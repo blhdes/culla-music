@@ -1,52 +1,62 @@
 import SwiftUI
 
-/// Right-edge panel that splits evenly among the user's playlists during a right-drag.
-/// The last slot is always a "New playlist" row that fires a creation flow on drop.
+/// Right-edge panel that splits evenly among the user's selected playlists during a right-drag.
+/// Capped externally — caller passes only the playlists already filtered to sidebar membership.
 struct PlaylistSidebarView: View {
     let playlists: [Playlist]
     let highlightedID: UUID?
     let dragProgress: CGFloat
 
-    /// Sentinel UUID for the "+ create new playlist" sidebar slot.
-    static let createSlotID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-
     private var isDragging: Bool { dragProgress > 0 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(playlists.enumerated()), id: \.element.id) { _, playlist in
-                PlaylistSidebarItem(
-                    playlist: playlist,
-                    neonColor: playlist.color,
-                    isHighlighted: playlist.id == highlightedID,
-                    isDragging: isDragging,
-                    dragProgress: dragProgress
-                )
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: PlaylistFramePreferenceKey.self,
-                            value: [playlist.id: geo.frame(in: .global)]
-                        )
-                    }
-                )
-            }
-
-            PlaylistSidebarCreateItem(
-                isHighlighted: highlightedID == Self.createSlotID,
-                isDragging: isDragging,
-                dragProgress: dragProgress
-            )
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: PlaylistFramePreferenceKey.self,
-                        value: [Self.createSlotID: geo.frame(in: .global)]
+        if playlists.isEmpty {
+            emptyState
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(playlists.enumerated()), id: \.element.id) { _, playlist in
+                    PlaylistSidebarItem(
+                        playlist: playlist,
+                        isHighlighted: playlist.id == highlightedID,
+                        isDragging: isDragging,
+                        dragProgress: dragProgress
+                    )
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: PlaylistFramePreferenceKey.self,
+                                value: [playlist.id: geo.frame(in: .global)]
+                            )
+                        }
                     )
                 }
-            )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "rectangle.stack.badge.plus")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text("Add a playlist\nto sort songs")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 4) {
+                Text("Tap Manage")
+                    .font(.caption)
+                Image(systemName: "arrow.down.right")
+                    .font(.caption)
+            }
+            .foregroundStyle(.tertiary)
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .opacity(isDragging ? 0.6 + 0.4 * dragProgress : 0.55)
     }
 }
 
@@ -54,7 +64,6 @@ struct PlaylistSidebarView: View {
 
 struct PlaylistSidebarItem: View {
     let playlist: Playlist
-    let neonColor: Color
     let isHighlighted: Bool
     let isDragging: Bool
     let dragProgress: CGFloat
@@ -65,8 +74,9 @@ struct PlaylistSidebarItem: View {
                 .fill(.ultraThinMaterial)
                 .opacity(Double(dragProgress))
 
-            neonColor
-                .opacity(backgroundOpacity)
+            // Soft accent highlight when this row is the drop target — neutral elsewhere.
+            Color.accentColor
+                .opacity(isHighlighted ? 0.6 : 0)
 
             HStack(spacing: 10) {
                 Image(systemName: playlist.iconName)
@@ -75,8 +85,7 @@ struct PlaylistSidebarItem: View {
                     .font(.title3.weight(.semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(isDragging ? .white : .secondary)
-            .shadow(color: isDragging ? .black.opacity(0.25) : .clear, radius: 2, x: 0, y: 1)
+            .foregroundStyle(textColor)
             .padding(.leading, 20)
             .opacity(textOpacity)
             .scaleEffect(isHighlighted ? 1.08 : 1.0, anchor: .leading)
@@ -87,48 +96,14 @@ struct PlaylistSidebarItem: View {
         .animation(.easeInOut(duration: 0.2), value: isDragging)
     }
 
-    private var backgroundOpacity: Double {
-        guard isDragging else { return 0 }
-        return isHighlighted ? 0.85 : 0.2 + 0.4 * dragProgress
+    private var textColor: Color {
+        if isHighlighted { return .white }
+        return isDragging ? .primary : .secondary
     }
 
     private var textOpacity: Double {
         if !isDragging { return 0.5 }
-        return isHighlighted ? 1.0 : 0.65
-    }
-}
-
-// MARK: - "+ New playlist" row
-
-struct PlaylistSidebarCreateItem: View {
-    let isHighlighted: Bool
-    let isDragging: Bool
-    let dragProgress: CGFloat
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(Double(dragProgress))
-
-            Color.accentColor
-                .opacity(isHighlighted ? 0.7 : 0)
-
-            HStack(spacing: 10) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title3.weight(.bold))
-                Text("New playlist")
-                    .font(.title3.weight(.semibold))
-            }
-            .foregroundStyle(isDragging ? .white : .secondary)
-            .padding(.leading, 20)
-            .opacity(isDragging ? (isHighlighted ? 1.0 : 0.7) : 0.5)
-            .scaleEffect(isHighlighted ? 1.08 : 1.0, anchor: .leading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isHighlighted)
-        .animation(.easeInOut(duration: 0.2), value: isDragging)
+        return isHighlighted ? 1.0 : 0.7
     }
 }
 

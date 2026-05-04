@@ -15,10 +15,21 @@ final class MusicSwipeViewModel {
     var isEmpty: Bool = false
     var toastMessage: String?
 
-    /// Snapshot of local Playlist rows (kept in sync with Apple Music).
+    /// Snapshot of all local Playlist rows (kept in sync with Apple Music).
     private(set) var playlists: [Playlist] = []
 
-    // Session counters (informational; not persisted)
+    /// Hard cap on how many playlists can appear in the right-swipe sidebar at once.
+    static let maxSidebar: Int = 5
+
+    /// Subset of `playlists` actually shown in the sidebar.
+    var sidebarPlaylists: [Playlist] {
+        playlists.filter(\.isInSidebar).sorted { $0.displayOrder < $1.displayOrder }
+    }
+
+    var sidebarCount: Int { sidebarPlaylists.count }
+    var canAddToSidebar: Bool { sidebarCount < Self.maxSidebar }
+
+    // Session counters (informational)
     private(set) var sessionSortedCount: Int = 0
     private(set) var sessionDismissedCount: Int = 0
 
@@ -77,7 +88,9 @@ final class MusicSwipeViewModel {
     // MARK: - Playlists Sync
 
     /// Pulls user's Apple Music playlists and inserts a local Playlist row
-    /// for every Apple Music playlist not yet tracked locally.
+    /// for every Apple Music playlist not yet tracked locally. On the first
+    /// successful sync, auto-selects the first N for the sidebar so the user
+    /// isn't presented with an empty sidebar on launch.
     func syncPlaylistsFromAppleMusic() async {
         do {
             let amPlaylists = try await service.refreshUserPlaylists()
@@ -104,6 +117,16 @@ final class MusicSwipeViewModel {
             }
             try? modelContext.save()
 
+            let refreshed = fetchLocalPlaylists()
+            // First-launch convenience: pre-fill sidebar with the first few playlists
+            // so the user can immediately swipe-to-sort without a Manage detour.
+            if refreshed.allSatisfy({ !$0.isInSidebar }), !refreshed.isEmpty {
+                for p in refreshed.prefix(Self.maxSidebar) {
+                    p.isInSidebar = true
+                }
+                try? modelContext.save()
+            }
+
             playlists = fetchLocalPlaylists()
         } catch {
             print("syncPlaylistsFromAppleMusic failed: \(error)")
@@ -113,6 +136,14 @@ final class MusicSwipeViewModel {
     private func fetchLocalPlaylists() -> [Playlist] {
         let descriptor = FetchDescriptor<Playlist>(sortBy: [SortDescriptor(\.displayOrder)])
         return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    /// Toggles a playlist's sidebar membership. Caller is responsible for
+    /// enforcing the `maxSidebar` cap before calling with `included: true`.
+    func setSidebar(_ playlist: Playlist, included: Bool) {
+        playlist.isInSidebar = included
+        try? modelContext.save()
+        playlists = fetchLocalPlaylists()
     }
 
     // MARK: - Swipe Actions
@@ -156,32 +187,24 @@ final class MusicSwipeViewModel {
         }
     }
 
-    /// "+ create new playlist" flow from sidebar drop.
-    func createPlaylistAndAssignCurrent(name: String) async {
-        guard let song = currentSong else { return }
+    /// Creates a new playlist (in Apple Music + locally), optionally adding
+    /// it to the sidebar. Used by the Manage sheet's "+ New playlist" flow.
+    func createPlaylist(name: String, addToSidebar: Bool) async {
         do {
             let amPlaylist = try await service.createPlaylist(name: name)
             let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
             let local = Playlist(
                 name: name,
                 displayOrder: nextOrder,
-                appleMusicPlaylistID: amPlaylist.id.rawValue
+                appleMusicPlaylistID: amPlaylist.id.rawValue,
+                isInSidebar: addToSidebar
             )
             modelContext.insert(local)
-
-            let record = SortedSong(songID: song.id.rawValue, playlist: local)
-            modelContext.insert(record)
             try? modelContext.save()
-
             playlists = fetchLocalPlaylists()
-            actionHistory.append(.sorted(song: song, playlist: local, record: record))
-            sessionSortedCount += 1
             toastMessage = "Created \(name)"
-            advance()
-
-            try await service.addSong(song, toPlaylistID: amPlaylist.id)
         } catch {
-            print("createPlaylistAndAssignCurrent failed: \(error)")
+            print("createPlaylist failed: \(error)")
             toastMessage = "Couldn't create playlist"
         }
     }
@@ -219,7 +242,7 @@ final class MusicSwipeViewModel {
         }
     }
 
-    // MARK: - Preview
+    // MARK: - Playback
 
     func togglePreview() {
         guard let song = currentSong else { return }

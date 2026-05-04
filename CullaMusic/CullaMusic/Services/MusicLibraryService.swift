@@ -1,7 +1,5 @@
 import Foundation
-import SwiftUI
 import MusicKit
-import AVFoundation
 
 @Observable
 @MainActor
@@ -20,13 +18,13 @@ final class MusicLibraryService {
     // Cached MusicKit.Playlist refs so add(songs:to:) doesn't re-fetch
     private var playlistCache: [MusicItemID: MusicKit.Playlist] = [:]
 
-    // Single shared preview player
-    private let player = AVPlayer()
-    private var endObserver: NSObjectProtocol?
+    // Apple Music's system player — handles full tracks for subscribers and
+    // previews for non-subscribers automatically. Replaces our prior AVPlayer
+    // approach, which only worked for catalog `previewAssets` URLs (library
+    // tracks routinely 404'd or timed out).
+    private let player = ApplicationMusicPlayer.shared
 
-    private init() {
-        configureAudioSession()
-    }
+    private init() {}
 
     // MARK: - Authorization
 
@@ -39,8 +37,6 @@ final class MusicLibraryService {
 
     // MARK: - Library Songs (paged)
 
-    /// Resets the paging cursor — call when the user explicitly refreshes,
-    /// or when the deck signals "all caught up" and the user taps Refresh.
     func resetLibraryCursor() {
         pageOffset = 0
         libraryExhausted = false
@@ -93,6 +89,12 @@ final class MusicLibraryService {
         return playlists
     }
 
+    /// Returns the CDN artwork URL for a playlist from the in-memory cache.
+    /// Returns nil if the playlist has no artwork or hasn't been fetched yet.
+    func artworkURL(forPlaylistID id: String, size: Int = 88) -> URL? {
+        playlistCache[MusicItemID(id)]?.artwork?.url(width: size, height: size)
+    }
+
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
         let playlist = try await MusicLibrary.shared.createPlaylist(name: name)
         playlistCache[playlist.id] = playlist
@@ -108,51 +110,32 @@ final class MusicLibraryService {
     }
 
     /// MusicKit has no public single-song removal API as of iOS 17.
-    /// We surface this so the caller can show a "Removed locally" toast on undo.
+    /// Caller surfaces a "Removed locally" toast on undo.
     func removeSong(_ song: Song, fromPlaylistID id: MusicItemID) async throws {
         throw MusicLibraryError.removeNotSupported
     }
 
-    // MARK: - Preview Playback (30s)
+    // MARK: - Playback
 
     func playPreview(for song: Song) {
-        guard let url = song.previewAssets?.first?.url else { return }
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-
-        let item = AVPlayerItem(url: url)
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.isPlayingPreview = false
-                self?.nowPlayingSongID = nil
+        Task {
+            do {
+                player.queue = ApplicationMusicPlayer.Queue(for: [song])
+                try await player.play()
+                isPlayingPreview = true
+                nowPlayingSongID = song.id.rawValue
+            } catch {
+                print("Playback failed: \(error)")
+                isPlayingPreview = false
+                nowPlayingSongID = nil
             }
         }
-
-        player.replaceCurrentItem(with: item)
-        player.play()
-        isPlayingPreview = true
-        nowPlayingSongID = song.id.rawValue
     }
 
     func stopPreview() {
         player.pause()
-        player.replaceCurrentItem(with: nil)
         isPlayingPreview = false
         nowPlayingSongID = nil
-    }
-
-    // MARK: - Audio Session
-
-    private func configureAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("AudioSession config failed: \(error)")
-        }
     }
 }
 

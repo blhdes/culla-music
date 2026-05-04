@@ -11,7 +11,7 @@ struct MusicSwipeView: View {
     @State private var playlistFrames: [UUID: CGRect] = [:]
 
     // Sheet
-    @State private var showNewPlaylistSheet = false
+    @State private var showManageSheet = false
 
     // Toast / undo timers
     @State private var toastTimer: Task<Void, Never>?
@@ -32,10 +32,8 @@ struct MusicSwipeView: View {
                 swipeContent
             }
         }
-        .sheet(isPresented: $showNewPlaylistSheet) {
-            NewPlaylistSheet { name in
-                Task { await viewModel.createPlaylistAndAssignCurrent(name: name) }
-            }
+        .sheet(isPresented: $showManageSheet) {
+            ManagePlaylistsSheet(viewModel: viewModel)
         }
         .onChange(of: viewModel.actionHistory.count) { _, _ in
             flashUndo()
@@ -67,7 +65,7 @@ struct MusicSwipeView: View {
                     HStack(spacing: 0) {
                         Spacer()
                         PlaylistSidebarView(
-                            playlists: viewModel.playlists,
+                            playlists: viewModel.sidebarPlaylists,
                             highlightedID: highlightedID,
                             dragProgress: rightDragProgress
                         )
@@ -79,6 +77,12 @@ struct MusicSwipeView: View {
                     .onPreferenceChange(PlaylistFramePreferenceKey.self) { frames in
                         playlistFrames = frames
                     }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    manageButton
+                        .padding(.leading, 16)
+                        .padding(.bottom, 16)
+                        .opacity(chromeOpacity)
                 }
         }
         .overlay(alignment: .top) {
@@ -155,23 +159,15 @@ struct MusicSwipeView: View {
         let tx = value.translation.width
         let ptx = value.predictedEndTranslation.width
 
-        // Right swipe — assign or open create sheet
+        // Right swipe — assign to highlighted playlist
         if tx > swipeThreshold || ptx > swipeThreshold {
-            if let id = highlightedID {
-                if id == PlaylistSidebarView.createSlotID {
-                    flyOff(x: 500) {
-                        Haptics.swipeRight()
-                        showNewPlaylistSheet = true
-                    }
-                    return
+            if let id = highlightedID,
+               let playlist = viewModel.sidebarPlaylists.first(where: { $0.id == id }) {
+                flyOff(x: 500) {
+                    viewModel.assignToPlaylist(playlist)
+                    Haptics.swipeRight()
                 }
-                if let playlist = viewModel.playlists.first(where: { $0.id == id }) {
-                    flyOff(x: 500) {
-                        viewModel.assignToPlaylist(playlist)
-                        Haptics.swipeRight()
-                    }
-                    return
-                }
+                return
             }
             // Right swipe with no target highlighted — snap back, no action
             snapBack()
@@ -223,6 +219,20 @@ struct MusicSwipeView: View {
             return id
         }
         return nil
+    }
+
+    @ViewBuilder
+    private var manageButton: some View {
+        Button {
+            showManageSheet = true
+        } label: {
+            Text("Manage")
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

@@ -5,7 +5,9 @@ import MusicKit
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var authStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
-    @State private var viewModel: MusicSwipeViewModel?
+    @State private var activeConfig: SwipeConfig?
+    @State private var activeViewModel: MusicSwipeViewModel?
+    @State private var isLoadingDeck = false
 
     var body: some View {
         ZStack {
@@ -13,10 +15,12 @@ struct RootView: View {
 
             switch authStatus {
             case .authorized:
-                if let viewModel {
-                    MusicSwipeView(viewModel: viewModel)
+                if let vm = activeViewModel {
+                    MusicSwipeView(viewModel: vm, onBack: endSession)
+                } else if isLoadingDeck {
+                    ProgressView("Loading…")
                 } else {
-                    ProgressView("Loading library…")
+                    HomeView(onStart: startSession)
                 }
             case .notDetermined, .denied, .restricted:
                 AuthGateView(status: authStatus, onRequest: requestAuth)
@@ -27,29 +31,34 @@ struct RootView: View {
         .task {
             seedDefaults()
             authStatus = MusicAuthorization.currentStatus
-            if authStatus == .authorized, viewModel == nil {
-                await loadVM()
-            }
         }
     }
+
+    // MARK: - Actions
 
     private func requestAuth() {
         Task {
             let status = await MusicLibraryService.shared.requestAuthorization()
             authStatus = status
-            if status == .authorized, viewModel == nil {
-                await loadVM()
-            }
         }
     }
 
-    private func loadVM() async {
-        let vm = MusicSwipeViewModel(modelContext: modelContext)
-        viewModel = vm
-        await vm.loadInitial()
+    @MainActor
+    private func startSession(config: SwipeConfig) {
+        isLoadingDeck = true
+        Task { @MainActor in
+            let vm = MusicSwipeViewModel(config: config, modelContext: modelContext)
+            await vm.loadInitial()
+            activeViewModel = vm
+            isLoadingDeck = false
+        }
     }
 
-    /// First-launch defaults so Haptics actually fires (it gates on this key).
+    private func endSession() {
+        activeViewModel = nil
+        activeConfig = nil
+    }
+
     private func seedDefaults() {
         if UserDefaults.standard.object(forKey: "hapticsEnabled") == nil {
             UserDefaults.standard.set(true, forKey: "hapticsEnabled")

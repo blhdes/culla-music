@@ -4,10 +4,9 @@ import SwiftData
 import MusicKit
 
 @Observable
-@MainActor
 final class MusicSwipeViewModel {
 
-    // MARK: - State (observable)
+    // MARK: - State
 
     var currentSong: Song?
     var nextSong: Song?
@@ -15,30 +14,28 @@ final class MusicSwipeViewModel {
     var isEmpty: Bool = false
     var toastMessage: String?
 
-    /// Snapshot of all local Playlist rows (kept in sync with Apple Music).
     private(set) var playlists: [Playlist] = []
 
-    /// Hard cap on how many playlists can appear in the right-swipe sidebar at once.
     static let maxSidebar: Int = 5
 
-    /// Subset of `playlists` actually shown in the sidebar.
     var sidebarPlaylists: [Playlist] {
-        playlists.filter(\.isInSidebar).sorted { $0.displayOrder < $1.displayOrder }
+        playlists
+            .filter { $0.isInSidebar && $0.isEditable }
+            .sorted { $0.displayOrder < $1.displayOrder }
     }
 
     var sidebarCount: Int { sidebarPlaylists.count }
     var canAddToSidebar: Bool { sidebarCount < Self.maxSidebar }
 
-    // Session counters (informational)
     private(set) var sessionSortedCount: Int = 0
     private(set) var sessionDismissedCount: Int = 0
 
-    // Undo
     private(set) var actionHistory: [SwipeAction] = []
     var canUndo: Bool { !actionHistory.isEmpty }
 
     // MARK: - Dependencies
 
+    let config: SwipeConfig
     private let service: MusicLibraryService
     private let modelContext: ModelContext
 
@@ -48,10 +45,19 @@ final class MusicSwipeViewModel {
     private let batchSize: Int = 50
     private let refillThreshold: Int = 10
 
+    /// Exclusion set for the current session — grows as songs are acted on.
+    private var sessionExclusionSet: Set<String> = []
+
     // MARK: - Init
 
-    init(service: MusicLibraryService = .shared, modelContext: ModelContext) {
-        self.service = service
+    // Explicit @MainActor on the init (not the class) avoids the macro/isolation
+    // conflict that occurs when @Observable and @MainActor are both on the class.
+    // No default for config — callers always supply it; removes the nonisolated
+    // default-expression evaluation issue with SwipeConfig().
+    @MainActor
+    init(config: SwipeConfig, modelContext: ModelContext) {
+        self.config = config
+        self.service = MusicLibraryService.shared
         self.modelContext = modelContext
     }
 
@@ -65,12 +71,33 @@ final class MusicSwipeViewModel {
 
         await syncPlaylistsFromAppleMusic()
 
-        let excluded = fetchExcludedIdentifiers()
         do {
-            let songs = try await service.fetchNextLibrarySongs(excluding: excluded, desired: batchSize)
-            populateQueue(with: songs)
+            switch config.mode {
+            case .library:
+                sessionExclusionSet = fetchExcludedIdentifiers()
+                let songs = try await service.fetchNextLibrarySongs(
+                    excluding: sessionExclusionSet,
+                    desired: batchSize,
+                    ascending: config.order.ascending
+                )
+                populateQueue(with: songs)
+
+            case .unsorted:
+                let editableIDs = try await service.fetchEditablePlaylistSongIDs()
+                let sortedIDs = fetchSortedSongIDs()
+                sessionExclusionSet = editableIDs.union(sortedIDs)
+                let songs = try await service.fetchNextLibrarySongs(
+                    excluding: sessionExclusionSet,
+                    desired: batchSize,
+                    ascending: config.order.ascending
+                )
+                populateQueue(with: songs)
+
+            case .dismissed:
+                try await loadDismissedDeck()
+            }
         } catch {
-            print("loadInitial fetch failed: \(error)")
+            print("loadInitial failed: \(error)")
         }
 
         isLoading = false
@@ -81,16 +108,13 @@ final class MusicSwipeViewModel {
         currentSong = nil
         nextSong = nil
         songQueue.removeAll()
+        sessionExclusionSet = []
         isEmpty = false
         await loadInitial()
     }
 
     // MARK: - Playlists Sync
 
-    /// Pulls user's Apple Music playlists and inserts a local Playlist row
-    /// for every Apple Music playlist not yet tracked locally. On the first
-    /// successful sync, auto-selects the first N for the sidebar so the user
-    /// isn't presented with an empty sidebar on launch.
     func syncPlaylistsFromAppleMusic() async {
         do {
             let amPlaylists = try await service.refreshUserPlaylists()
@@ -105,11 +129,18 @@ final class MusicSwipeViewModel {
 
             for amPlaylist in amPlaylists {
                 let amID = amPlaylist.id.rawValue
-                if localByAMID[amID] == nil {
+                let editable = amPlaylist.kind.map({ "\($0)" }) == "personal"
+
+                if let existing = localByAMID[amID] {
+                    // Update editability and name in case they changed
+                    existing.isEditable = editable
+                    existing.name = amPlaylist.name
+                } else {
                     let row = Playlist(
                         name: amPlaylist.name,
                         displayOrder: nextOrder,
-                        appleMusicPlaylistID: amID
+                        appleMusicPlaylistID: amID,
+                        isEditable: editable
                     )
                     modelContext.insert(row)
                     nextOrder += 1
@@ -118,10 +149,9 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
 
             let refreshed = fetchLocalPlaylists()
-            // First-launch convenience: pre-fill sidebar with the first few playlists
-            // so the user can immediately swipe-to-sort without a Manage detour.
+            // First-launch: auto-select the first few editable playlists for the sidebar.
             if refreshed.allSatisfy({ !$0.isInSidebar }), !refreshed.isEmpty {
-                for p in refreshed.prefix(Self.maxSidebar) {
+                for p in refreshed.filter(\.isEditable).prefix(Self.maxSidebar) {
                     p.isInSidebar = true
                 }
                 try? modelContext.save()
@@ -138,9 +168,8 @@ final class MusicSwipeViewModel {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    /// Toggles a playlist's sidebar membership. Caller is responsible for
-    /// enforcing the `maxSidebar` cap before calling with `included: true`.
     func setSidebar(_ playlist: Playlist, included: Bool) {
+        guard playlist.isEditable || !included else { return }
         playlist.isInSidebar = included
         try? modelContext.save()
         playlists = fetchLocalPlaylists()
@@ -148,19 +177,25 @@ final class MusicSwipeViewModel {
 
     // MARK: - Swipe Actions
 
-    /// Left swipe: dismiss current song. Persists so it never reappears.
     func dismissCurrent() {
         guard let song = currentSong else { return }
+
+        if config.mode == .dismissed {
+            // In dismissed mode: skip the song in this session without changing its record.
+            advance()
+            return
+        }
+
         let record = DismissedSong(songID: song.id.rawValue)
         modelContext.insert(record)
         try? modelContext.save()
         actionHistory.append(.dismissed(song: song, record: record))
+        sessionExclusionSet.insert(song.id.rawValue)
         sessionDismissedCount += 1
         toastMessage = "Dismissed"
         advance()
     }
 
-    /// Right swipe drop: add current song to the chosen playlist.
     func assignToPlaylist(_ playlist: Playlist) {
         guard let song = currentSong else { return }
         guard let amIDString = playlist.appleMusicPlaylistID else {
@@ -169,26 +204,51 @@ final class MusicSwipeViewModel {
         }
         let amID = MusicItemID(amIDString)
 
+        if config.mode == .dismissed {
+            // Assign from dismissed: also un-dismiss by deleting the DismissedSong record.
+            let descriptor = FetchDescriptor<DismissedSong>(
+                predicate: #Predicate { $0.songID == song.id.rawValue }
+            )
+            let dismissedRecord = (try? modelContext.fetch(descriptor))?.first
+            let originalDismissedAt = dismissedRecord?.dismissedAt ?? .now
+            if let dismissedRecord { modelContext.delete(dismissedRecord) }
+
+            let sortedRecord = SortedSong(songID: song.id.rawValue, playlist: playlist)
+            modelContext.insert(sortedRecord)
+            try? modelContext.save()
+            actionHistory.append(.sortedFromDismissed(
+                song: song,
+                playlist: playlist,
+                sortedRecord: sortedRecord,
+                originalDismissedAt: originalDismissedAt
+            ))
+            sessionSortedCount += 1
+            toastMessage = "Added to \(playlist.name)"
+            advance()
+
+            Task { @MainActor in
+                do { try await service.addSong(song, toPlaylistID: amID) }
+                catch { toastMessage = "Couldn't add to \(playlist.name)" }
+            }
+            return
+        }
+
+        // Normal mode: just sort.
         let record = SortedSong(songID: song.id.rawValue, playlist: playlist)
         modelContext.insert(record)
         try? modelContext.save()
         actionHistory.append(.sorted(song: song, playlist: playlist, record: record))
+        sessionExclusionSet.insert(song.id.rawValue)
         sessionSortedCount += 1
         toastMessage = "Added to \(playlist.name)"
         advance()
 
         Task { @MainActor in
-            do {
-                try await service.addSong(song, toPlaylistID: amID)
-            } catch {
-                print("addSong failed: \(error)")
-                toastMessage = "Couldn't add to \(playlist.name)"
-            }
+            do { try await service.addSong(song, toPlaylistID: amID) }
+            catch { toastMessage = "Couldn't add to \(playlist.name)" }
         }
     }
 
-    /// Creates a new playlist (in Apple Music + locally), optionally adding
-    /// it to the sidebar. Used by the Manage sheet's "+ New playlist" flow.
     func createPlaylist(name: String, addToSidebar: Bool) async {
         do {
             let amPlaylist = try await service.createPlaylist(name: name)
@@ -197,14 +257,14 @@ final class MusicSwipeViewModel {
                 name: name,
                 displayOrder: nextOrder,
                 appleMusicPlaylistID: amPlaylist.id.rawValue,
-                isInSidebar: addToSidebar
+                isInSidebar: addToSidebar,
+                isEditable: true
             )
             modelContext.insert(local)
             try? modelContext.save()
             playlists = fetchLocalPlaylists()
             toastMessage = "Created \(name)"
         } catch {
-            print("createPlaylist failed: \(error)")
             toastMessage = "Couldn't create playlist"
         }
     }
@@ -217,27 +277,40 @@ final class MusicSwipeViewModel {
         case .dismissed(let song, let record):
             modelContext.delete(record)
             try? modelContext.save()
+            sessionExclusionSet.remove(song.id.rawValue)
             sessionDismissedCount = max(sessionDismissedCount - 1, 0)
             pushBackToFront(song: song)
 
         case .sorted(let song, let playlist, let record):
             modelContext.delete(record)
             try? modelContext.save()
+            sessionExclusionSet.remove(song.id.rawValue)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
             pushBackToFront(song: song)
+            remoteRemove(song: song, fromPlaylist: playlist)
 
-            // Best-effort remote remove (currently unsupported by MusicKit — we surface a toast).
-            if let amIDString = playlist.appleMusicPlaylistID {
-                let amID = MusicItemID(amIDString)
-                Task { @MainActor in
-                    do {
-                        try await service.removeSong(song, fromPlaylistID: amID)
-                    } catch MusicLibraryError.removeNotSupported {
-                        toastMessage = "Removed locally — open Apple Music to remove from \(playlist.name)"
-                    } catch {
-                        toastMessage = "Couldn't remove from \(playlist.name)"
-                    }
-                }
+        case .sortedFromDismissed(let song, let playlist, let sortedRecord, let originalDismissedAt):
+            modelContext.delete(sortedRecord)
+            let restored = DismissedSong(songID: song.id.rawValue)
+            restored.dismissedAt = originalDismissedAt
+            modelContext.insert(restored)
+            try? modelContext.save()
+            sessionSortedCount = max(sessionSortedCount - 1, 0)
+            pushBackToFront(song: song)
+            remoteRemove(song: song, fromPlaylist: playlist)
+        }
+    }
+
+    private func remoteRemove(song: Song, fromPlaylist playlist: Playlist) {
+        guard let amIDString = playlist.appleMusicPlaylistID else { return }
+        let amID = MusicItemID(amIDString)
+        Task { @MainActor in
+            do {
+                try await service.removeSong(song, fromPlaylistID: amID)
+            } catch MusicLibraryError.removeNotSupported {
+                toastMessage = "Removed locally — open Apple Music to remove from \(playlist.name)"
+            } catch {
+                toastMessage = "Couldn't remove from \(playlist.name)"
             }
         }
     }
@@ -254,6 +327,24 @@ final class MusicSwipeViewModel {
     }
 
     // MARK: - Private
+
+    private func loadDismissedDeck() async throws {
+        let ascending = config.order.ascending
+        let sortDescriptor = ascending
+            ? SortDescriptor<DismissedSong>(\.dismissedAt, order: .forward)
+            : SortDescriptor<DismissedSong>(\.dismissedAt, order: .reverse)
+        let descriptor = FetchDescriptor<DismissedSong>(sortBy: [sortDescriptor])
+        let dismissed = (try? modelContext.fetch(descriptor)) ?? []
+
+        guard !dismissed.isEmpty else {
+            isEmpty = true
+            return
+        }
+
+        let orderedIDs = dismissed.map(\.songID)
+        let songs = try await service.resolveSongs(ids: orderedIDs)
+        populateQueue(with: songs)
+    }
 
     private func populateQueue(with songs: [Song]) {
         var queue = songs
@@ -281,11 +372,16 @@ final class MusicSwipeViewModel {
             return
         }
 
-        // Refill in background if running low.
+        // Dismissed mode: the deck is finite, no background refill.
+        guard config.mode != .dismissed else { return }
+
         if songQueue.count < refillThreshold {
             Task { @MainActor in
-                let excluded = fetchExcludedIdentifiers()
-                if let more = try? await service.fetchNextLibrarySongs(excluding: excluded, desired: batchSize) {
+                if let more = try? await service.fetchNextLibrarySongs(
+                    excluding: sessionExclusionSet,
+                    desired: batchSize,
+                    ascending: config.order.ascending
+                ) {
                     songQueue.append(contentsOf: more)
                     if currentSong == nil, !songQueue.isEmpty {
                         currentSong = songQueue.removeFirst()
@@ -310,15 +406,17 @@ final class MusicSwipeViewModel {
 
     private func fetchExcludedIdentifiers() -> Set<String> {
         var excluded = Set<String>()
-        let sortedDescriptor = FetchDescriptor<SortedSong>()
-        if let sorted = try? modelContext.fetch(sortedDescriptor) {
+        if let sorted = try? modelContext.fetch(FetchDescriptor<SortedSong>()) {
             excluded.formUnion(sorted.map(\.songID))
         }
-        let dismissedDescriptor = FetchDescriptor<DismissedSong>()
-        if let dismissed = try? modelContext.fetch(dismissedDescriptor) {
+        if let dismissed = try? modelContext.fetch(FetchDescriptor<DismissedSong>()) {
             excluded.formUnion(dismissed.map(\.songID))
         }
         return excluded
+    }
+
+    private func fetchSortedSongIDs() -> Set<String> {
+        Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
     }
 }
 
@@ -327,4 +425,6 @@ final class MusicSwipeViewModel {
 enum SwipeAction {
     case dismissed(song: Song, record: DismissedSong)
     case sorted(song: Song, playlist: Playlist, record: SortedSong)
+    /// Right-swipe in dismissed mode: un-dismisses + adds to playlist.
+    case sortedFromDismissed(song: Song, playlist: Playlist, sortedRecord: SortedSong, originalDismissedAt: Date)
 }

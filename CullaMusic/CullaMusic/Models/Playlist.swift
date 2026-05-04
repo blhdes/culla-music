@@ -17,6 +17,11 @@ final class Playlist {
     /// User-controlled: which playlists appear in the right-swipe sidebar (capped to 5).
     var isInSidebar: Bool = false
 
+    /// True for user-created playlists (MusicKit .personal kind).
+    /// False for editorial, algorithmic, or saved-from-others playlists.
+    /// Only editable playlists can be sorted into or added to the sidebar.
+    var isEditable: Bool = true
+
     @Relationship(deleteRule: .cascade, inverse: \SortedSong.playlist)
     var sortedSongs: [SortedSong]
 
@@ -26,7 +31,8 @@ final class Playlist {
         colorHex: String = "#F5F5F5",
         displayOrder: Int = 0,
         appleMusicPlaylistID: String? = nil,
-        isInSidebar: Bool = false
+        isInSidebar: Bool = false,
+        isEditable: Bool = true
     ) {
         self.id = UUID()
         self.name = name
@@ -37,6 +43,7 @@ final class Playlist {
         self.createdAt = .now
         self.appleMusicPlaylistID = appleMusicPlaylistID
         self.isInSidebar = isInSidebar
+        self.isEditable = isEditable
         self.sortedSongs = []
     }
 }

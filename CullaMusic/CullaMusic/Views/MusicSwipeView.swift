@@ -4,6 +4,7 @@ import MusicKit
 
 struct MusicSwipeView: View {
     @Bindable var viewModel: MusicSwipeViewModel
+    var onBack: (() -> Void)?
 
     // Drag state
     @State private var cardOffset: CGSize = .zero
@@ -76,6 +77,21 @@ struct MusicSwipeView: View {
                     .allowsHitTesting(false)
                     .onPreferenceChange(PlaylistFramePreferenceKey.self) { frames in
                         playlistFrames = frames
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if let onBack {
+                        Button(action: onBack) {
+                            Image(systemName: "chevron.left")
+                                .font(.title3.weight(.medium))
+                                .frame(width: 24, height: 24)
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 16)
+                        .padding(.top, 8)
+                        .opacity(chromeOpacity)
                     }
                 }
                 .overlay(alignment: .bottomLeading) {

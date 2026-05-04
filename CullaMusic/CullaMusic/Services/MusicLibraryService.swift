@@ -15,13 +15,9 @@ final class MusicLibraryService {
     private var pageOffset: Int = 0
     private var libraryExhausted: Bool = false
 
-    // Cached MusicKit.Playlist refs so add(songs:to:) doesn't re-fetch
+    // Cached MusicKit.Playlist refs
     private var playlistCache: [MusicItemID: MusicKit.Playlist] = [:]
 
-    // Apple Music's system player — handles full tracks for subscribers and
-    // previews for non-subscribers automatically. Replaces our prior AVPlayer
-    // approach, which only worked for catalog `previewAssets` URLs (library
-    // tracks routinely 404'd or timed out).
     private let player = ApplicationMusicPlayer.shared
 
     private init() {}
@@ -42,9 +38,13 @@ final class MusicLibraryService {
         libraryExhausted = false
     }
 
-    /// Pages through the user's Apple Music library, returning up to `desired`
-    /// songs whose IDs are NOT in the exclusion set. Stops early when exhausted.
-    func fetchNextLibrarySongs(excluding: Set<String>, desired: Int) async throws -> [Song] {
+    /// Pages through the user's library, returning up to `desired` songs not in `excluding`.
+    /// Pass `ascending: true` for oldest-first order.
+    func fetchNextLibrarySongs(
+        excluding: Set<String>,
+        desired: Int,
+        ascending: Bool = false
+    ) async throws -> [Song] {
         var collected: [Song] = []
         let pageSize = 100
 
@@ -52,7 +52,7 @@ final class MusicLibraryService {
             var request = MusicLibraryRequest<Song>()
             request.limit = pageSize
             request.offset = pageOffset
-            request.sort(by: \.libraryAddedDate, ascending: false)
+            request.sort(by: \.libraryAddedDate, ascending: ascending)
 
             let response = try await request.response()
             let page = response.items
@@ -89,8 +89,6 @@ final class MusicLibraryService {
         return playlists
     }
 
-    /// Returns the CDN artwork URL for a playlist from the in-memory cache.
-    /// Returns nil if the playlist has no artwork or hasn't been fetched yet.
     func artworkURL(forPlaylistID id: String, size: Int = 88) -> URL? {
         playlistCache[MusicItemID(id)]?.artwork?.url(width: size, height: size)
     }
@@ -109,10 +107,70 @@ final class MusicLibraryService {
         playlistCache[updated.id] = updated
     }
 
-    /// MusicKit has no public single-song removal API as of iOS 17.
-    /// Caller surfaces a "Removed locally" toast on undo.
     func removeSong(_ song: Song, fromPlaylistID id: MusicItemID) async throws {
         throw MusicLibraryError.removeNotSupported
+    }
+
+    // MARK: - Unsorted Mode
+
+    /// Returns song IDs that belong to at least one user-created (.personal) playlist.
+    /// Non-editable playlists (editorial, algorithmic, saved) are excluded — songs
+    /// only in those still count as "unsorted" since the user didn't actively organise them.
+    /// Caller must have called refreshUserPlaylists() first so the cache is warm.
+    func fetchEditablePlaylistSongIDs() async throws -> Set<String> {
+        if playlistCache.isEmpty {
+            try await refreshUserPlaylists()
+        }
+
+        var songIDs = Set<String>()
+
+        for playlist in playlistCache.values {
+            // rawValue comparison sidesteps the MusicKit.Playlist.Kind / local Playlist
+            // name collision that prevents the compiler from resolving .personal directly.
+            // String interpolation via CustomStringConvertible sidesteps static-member
+            // resolution issues (SDK-version variation / local Playlist name collision).
+            guard playlist.kind.map({ "\($0)" }) == "personal" else { continue }
+
+            // Explicit type annotation gives the compiler the context it needs to
+            // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.
+            let populated: MusicKit.Playlist = try await playlist.with([.tracks])
+            for track in (populated.tracks ?? []) {
+                songIDs.insert(track.id.rawValue)
+            }
+        }
+
+        return songIDs
+    }
+
+    // MARK: - Dismissed Mode
+
+    /// Resolves a list of song IDs to Song objects by paging through the library.
+    /// Returns songs in the same order as `ids` (so the caller's sort order is preserved).
+    func resolveSongs(ids: [String]) async throws -> [Song] {
+        guard !ids.isEmpty else { return [] }
+        let targetSet = Set(ids)
+        var found: [String: Song] = [:]
+        let pageSize = 100
+        var offset = 0
+
+        while found.count < targetSet.count {
+            var request = MusicLibraryRequest<Song>()
+            request.limit = pageSize
+            request.offset = offset
+            let response = try await request.response()
+            let page = response.items
+
+            if page.isEmpty { break }
+
+            for song in page where targetSet.contains(song.id.rawValue) {
+                found[song.id.rawValue] = song
+            }
+
+            offset += page.count
+            if page.count < pageSize { break }
+        }
+
+        return ids.compactMap { found[$0] }
     }
 
     // MARK: - Playback

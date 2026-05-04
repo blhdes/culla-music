@@ -63,7 +63,8 @@ struct ManagePlaylistsSheet: View {
     @ViewBuilder
     private func row(for playlist: Playlist) -> some View {
         let isOn = playlist.isInSidebar
-        let canEnable = viewModel.canAddToSidebar
+        let isEditable = playlist.isEditable
+        let canEnable = isEditable && viewModel.canAddToSidebar
         let isTappable = isOn || canEnable
 
         Button {
@@ -75,9 +76,19 @@ struct ManagePlaylistsSheet: View {
         } label: {
             HStack(spacing: 12) {
                 PlaylistCoverView(appleMusicPlaylistID: playlist.appleMusicPlaylistID)
-                Text(playlist.name)
-                    .foregroundStyle(.primary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .foregroundStyle(.primary)
+                    if !isEditable {
+                        Text("Read-only")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Spacer()
+
                 if isOn {
                     Image(systemName: "checkmark")
                         .foregroundStyle(.tint)
@@ -85,7 +96,7 @@ struct ManagePlaylistsSheet: View {
                 }
             }
             .contentShape(Rectangle())
-            .opacity(isTappable ? 1.0 : 0.4)
+            .opacity(isTappable ? 1.0 : 0.35)
         }
         .buttonStyle(.plain)
         .disabled(!isTappable)

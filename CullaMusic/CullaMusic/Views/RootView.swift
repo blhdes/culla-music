@@ -7,7 +7,6 @@ struct RootView: View {
     @State private var authStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
     @State private var activeConfig: SwipeConfig?
     @State private var activeViewModel: MusicSwipeViewModel?
-    @State private var isLoadingDeck = false
 
     var body: some View {
         ZStack {
@@ -17,8 +16,6 @@ struct RootView: View {
             case .authorized:
                 if let vm = activeViewModel {
                     MusicSwipeView(viewModel: vm, onBack: endSession)
-                } else if isLoadingDeck {
-                    ProgressView("Loading…")
                 } else {
                     HomeView(onStart: startSession)
                 }
@@ -45,12 +42,10 @@ struct RootView: View {
 
     @MainActor
     private func startSession(config: SwipeConfig) {
-        isLoadingDeck = true
+        let vm = MusicSwipeViewModel(config: config, modelContext: modelContext)
+        activeViewModel = vm
         Task { @MainActor in
-            let vm = MusicSwipeViewModel(config: config, modelContext: modelContext)
             await vm.loadInitial()
-            activeViewModel = vm
-            isLoadingDeck = false
         }
     }
 

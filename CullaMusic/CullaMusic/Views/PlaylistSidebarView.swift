@@ -10,29 +10,32 @@ struct PlaylistSidebarView: View {
     private var isDragging: Bool { dragProgress > 0 }
 
     var body: some View {
-        if playlists.isEmpty {
-            emptyState
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(playlists.enumerated()), id: \.element.id) { _, playlist in
-                    PlaylistSidebarItem(
-                        playlist: playlist,
-                        isHighlighted: playlist.id == highlightedID,
-                        isDragging: isDragging,
-                        dragProgress: dragProgress
-                    )
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: PlaylistFramePreferenceKey.self,
-                                value: [playlist.id: geo.frame(in: .global)]
-                            )
-                        }
-                    )
+        Group {
+            if playlists.isEmpty {
+                emptyState
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(playlists.enumerated()), id: \.element.id) { _, playlist in
+                        PlaylistSidebarItem(
+                            playlist: playlist,
+                            isHighlighted: playlist.id == highlightedID,
+                            isDragging: isDragging,
+                            dragProgress: dragProgress
+                        )
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: PlaylistFramePreferenceKey.self,
+                                    value: [playlist.id: geo.frame(in: .global)]
+                                )
+                            }
+                        )
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .opacity(Double(dragProgress))
     }
 
     private var emptyState: some View {
@@ -78,17 +81,22 @@ struct PlaylistSidebarItem: View {
             Color.accentColor
                 .opacity(isHighlighted ? 0.6 : 0)
 
-            HStack(spacing: 10) {
-                Image(systemName: playlist.iconName)
-                    .font(.body.weight(.semibold))
+            HStack(spacing: 12) {
+                PlaylistCoverView(
+                    appleMusicPlaylistID: playlist.appleMusicPlaylistID,
+                    size: 52,
+                    cornerRadius: 8
+                )
                 Text(playlist.name)
                     .font(.title3.weight(.semibold))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
             .foregroundStyle(textColor)
-            .padding(.leading, 20)
+            .padding(.leading, 16)
+            .padding(.trailing, 12)
             .opacity(textOpacity)
-            .scaleEffect(isHighlighted ? 1.08 : 1.0, anchor: .leading)
+            .scaleEffect(isHighlighted ? 1.06 : 1.0, anchor: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())

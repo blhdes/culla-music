@@ -10,7 +10,7 @@ final class MusicSwipeViewModel {
 
     var currentSong: Song?
     var nextSong: Song?
-    var isLoading: Bool = false
+    var isLoading: Bool = true
     var isEmpty: Bool = false
     var toastMessage: String?
 

@@ -19,16 +19,13 @@ struct MusicSwipeView: View {
     @State private var showUndo = false
     @State private var undoHideTask: Task<Void, Never>?
 
-    // First-appearance fade-in
-    @State private var contentReady = false
-
     private let swipeThreshold: CGFloat = 100
 
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
-            if contentReady {
+            if !viewModel.isLoading {
                 if viewModel.isEmpty {
                     EmptyStateView(onRefresh: { Task { await viewModel.reload() } })
                         .transition(.opacity)
@@ -38,9 +35,8 @@ struct MusicSwipeView: View {
                 }
             }
         }
-        .animation(.easeOut(duration: 0.45), value: contentReady)
+        .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
-        .onAppear { contentReady = true }
         .sheet(isPresented: $showManageSheet) {
             ManagePlaylistsSheet(viewModel: viewModel)
         }
@@ -82,10 +78,10 @@ struct MusicSwipeView: View {
                         PlaylistSidebarView(
                             playlists: viewModel.sidebarPlaylists,
                             highlightedID: highlightedID,
-                            dragProgress: rightDragProgress
+                            dragProgress: sidebarProgress
                         )
-                        .frame(width: geo.size.width * 0.5)
-                        .offset(x: (1.0 - rightDragProgress) * 30)
+                        .frame(width: geo.size.width * 0.8)
+                        .offset(x: (1.0 - sidebarProgress) * 80)
                     }
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -244,6 +240,15 @@ struct MusicSwipeView: View {
 
     private var rightDragProgress: CGFloat {
         min(max(cardOffset.width / swipeThreshold, 0), 1.0)
+    }
+
+    /// Deadzoned, ramped progress used to drive the sidebar reveal.
+    /// Stays at 0 until the user has clearly committed to a right-swipe,
+    /// so the sidebar doesn't crowd the card on small drags.
+    private var sidebarProgress: CGFloat {
+        let deadzone: CGFloat = 0.35
+        guard rightDragProgress > deadzone else { return 0 }
+        return min((rightDragProgress - deadzone) / (1.0 - deadzone), 1.0)
     }
 
     private var chromeOpacity: Double {

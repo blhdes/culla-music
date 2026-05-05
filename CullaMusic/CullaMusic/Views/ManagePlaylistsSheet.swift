@@ -105,12 +105,14 @@ struct ManagePlaylistsSheet: View {
 
 // MARK: - Playlist cover thumbnail
 
-private struct PlaylistCoverView: View {
+struct PlaylistCoverView: View {
     let appleMusicPlaylistID: String?
+    var size: CGFloat = 44
+    var cornerRadius: CGFloat = 8
 
     private var artworkURL: URL? {
         guard let id = appleMusicPlaylistID else { return nil }
-        return MusicLibraryService.shared.artworkURL(forPlaylistID: id, size: 88)
+        return MusicLibraryService.shared.artworkURL(forPlaylistID: id, size: Int(size * 2))
     }
 
     var body: some View {
@@ -128,8 +130,8 @@ private struct PlaylistCoverView: View {
                 placeholder
             }
         }
-        .frame(width: 44, height: 44)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     private var placeholder: some View {
@@ -137,7 +139,7 @@ private struct PlaylistCoverView: View {
             .fill(.quaternary)
             .overlay(
                 Image(systemName: "music.note.list")
-                    .font(.caption)
+                    .font(size > 44 ? .body : .caption)
                     .foregroundStyle(.secondary)
             )
     }

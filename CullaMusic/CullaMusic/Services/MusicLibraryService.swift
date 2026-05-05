@@ -108,7 +108,18 @@ final class MusicLibraryService {
     }
 
     func removeSong(_ song: Song, fromPlaylistID id: MusicItemID) async throws {
-        throw MusicLibraryError.removeNotSupported
+        guard let cached = playlistCache[id] else {
+            throw MusicLibraryError.playlistNotFound
+        }
+
+        let populated: MusicKit.Playlist = try await cached.with([.tracks])
+        guard let currentTracks = populated.tracks else { return }
+
+        let filtered = currentTracks.filter { $0.id != song.id }
+        guard filtered.count != currentTracks.count else { return }
+
+        let updated = try await MusicLibrary.shared.edit(populated, items: Array(filtered))
+        playlistCache[updated.id] = updated
     }
 
     // MARK: - Unsorted Mode
@@ -198,5 +209,4 @@ final class MusicLibraryService {
 
 enum MusicLibraryError: Error {
     case playlistNotFound
-    case removeNotSupported
 }

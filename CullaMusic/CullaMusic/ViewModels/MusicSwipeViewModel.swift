@@ -328,8 +328,7 @@ final class MusicSwipeViewModel {
         Task { @MainActor in
             do {
                 try await service.removeSong(song, fromPlaylistID: amID)
-            } catch MusicLibraryError.removeNotSupported {
-                toastMessage = "Removed locally — open Apple Music to remove from \(playlist.name)"
+                toastMessage = "Removed from \(playlist.name)"
             } catch {
                 toastMessage = "Couldn't remove from \(playlist.name)"
             }

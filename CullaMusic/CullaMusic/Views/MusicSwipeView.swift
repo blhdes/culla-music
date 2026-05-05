@@ -19,20 +19,28 @@ struct MusicSwipeView: View {
     @State private var showUndo = false
     @State private var undoHideTask: Task<Void, Never>?
 
+    // First-appearance fade-in
+    @State private var contentReady = false
+
     private let swipeThreshold: CGFloat = 100
 
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
-            if viewModel.isLoading {
-                ProgressView("Loading library…")
-            } else if viewModel.isEmpty {
-                EmptyStateView(onRefresh: { Task { await viewModel.reload() } })
-            } else {
-                swipeContent
+            if contentReady {
+                if viewModel.isEmpty {
+                    EmptyStateView(onRefresh: { Task { await viewModel.reload() } })
+                        .transition(.opacity)
+                } else {
+                    swipeContent
+                        .transition(.opacity)
+                }
             }
         }
+        .animation(.easeOut(duration: 0.45), value: contentReady)
+        .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
+        .onAppear { contentReady = true }
         .sheet(isPresented: $showManageSheet) {
             ManagePlaylistsSheet(viewModel: viewModel)
         }
@@ -156,6 +164,10 @@ struct MusicSwipeView: View {
                     onTogglePlay: { viewModel.togglePreview() }
                 )
                 .id(current.id.rawValue)
+                .transition(.asymmetric(
+                    insertion: .opacity,
+                    removal: .identity
+                ))
             }
         }
     }
@@ -213,9 +225,11 @@ struct MusicSwipeView: View {
             cardOffset = CGSize(width: x, height: y)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            cardOffset = .zero
             highlightedID = nil
-            action()
+            withAnimation(.easeOut(duration: 0.35)) {
+                cardOffset = .zero
+                action()
+            }
         }
     }
 

@@ -103,8 +103,18 @@ final class MusicLibraryService {
         guard let playlist = playlistCache[id] else {
             throw MusicLibraryError.playlistNotFound
         }
-        let updated = try await MusicLibrary.shared.add(song, to: playlist)
-        playlistCache[updated.id] = updated
+        _ = try await MusicLibrary.shared.add(song, to: playlist)
+        // Re-fetch from the library so the cached reference reflects Apple's
+        // aggregated cover art (generated from track artworks once songs exist).
+        if let refreshed = try? await fetchPlaylist(id: id) {
+            playlistCache[refreshed.id] = refreshed
+        }
+    }
+
+    private func fetchPlaylist(id: MusicItemID) async throws -> MusicKit.Playlist? {
+        var request = MusicLibraryRequest<MusicKit.Playlist>()
+        request.filter(matching: \.id, equalTo: id)
+        return try await request.response().items.first
     }
 
     func removeSong(_ song: Song, fromPlaylistID id: MusicItemID) async throws {

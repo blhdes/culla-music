@@ -137,8 +137,14 @@ final class MusicSwipeViewModel {
                 let editable = amPlaylist.curatorName == nil
 
                 if let existing = localByAMID[amID] {
-                    // Update editability and name in case they changed
-                    existing.isEditable = editable
+                    // Don't downgrade isEditable: Apple's curatorName signal is
+                    // unreliable for playlists we created in-app (it can come
+                    // back non-nil on later fetches), which would otherwise flip
+                    // them to read-only. Only apply the signal if we don't yet
+                    // know the playlist is editable.
+                    if !existing.isEditable {
+                        existing.isEditable = editable
+                    }
                     existing.name = amPlaylist.name
                 } else {
                     let row = Playlist(

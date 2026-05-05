@@ -17,8 +17,9 @@ final class Playlist {
     /// User-controlled: which playlists appear in the right-swipe sidebar (capped to 5).
     var isInSidebar: Bool = false
 
-    /// True for user-created playlists (MusicKit .personal kind).
-    /// False for editorial, algorithmic, or saved-from-others playlists.
+    /// True for user-owned writable playlists (MusicKit `curatorName == nil`).
+    /// False for Apple editorial content and playlists shared by other users
+    /// (both have curatorName populated).
     /// Only editable playlists can be sorted into or added to the sidebar.
     var isEditable: Bool = true
 

@@ -125,11 +125,10 @@ final class MusicLibraryService {
         var songIDs = Set<String>()
 
         for playlist in playlistCache.values {
-            // rawValue comparison sidesteps the MusicKit.Playlist.Kind / local Playlist
-            // name collision that prevents the compiler from resolving .personal directly.
-            // String interpolation via CustomStringConvertible sidesteps static-member
-            // resolution issues (SDK-version variation / local Playlist name collision).
-            guard playlist.kind.map({ "\($0)" }) == "personal" else { continue }
+            // User-owned playlists have no curator (Apple/other users set curatorName).
+            // Songs only in foreign playlists still count as "unsorted" since the user
+            // can't actively sort into them.
+            guard playlist.curatorName == nil else { continue }
 
             // Explicit type annotation gives the compiler the context it needs to
             // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.

@@ -3,6 +3,7 @@ import UIKit
 enum Haptics {
     static func swipeLeft()  { impact(.light)  }   // dismiss
     static func swipeRight() { impact(.medium) }   // assign to playlist
+    static func skip()       { impact(.soft)   }   // double-tap → skip (session-only)
     static func tap()        { impact(.light)  }
     static func confirm()    { notification(.success) }
 

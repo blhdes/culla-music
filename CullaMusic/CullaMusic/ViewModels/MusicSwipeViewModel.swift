@@ -29,6 +29,7 @@ final class MusicSwipeViewModel {
 
     private(set) var sessionSortedCount: Int = 0
     private(set) var sessionDismissedCount: Int = 0
+    private(set) var sessionSkippedCount: Int = 0
 
     private(set) var actionHistory: [SwipeAction] = []
     var canUndo: Bool { !actionHistory.isEmpty }
@@ -129,7 +130,11 @@ final class MusicSwipeViewModel {
 
             for amPlaylist in amPlaylists {
                 let amID = amPlaylist.id.rawValue
-                let editable = amPlaylist.kind.map({ "\($0)" }) == "personal"
+                // A playlist is the user's own (and writable) when it has no curator —
+                // Apple's editorial content has curatorName="Apple Music" etc., and
+                // playlists shared by other users carry the sharer's curatorName.
+                // The user's private and self-shared playlists have nil curator info.
+                let editable = amPlaylist.curatorName == nil
 
                 if let existing = localByAMID[amID] {
                     // Update editability and name in case they changed
@@ -193,6 +198,17 @@ final class MusicSwipeViewModel {
         sessionExclusionSet.insert(song.id.rawValue)
         sessionDismissedCount += 1
         toastMessage = "Dismissed"
+        advance()
+    }
+
+    /// Skip is in-session only: no SwiftData record, no Apple Music side effect.
+    /// The song stays out of the deck for this run but reappears next session.
+    func skipCurrent() {
+        guard let song = currentSong else { return }
+        sessionExclusionSet.insert(song.id.rawValue)
+        sessionSkippedCount += 1
+        actionHistory.append(.skipped(song: song))
+        toastMessage = "Skipped"
         advance()
     }
 
@@ -279,6 +295,11 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
             sessionDismissedCount = max(sessionDismissedCount - 1, 0)
+            pushBackToFront(song: song)
+
+        case .skipped(let song):
+            sessionExclusionSet.remove(song.id.rawValue)
+            sessionSkippedCount = max(sessionSkippedCount - 1, 0)
             pushBackToFront(song: song)
 
         case .sorted(let song, let playlist, let record):
@@ -427,4 +448,6 @@ enum SwipeAction {
     case sorted(song: Song, playlist: Playlist, record: SortedSong)
     /// Right-swipe in dismissed mode: un-dismisses + adds to playlist.
     case sortedFromDismissed(song: Song, playlist: Playlist, sortedRecord: SortedSong, originalDismissedAt: Date)
+    /// Down-swipe: in-session only, song reappears next launch.
+    case skipped(song: Song)
 }

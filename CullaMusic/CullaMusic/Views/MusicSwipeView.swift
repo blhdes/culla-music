@@ -61,6 +61,12 @@ struct MusicSwipeView: View {
         GeometryReader { geo in
             cardStack
                 .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    flyOff(y: 700) {
+                        viewModel.skipCurrent()
+                        Haptics.skip()
+                    }
+                }
                 .gesture(dragGesture)
                 .overlay {
                     HStack(spacing: 0) {
@@ -202,9 +208,9 @@ struct MusicSwipeView: View {
         snapBack()
     }
 
-    private func flyOff(x: CGFloat, action: @escaping () -> Void) {
+    private func flyOff(x: CGFloat = 0, y: CGFloat = 0, action: @escaping () -> Void) {
         withAnimation(.easeIn(duration: 0.25)) {
-            cardOffset = CGSize(width: x, height: 0)
+            cardOffset = CGSize(width: x, height: y)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             cardOffset = .zero

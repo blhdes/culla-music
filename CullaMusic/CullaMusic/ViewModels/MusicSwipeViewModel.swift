@@ -130,18 +130,24 @@ final class MusicSwipeViewModel {
 
             for amPlaylist in amPlaylists {
                 let amID = amPlaylist.id.rawValue
-                // A playlist is the user's own (and writable) when it has no curator —
-                // Apple's editorial content has curatorName="Apple Music" etc., and
-                // playlists shared by other users carry the sharer's curatorName.
-                // The user's private and self-shared playlists have nil curator info.
-                let editable = amPlaylist.curatorName == nil
+                // Use Playlist.Kind to decide editability — curatorName is
+                // unreliable (Apple sometimes attributes user-created playlists
+                // to the user themselves, which would mark them read-only).
+                // Editorial / auto-generated kinds are read-only; user-shared
+                // and external kinds are user-controlled.
+                let editable: Bool
+                switch amPlaylist.kind {
+                case .editorial, .personalMix, .replay:
+                    editable = false
+                default:
+                    editable = true
+                }
 
                 if let existing = localByAMID[amID] {
-                    // Don't downgrade isEditable: Apple's curatorName signal is
-                    // unreliable for playlists we created in-app (it can come
-                    // back non-nil on later fetches), which would otherwise flip
-                    // them to read-only. Only apply the signal if we don't yet
-                    // know the playlist is editable.
+                    // Preserve isEditable=true; only re-apply the signal to
+                    // records that were previously read-only. This auto-repairs
+                    // playlists that were wrongly downgraded by the old
+                    // curatorName-based check.
                     if !existing.isEditable {
                         existing.isEditable = editable
                     }

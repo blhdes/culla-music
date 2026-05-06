@@ -134,9 +134,9 @@ final class MusicLibraryService {
 
     // MARK: - Unsorted Mode
 
-    /// Returns song IDs that belong to at least one user-created (.personal) playlist.
-    /// Non-editable playlists (editorial, algorithmic, saved) are excluded — songs
-    /// only in those still count as "unsorted" since the user didn't actively organise them.
+    /// Returns song IDs that belong to at least one user-controlled playlist.
+    /// Editorial / auto-generated kinds are excluded (songs only in those still
+    /// count as "unsorted" since the user didn't actively organise them).
     /// Caller must have called refreshUserPlaylists() first so the cache is warm.
     func fetchEditablePlaylistSongIDs() async throws -> Set<String> {
         if playlistCache.isEmpty {
@@ -146,10 +146,17 @@ final class MusicLibraryService {
         var songIDs = Set<String>()
 
         for playlist in playlistCache.values {
-            // User-owned playlists have no curator (Apple/other users set curatorName).
-            // Songs only in foreign playlists still count as "unsorted" since the user
-            // can't actively sort into them.
-            guard playlist.curatorName == nil else { continue }
+            // Use Playlist.Kind instead of curatorName — Apple stamps the
+            // creating app's name into curatorName for third-party-created
+            // playlists, which would otherwise exclude Culla-created lists.
+            let isUserControlled: Bool
+            switch playlist.kind {
+            case .editorial, .personalMix, .replay:
+                isUserControlled = false
+            default:
+                isUserControlled = true
+            }
+            guard isUserControlled else { continue }
 
             // Explicit type annotation gives the compiler the context it needs to
             // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.

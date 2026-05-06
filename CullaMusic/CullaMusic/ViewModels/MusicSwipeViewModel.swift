@@ -16,7 +16,7 @@ final class MusicSwipeViewModel {
 
     private(set) var playlists: [Playlist] = []
 
-    static let maxSidebar: Int = 5
+    static let maxSidebar: Int = 13
 
     var sidebarPlaylists: [Playlist] {
         playlists

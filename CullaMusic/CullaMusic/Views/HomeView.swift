@@ -8,6 +8,7 @@ import MusicKit
 final class HomeViewModel {
     var dismissedCount: Int = 0
     var unsortedCount: Int? = nil   // nil = computing
+    var playlists: [Playlist] = []
 
     private let modelContext: ModelContext
 
@@ -16,6 +17,7 @@ final class HomeViewModel {
     }
 
     func loadCounts() async {
+        await syncPlaylistsFromAppleMusic()
         dismissedCount = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
 
         // Read cache from UserDefaults inline — no stored properties needed,
@@ -68,6 +70,57 @@ final class HomeViewModel {
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: .now)
     }
+
+    private func syncPlaylistsFromAppleMusic() async {
+        do {
+            let amPlaylists = try await MusicLibraryService.shared.refreshUserPlaylists()
+            let local = fetchLocalPlaylists()
+            let localByAMID = Dictionary(
+                uniqueKeysWithValues: local.compactMap { playlist -> (String, Playlist)? in
+                    guard let appleMusicPlaylistID = playlist.appleMusicPlaylistID else { return nil }
+                    return (appleMusicPlaylistID, playlist)
+                }
+            )
+            var nextOrder = (local.map(\.displayOrder).max() ?? -1) + 1
+
+            for amPlaylist in amPlaylists {
+                let editable: Bool
+                switch amPlaylist.kind {
+                case .editorial, .personalMix, .replay:
+                    editable = false
+                default:
+                    editable = true
+                }
+
+                if let existing = localByAMID[amPlaylist.id.rawValue] {
+                    if !existing.isEditable {
+                        existing.isEditable = editable
+                    }
+                    existing.name = amPlaylist.name
+                } else {
+                    let row = Playlist(
+                        name: amPlaylist.name,
+                        displayOrder: nextOrder,
+                        appleMusicPlaylistID: amPlaylist.id.rawValue,
+                        isEditable: editable
+                    )
+                    modelContext.insert(row)
+                    nextOrder += 1
+                }
+            }
+
+            try? modelContext.save()
+            playlists = fetchLocalPlaylists()
+        } catch {
+            playlists = fetchLocalPlaylists()
+            print("Playlist sync failed: \(error)")
+        }
+    }
+
+    private func fetchLocalPlaylists() -> [Playlist] {
+        let descriptor = FetchDescriptor<Playlist>(sortBy: [SortDescriptor(\.displayOrder)])
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
 }
 
 // MARK: - HomeView
@@ -78,7 +131,9 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var homeVM: HomeViewModel?
     @State private var selectedMode: ReviewMode = .library
+    @State private var sourcePlaylistID: String = ""
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
+    @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
 
     var body: some View {
         ZStack {
@@ -107,11 +162,23 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 24)
 
+                if selectedMode == .library {
+                    sourcePicker
+                        .padding(.top, 18)
+                        .transition(.opacity)
+                }
+
                 Spacer()
 
                 Divider()
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
+
+                if selectedMode == .library, !sourcePlaylistID.isEmpty {
+                    sourceTransferPicker
+                        .padding(.bottom, 16)
+                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                }
 
                 // Shared order picker — binds directly to sortOrderRaw to avoid
                 // a computed-property setter that Swift treats as mutating in closures.
@@ -136,7 +203,15 @@ struct HomeView: View {
 
                 Button {
                     let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
-                    onStart(SwipeConfig(mode: selectedMode, order: order))
+                    let transferMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
+                    let source = selectedMode == .library ? selectedSourcePlaylist : nil
+                    onStart(SwipeConfig(
+                        mode: selectedMode,
+                        order: order,
+                        sourcePlaylistID: source?.appleMusicPlaylistID,
+                        sourcePlaylistName: source?.name,
+                        sourceTransferMode: transferMode
+                    ))
                 } label: {
                     Text("Start Cullaing")
                         .font(.headline)
@@ -153,6 +228,70 @@ struct HomeView: View {
             homeVM = vm
             await vm.loadCounts()
         }
+        .onChange(of: selectedMode) { _, newValue in
+            if newValue != .library {
+                sourcePlaylistID = ""
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: selectedMode)
+        .animation(.easeInOut(duration: 0.18), value: sourcePlaylistID)
+    }
+
+    private var sourcePlaylists: [Playlist] {
+        (homeVM?.playlists ?? [])
+            .filter { $0.isEditable && $0.appleMusicPlaylistID != nil }
+            .sorted { $0.displayOrder < $1.displayOrder }
+    }
+
+    private var selectedSourcePlaylist: Playlist? {
+        sourcePlaylists.first { $0.appleMusicPlaylistID == sourcePlaylistID }
+    }
+
+    private var sourcePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sorting from")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Picker("Sorting from", selection: $sourcePlaylistID) {
+                Text("General Library").tag("")
+                ForEach(sourcePlaylists, id: \.id) { playlist in
+                    if let appleMusicPlaylistID = playlist.appleMusicPlaylistID {
+                        Text(playlist.name).tag(appleMusicPlaylistID)
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.secondarySystemBackground))
+            )
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var sourceTransferPicker: some View {
+        VStack(spacing: 6) {
+            Picker("Source behavior", selection: Binding(
+                get: { SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy },
+                set: { sourceTransferModeRaw = $0.rawValue }
+            )) {
+                ForEach(SourceTransferMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text((SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy) == .copy
+                 ? "Sorted songs stay in the source playlist too."
+                 : "Sorted songs are removed from the source playlist.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 24)
     }
 
     private func count(for mode: ReviewMode) -> Int? {

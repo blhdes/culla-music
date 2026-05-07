@@ -76,11 +76,7 @@ final class MusicSwipeViewModel {
             switch config.mode {
             case .library:
                 sessionExclusionSet = fetchExcludedIdentifiers()
-                let songs = try await service.fetchNextLibrarySongs(
-                    excluding: sessionExclusionSet,
-                    desired: batchSize,
-                    ascending: config.order.ascending
-                )
+                let songs = try await fetchNextSessionSongs()
                 populateQueue(with: songs)
 
             case .unsorted:
@@ -272,8 +268,12 @@ final class MusicSwipeViewModel {
         advance()
 
         Task { @MainActor in
-            do { try await service.addSong(song, toPlaylistID: amID) }
-            catch { toastMessage = "Couldn't add to \(playlist.name)" }
+            do {
+                try await service.addSong(song, toPlaylistID: amID)
+                try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
+            } catch {
+                toastMessage = "Couldn't add to \(playlist.name)"
+            }
         }
     }
 
@@ -321,6 +321,7 @@ final class MusicSwipeViewModel {
             sessionSortedCount = max(sessionSortedCount - 1, 0)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
+            remoteRestoreToSourceIfNeeded(song: song, destinationPlaylist: playlist)
 
         case .sortedFromDismissed(let song, let playlist, let sortedRecord, let originalDismissedAt):
             modelContext.delete(sortedRecord)
@@ -409,11 +410,7 @@ final class MusicSwipeViewModel {
 
         if songQueue.count < refillThreshold {
             Task { @MainActor in
-                if let more = try? await service.fetchNextLibrarySongs(
-                    excluding: sessionExclusionSet,
-                    desired: batchSize,
-                    ascending: config.order.ascending
-                ) {
+                if let more = try? await fetchNextSessionSongs() {
                     songQueue.append(contentsOf: more)
                     if currentSong == nil, !songQueue.isEmpty {
                         currentSong = songQueue.removeFirst()
@@ -445,6 +442,49 @@ final class MusicSwipeViewModel {
             excluded.formUnion(dismissed.map(\.songID))
         }
         return excluded
+    }
+
+    private func fetchNextSessionSongs() async throws -> [Song] {
+        if config.mode == .library,
+           let sourcePlaylistID = config.sourcePlaylistID {
+            return try await service.fetchNextPlaylistSongs(
+                playlistID: MusicItemID(sourcePlaylistID),
+                excluding: sessionExclusionSet,
+                desired: batchSize,
+                ascending: config.order.ascending
+            )
+        }
+
+        return try await service.fetchNextLibrarySongs(
+            excluding: sessionExclusionSet,
+            desired: batchSize,
+            ascending: config.order.ascending
+        )
+    }
+
+    private func removeFromSourceIfNeeded(song: Song, destinationPlaylist: Playlist) async throws {
+        guard config.sourceTransferMode == .move,
+              let sourcePlaylistID = config.sourcePlaylistID,
+              sourcePlaylistID != destinationPlaylist.appleMusicPlaylistID
+        else { return }
+
+        try await service.removeSong(song, fromPlaylistID: MusicItemID(sourcePlaylistID))
+    }
+
+    private func remoteRestoreToSourceIfNeeded(song: Song, destinationPlaylist: Playlist) {
+        guard config.sourceTransferMode == .move,
+              let sourcePlaylistID = config.sourcePlaylistID,
+              sourcePlaylistID != destinationPlaylist.appleMusicPlaylistID
+        else { return }
+
+        let sourceName = config.sourcePlaylistName ?? "source playlist"
+        Task { @MainActor in
+            do {
+                try await service.addSong(song, toPlaylistID: MusicItemID(sourcePlaylistID))
+            } catch {
+                toastMessage = "Couldn't restore to \(sourceName)"
+            }
+        }
     }
 
     private func fetchSortedSongIDs() -> Set<String> {

@@ -3,6 +3,13 @@ import Foundation
 struct SwipeConfig {
     var mode: ReviewMode = .library
     var order: SortOrder = .newestFirst
+    var sourcePlaylistID: String?
+    var sourcePlaylistName: String?
+    var sourceTransferMode: SourceTransferMode = .copy
+
+    var isPlaylistSource: Bool {
+        sourcePlaylistID != nil
+    }
 }
 
 enum ReviewMode: String, CaseIterable, Identifiable {
@@ -49,4 +56,16 @@ enum SortOrder: String, CaseIterable {
     }
 
     var ascending: Bool { self == .oldestFirst }
+}
+
+enum SourceTransferMode: String, CaseIterable {
+    case copy
+    case move
+
+    var label: String {
+        switch self {
+        case .copy: "Keep in playlist"
+        case .move: "Move out"
+        }
+    }
 }

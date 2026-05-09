@@ -2,6 +2,7 @@
 DerivedData/
 build/
 *.xcuserstate
+*.mobileprovision
 *.moved-aside
 *.pbxuser
 !default.pbxuser

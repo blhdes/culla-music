@@ -137,6 +137,10 @@ final class MusicLibraryService {
         playlistCache[MusicItemID(id)]?.artwork?.url(width: size, height: size)
     }
 
+    func artwork(forPlaylistID id: String) -> Artwork? {
+        playlistCache[MusicItemID(id)]?.artwork
+    }
+
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
         let playlist = try await MusicLibrary.shared.createPlaylist(name: name)
         playlistCache[playlist.id] = playlist

@@ -51,20 +51,8 @@ struct SongCardView: View {
 
     @ViewBuilder
     private func artwork(for song: Song, size: CGFloat) -> some View {
-        if let url = song.artwork?.url(width: 600, height: 600) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle().fill(.ultraThinMaterial)
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    artworkFallback
-                @unknown default:
-                    artworkFallback
-                }
-            }
-            .frame(width: size, height: size)
+        if let artwork = song.artwork {
+            ArtworkImage(artwork, width: size, height: size)
         } else {
             artworkFallback
                 .frame(width: size, height: size)

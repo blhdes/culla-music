@@ -1,4 +1,5 @@
 import SwiftUI
+import MusicKit
 
 /// Lets the user pick which playlists appear in the swipe sidebar (capped to
 /// `MusicSwipeViewModel.maxSidebar`) and create new ones.
@@ -110,22 +111,15 @@ struct PlaylistCoverView: View {
     var size: CGFloat = 44
     var cornerRadius: CGFloat = 8
 
-    private var artworkURL: URL? {
+    private var artwork: Artwork? {
         guard let id = appleMusicPlaylistID else { return nil }
-        return MusicLibraryService.shared.artworkURL(forPlaylistID: id, size: Int(size * 2))
+        return MusicLibraryService.shared.artwork(forPlaylistID: id)
     }
 
     var body: some View {
         Group {
-            if let url = artworkURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        placeholder
-                    }
-                }
+            if let artwork {
+                ArtworkImage(artwork, width: size, height: size)
             } else {
                 placeholder
             }

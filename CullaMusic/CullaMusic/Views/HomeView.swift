@@ -132,6 +132,7 @@ struct HomeView: View {
     @State private var homeVM: HomeViewModel?
     @State private var selectedMode: ReviewMode = .library
     @State private var sourcePlaylistID: String = ""
+    @State private var showSourcePicker = false
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
 
@@ -163,7 +164,7 @@ struct HomeView: View {
                 .padding(.horizontal, 24)
 
                 if selectedMode == .library {
-                    sourcePicker
+                    sourceFilterButton
                         .padding(.top, 18)
                         .transition(.opacity)
                 }
@@ -233,6 +234,14 @@ struct HomeView: View {
                 sourcePlaylistID = ""
             }
         }
+        .sheet(isPresented: $showSourcePicker) {
+            SourcePlaylistPickerSheet(
+                playlists: sourcePlaylists,
+                selectedID: sourcePlaylistID
+            ) { picked in
+                sourcePlaylistID = picked?.appleMusicPlaylistID ?? ""
+            }
+        }
         .animation(.easeInOut(duration: 0.18), value: selectedMode)
         .animation(.easeInOut(duration: 0.18), value: sourcePlaylistID)
     }
@@ -247,29 +256,34 @@ struct HomeView: View {
         sourcePlaylists.first { $0.appleMusicPlaylistID == sourcePlaylistID }
     }
 
-    private var sourcePicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Sorting from")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Picker("Sorting from", selection: $sourcePlaylistID) {
-                Text("General Library").tag("")
-                ForEach(sourcePlaylists, id: \.id) { playlist in
-                    if let appleMusicPlaylistID = playlist.appleMusicPlaylistID {
-                        Text(playlist.name).tag(appleMusicPlaylistID)
+    private var sourceFilterButton: some View {
+        Button {
+            showSourcePicker = true
+        } label: {
+            HStack {
+                Image(systemName: "music.note.list")
+                if let playlist = selectedSourcePlaylist {
+                    Text(playlist.name)
+                    Spacer()
+                    Button {
+                        sourcePlaylistID = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("General Library")
+                    Spacer()
+                    Text("Sort from a playlist")
+                        .foregroundStyle(.secondary)
                 }
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.secondarySystemBackground))
-            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .modifier(GlassOrQuaternaryRounded())
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 24)
     }
 
@@ -371,5 +385,20 @@ private struct ModeCard: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
+    }
+}
+
+// MARK: - Glass / Quaternary background modifier
+
+/// Pill-style background: liquid glass on iOS 26+, falls back to a soft
+/// quaternary fill on older OS versions. Mirrors the photo Culla helper
+/// so the source button looks identical across both apps.
+private struct GlassOrQuaternaryRounded: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.glassEffect(in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            content.background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+        }
     }
 }

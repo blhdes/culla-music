@@ -149,21 +149,40 @@ final class MusicLibraryService {
 
     func addSong(_ song: Song, toPlaylistID id: MusicItemID) async throws {
         try await performPlaylistMutation(for: id) { [self] in
-            guard let playlist = try await freshPlaylist(id: id) else {
-                throw MusicLibraryError.playlistNotFound
-            }
-
-            let populated: MusicKit.Playlist = try await playlist.with([.tracks])
-            if populated.tracks?.contains(where: { $0.id == song.id }) == true {
-                return
-            }
-
-            _ = try await MusicLibrary.shared.add(song, to: populated)
+            try await addSongAttempt(song, toPlaylistID: id, allowRetry: true)
             // Re-fetch from the library so the cached reference reflects Apple's
             // aggregated cover art (generated from track artworks once songs exist).
             if let refreshed = try? await fetchPlaylist(id: id) {
                 playlistCache[refreshed.id] = refreshed
             }
+        }
+    }
+
+    // Apple Music's playlist index is eventually consistent — right after a
+    // remove, an immediate re-add of the same song can fail even though the
+    // backend would accept it a moment later. On error, wait briefly and try
+    // once more; the dedupe check covers the case where it actually did go
+    // through and we just got a stale error.
+    private func addSongAttempt(
+        _ song: Song,
+        toPlaylistID id: MusicItemID,
+        allowRetry: Bool
+    ) async throws {
+        guard let playlist = try await freshPlaylist(id: id) else {
+            throw MusicLibraryError.playlistNotFound
+        }
+
+        let populated: MusicKit.Playlist = try await playlist.with([.tracks])
+        if populated.tracks?.contains(where: { $0.id == song.id }) == true {
+            return
+        }
+
+        do {
+            _ = try await MusicLibrary.shared.add(song, to: populated)
+        } catch {
+            guard allowRetry else { throw error }
+            try? await Task.sleep(for: .milliseconds(450))
+            try await addSongAttempt(song, toPlaylistID: id, allowRetry: false)
         }
     }
 

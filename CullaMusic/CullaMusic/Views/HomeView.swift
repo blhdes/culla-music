@@ -18,17 +18,23 @@ final class HomeViewModel {
 
     func loadCounts() async {
         await syncPlaylistsFromAppleMusic()
-        dismissedCount = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
+        let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
+        let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
+        dismissedCount = dismissedSnapshot
 
-        // Read cache from UserDefaults inline — no stored properties needed,
-        // which avoids the @Observable macro collision on property names.
+        // Cache is invalidated by either a calendar-day rollover OR a change in
+        // the local Sorted/Dismissed counts — so the count refreshes whenever
+        // the user has actually done something in Culla, not just once per day.
         let cacheKey = "music.unsortedCountCached"
         let dateKey  = "music.unsortedCountDate"
+        let fingerprintKey = "music.unsortedCountFingerprint"
         let today = todayString()
+        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
         let cachedDate  = UserDefaults.standard.string(forKey: dateKey) ?? ""
+        let cachedFingerprint = UserDefaults.standard.string(forKey: fingerprintKey) ?? ""
         let cachedCount = UserDefaults.standard.integer(forKey: cacheKey)
 
-        if cachedDate == today {
+        if cachedDate == today, cachedFingerprint == fingerprint {
             unsortedCount = cachedCount
             return
         }
@@ -60,6 +66,7 @@ final class HomeViewModel {
             unsortedCount = count
             UserDefaults.standard.set(count, forKey: cacheKey)
             UserDefaults.standard.set(today, forKey: dateKey)
+            UserDefaults.standard.set(fingerprint, forKey: fingerprintKey)
         } catch {
             print("Unsorted count failed: \(error)")
         }

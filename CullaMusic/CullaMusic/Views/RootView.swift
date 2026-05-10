@@ -8,6 +8,21 @@ struct RootView: View {
     @State private var activeConfig: SwipeConfig?
     @State private var activeViewModel: MusicSwipeViewModel?
 
+    @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
+    @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
+
+    private var appColorScheme: ColorScheme? {
+        switch colorSchemeRaw {
+        case "light": .light
+        case "dark":  .dark
+        default:      nil
+        }
+    }
+
+    private var palette: AccentPalette {
+        AccentPalette(rawValue: accentPaletteRaw) ?? .blue
+    }
+
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
@@ -29,6 +44,9 @@ struct RootView: View {
             seedDefaults()
             authStatus = MusicAuthorization.currentStatus
         }
+        .preferredColorScheme(appColorScheme)
+        .tint(palette.color)
+        .environment(\.appAccent, palette.color)
     }
 
     // MARK: - Actions

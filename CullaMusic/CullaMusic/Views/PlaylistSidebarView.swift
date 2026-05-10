@@ -71,6 +71,8 @@ struct PlaylistSidebarItem: View {
     let isDragging: Bool
     let dragProgress: CGFloat
 
+    @Environment(\.appAccent) private var appAccent
+
     var body: some View {
         ZStack(alignment: .leading) {
             Rectangle()
@@ -78,7 +80,7 @@ struct PlaylistSidebarItem: View {
                 .opacity(Double(dragProgress))
 
             // Soft accent highlight when this row is the drop target — neutral elsewhere.
-            Color.accentColor
+            appAccent
                 .opacity(isHighlighted ? 0.6 : 0)
 
             HStack(spacing: 12) {

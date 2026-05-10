@@ -142,7 +142,14 @@ final class MusicLibraryService {
     }
 
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
-        let playlist = try await MusicLibrary.shared.createPlaylist(name: name)
+        let stored = (UserDefaults.standard.string(forKey: "authorDisplayName") ?? "")
+            .trimmingCharacters(in: .whitespaces)
+        let author: String? = stored.isEmpty ? nil : stored
+        let playlist = try await MusicLibrary.shared.createPlaylist(
+            name: name,
+            description: nil,
+            authorDisplayName: author
+        )
         playlistCache[playlist.id] = playlist
         return playlist
     }

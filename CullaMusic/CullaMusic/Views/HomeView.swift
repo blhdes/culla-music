@@ -140,6 +140,7 @@ struct HomeView: View {
     @State private var selectedMode: ReviewMode = .library
     @State private var sourcePlaylistID: String = ""
     @State private var showSourcePicker = false
+    @State private var showSettings = false
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
 
@@ -231,6 +232,20 @@ struct HomeView: View {
                 .padding(.bottom, 40)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
+            .padding(.top, 18)
+        }
         .task {
             let vm = HomeViewModel(modelContext: modelContext)
             homeVM = vm
@@ -248,6 +263,9 @@ struct HomeView: View {
             ) { picked in
                 sourcePlaylistID = picked?.appleMusicPlaylistID ?? ""
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         .animation(.easeInOut(duration: 0.18), value: selectedMode)
         .animation(.easeInOut(duration: 0.18), value: sourcePlaylistID)

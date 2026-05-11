@@ -5,7 +5,12 @@ struct SongCardView: View {
     let song: Song?
     let offset: CGSize
     let isPlaying: Bool
+    let playbackPosition: TimeInterval
+    let playbackDuration: TimeInterval
     let onTogglePlay: () -> Void
+    let onSeek: (TimeInterval) -> Void
+
+    @State private var scrubOverride: TimeInterval?
 
     private let swipeThreshold: CGFloat = 100
 
@@ -15,11 +20,18 @@ struct SongCardView: View {
                 Color(.systemBackground)
 
                 if let song {
-                    VStack(spacing: 28) {
-                        artwork(for: song, size: min(geo.size.width * 0.78, 360))
+                    let artworkSize = min(geo.size.width * 0.78, 360)
+
+                    VStack(spacing: 18) {
+                        artwork(for: song, size: artworkSize)
                             .clipShape(RoundedRectangle(cornerRadius: 24))
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
                             .overlay(alignment: .center) { playButton }
+                            .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
+
+                        timeLabels(width: artworkSize)
+                            .opacity(progressOpacity)
+                            .animation(.easeInOut(duration: 0.35), value: progressOpacity)
 
                         VStack(spacing: 6) {
                             Text(song.title)
@@ -78,6 +90,57 @@ struct SongCardView: View {
                 .background(.black.opacity(0.55), in: Circle())
         }
         .buttonStyle(.plain)
+    }
+
+    // Gradient scrim → bar reads against any artwork. Whole stack fades with playback.
+    @ViewBuilder
+    private func progressOverlay(width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.28)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 44)
+            .allowsHitTesting(false)
+            .overlay(alignment: .bottom) {
+                ProgressBarView(
+                    position: playbackPosition,
+                    duration: playbackDuration,
+                    scrubOverride: $scrubOverride,
+                    onSeek: onSeek
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+        }
+        .frame(width: width)
+        .opacity(progressOpacity)
+        .animation(.easeInOut(duration: 0.35), value: progressOpacity)
+    }
+
+    private func timeLabels(width: CGFloat) -> some View {
+        let displayed = scrubOverride ?? playbackPosition
+        let remaining = max(playbackDuration - displayed, 0)
+        return HStack {
+            Text(format(displayed))
+            Spacer()
+            Text("-\(format(remaining))")
+        }
+        .font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+        .foregroundStyle(.secondary)
+        .frame(width: width)
+        .padding(.horizontal, 4)
+    }
+
+    private func format(_ t: TimeInterval) -> String {
+        guard t.isFinite else { return "0:00" }
+        let total = Int(t.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private var progressOpacity: Double {
+        isPlaying && playbackDuration > 0 ? 1 : 0
     }
 
     private var cardOpacity: CGFloat {

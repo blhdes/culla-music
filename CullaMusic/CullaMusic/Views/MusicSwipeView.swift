@@ -139,7 +139,10 @@ struct MusicSwipeView: View {
                     song: next,
                     offset: .zero,
                     isPlaying: false,
-                    onTogglePlay: {}
+                    playbackPosition: 0,
+                    playbackDuration: 0,
+                    onTogglePlay: {},
+                    onSeek: { _ in }
                 )
                 .id(next.id.rawValue)
                 .allowsHitTesting(false)
@@ -157,7 +160,10 @@ struct MusicSwipeView: View {
                     song: current,
                     offset: cardOffset,
                     isPlaying: isPlayingThis,
-                    onTogglePlay: { viewModel.togglePreview() }
+                    playbackPosition: isPlayingThis ? service.playbackPosition : 0,
+                    playbackDuration: isPlayingThis ? service.playbackDuration : 0,
+                    onTogglePlay: { viewModel.togglePreview() },
+                    onSeek: { service.seek(to: $0) }
                 )
                 .id(current.id.rawValue)
                 .transition(.asymmetric(

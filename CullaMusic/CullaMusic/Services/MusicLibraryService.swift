@@ -11,6 +11,8 @@ final class MusicLibraryService {
     var authorizationStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
     var isPlayingPreview: Bool = false
     var nowPlayingSongID: String? = nil
+    var playbackPosition: TimeInterval = 0
+    var playbackDuration: TimeInterval = 0
 
     // Library paging cursor
     private var pageOffset: Int = 0
@@ -26,6 +28,8 @@ final class MusicLibraryService {
     private let player = ApplicationMusicPlayer.shared
     private let clipPlayer = AVPlayer()
     private var clipEndObserver: NSObjectProtocol?
+    private var clipTimeObserverToken: Any?
+    private var fullSongPositionTimer: Timer?
 
     private init() {}
 
@@ -422,18 +426,37 @@ final class MusicLibraryService {
     func stopPreview() {
         player.pause()
         stopClipPlayer()
+        stopPositionObservers()
         isPlayingPreview = false
         nowPlayingSongID = nil
+        playbackPosition = 0
+        playbackDuration = 0
+    }
+
+    /// Routes to whichever player is active. The clip player path is identified
+    /// by an active periodic-time observer; otherwise we assume full-song mode.
+    func seek(to time: TimeInterval) {
+        let target = max(0, playbackDuration > 0 ? min(time, playbackDuration) : time)
+        if clipTimeObserverToken != nil {
+            clipPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+        } else {
+            player.playbackTime = target
+        }
+        playbackPosition = target
     }
 
     private func playFullSong(_ song: Song) {
         stopClipPlayer()
+        stopPositionObservers()
         Task { @MainActor in
             do {
                 player.queue = ApplicationMusicPlayer.Queue(for: [song])
                 try await player.play()
                 isPlayingPreview = true
                 nowPlayingSongID = song.id.rawValue
+                playbackPosition = 0
+                playbackDuration = song.duration ?? 0
+                startFullSongPositionTimer()
             } catch {
                 print("Playback failed: \(error)")
                 isPlayingPreview = false
@@ -445,6 +468,7 @@ final class MusicLibraryService {
     private func playHotClip(url: URL, songID: String) {
         player.pause()
         stopClipPlayer()
+        stopPositionObservers()
 
         // AVPlayer doesn't auto-configure the audio session the way
         // ApplicationMusicPlayer does — without this the clip can be silent.
@@ -474,6 +498,9 @@ final class MusicLibraryService {
         clipPlayer.play()
         isPlayingPreview = true
         nowPlayingSongID = songID
+        playbackPosition = 0
+        playbackDuration = 0
+        startClipPositionObserver()
     }
 
     private func stopClipPlayer() {
@@ -483,6 +510,44 @@ final class MusicLibraryService {
         }
         clipPlayer.pause()
         clipPlayer.replaceCurrentItem(with: nil)
+    }
+
+    private func startClipPositionObserver() {
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        clipTimeObserverToken = clipPlayer.addPeriodicTimeObserver(
+            forInterval: interval,
+            queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            self.playbackPosition = time.seconds
+            if let dur = self.clipPlayer.currentItem?.duration,
+               dur.isNumeric, dur.seconds > 0 {
+                self.playbackDuration = dur.seconds
+            }
+        }
+    }
+
+    // ApplicationMusicPlayer has no built-in periodic time observer, so we poll.
+    // 0.2s is fine for a hairline progress bar — the eye won't see finer.
+    private func startFullSongPositionTimer() {
+        fullSongPositionTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.2,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.playbackPosition = self.player.playbackTime
+            }
+        }
+    }
+
+    private func stopPositionObservers() {
+        if let token = clipTimeObserverToken {
+            clipPlayer.removeTimeObserver(token)
+            clipTimeObserverToken = nil
+        }
+        fullSongPositionTimer?.invalidate()
+        fullSongPositionTimer = nil
     }
 }
 

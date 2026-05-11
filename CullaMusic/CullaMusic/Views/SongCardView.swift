@@ -11,6 +11,7 @@ struct SongCardView: View {
     let onSeek: (TimeInterval) -> Void
 
     @State private var scrubOverride: TimeInterval?
+    @AppStorage("useHotPreview") private var useHotPreview: Bool = false
 
     private let swipeThreshold: CGFloat = 100
 
@@ -92,29 +93,32 @@ struct SongCardView: View {
         .buttonStyle(.plain)
     }
 
-    // Gradient scrim → bar reads against any artwork. Whole stack fades with playback.
+    // Gradient scrim → bar reads against any artwork. Clipped to the artwork's
+    // bottom corners so it doesn't poke out as a square block.
     @ViewBuilder
     private func progressOverlay(width: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.28)],
-                startPoint: .top,
-                endPoint: .bottom
+        LinearGradient(
+            colors: [.clear, .black.opacity(0.28)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(width: width, height: 44)
+        .clipShape(
+            UnevenRoundedRectangle(
+                cornerRadii: .init(bottomLeading: 24, bottomTrailing: 24)
             )
-            .frame(height: 44)
-            .allowsHitTesting(false)
-            .overlay(alignment: .bottom) {
-                ProgressBarView(
-                    position: playbackPosition,
-                    duration: playbackDuration,
-                    scrubOverride: $scrubOverride,
-                    onSeek: onSeek
-                )
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-            }
+        )
+        .allowsHitTesting(false)
+        .overlay(alignment: .bottom) {
+            ProgressBarView(
+                position: playbackPosition,
+                duration: playbackDuration,
+                scrubOverride: $scrubOverride,
+                onSeek: onSeek
+            )
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
         }
-        .frame(width: width)
         .opacity(progressOpacity)
         .animation(.easeInOut(duration: 0.35), value: progressOpacity)
     }
@@ -140,7 +144,8 @@ struct SongCardView: View {
     }
 
     private var progressOpacity: Double {
-        isPlaying && playbackDuration > 0 ? 1 : 0
+        // 30s hot-clip previews speak for themselves — no bar needed.
+        !useHotPreview && isPlaying && playbackDuration > 0 ? 1 : 0
     }
 
     private var cardOpacity: CGFloat {

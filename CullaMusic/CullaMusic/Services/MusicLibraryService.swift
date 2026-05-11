@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import MusicKit
 
@@ -23,6 +24,8 @@ final class MusicLibraryService {
     private var playlistMutationTasks: [MusicItemID: PlaylistMutationTask] = [:]
 
     private let player = ApplicationMusicPlayer.shared
+    private let clipPlayer = AVPlayer()
+    private var clipEndObserver: NSObjectProtocol?
 
     private init() {}
 
@@ -338,6 +341,23 @@ final class MusicLibraryService {
     // MARK: - Playback
 
     func playPreview(for song: Song) {
+        let useHotPreview = UserDefaults.standard.bool(forKey: "useHotPreview")
+        if useHotPreview, let url = song.previewAssets?.first?.url {
+            playHotClip(url: url, songID: song.id.rawValue)
+            return
+        }
+        playFullSong(song)
+    }
+
+    func stopPreview() {
+        player.pause()
+        stopClipPlayer()
+        isPlayingPreview = false
+        nowPlayingSongID = nil
+    }
+
+    private func playFullSong(_ song: Song) {
+        stopClipPlayer()
         Task {
             do {
                 player.queue = ApplicationMusicPlayer.Queue(for: [song])
@@ -352,10 +372,37 @@ final class MusicLibraryService {
         }
     }
 
-    func stopPreview() {
+    private func playHotClip(url: URL, songID: String) {
         player.pause()
-        isPlayingPreview = false
-        nowPlayingSongID = nil
+        stopClipPlayer()
+
+        let item = AVPlayerItem(url: url)
+        clipPlayer.replaceCurrentItem(with: item)
+
+        // The 30s preview is a finite clip — when it reaches the end, treat it
+        // the same as a manual stop so UI state stays consistent.
+        clipEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.stopPreview()
+            }
+        }
+
+        clipPlayer.play()
+        isPlayingPreview = true
+        nowPlayingSongID = songID
+    }
+
+    private func stopClipPlayer() {
+        if let token = clipEndObserver {
+            NotificationCenter.default.removeObserver(token)
+            clipEndObserver = nil
+        }
+        clipPlayer.pause()
+        clipPlayer.replaceCurrentItem(with: nil)
     }
 }
 

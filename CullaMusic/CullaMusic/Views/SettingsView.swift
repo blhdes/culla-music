@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
+    @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
 
     var body: some View {
@@ -39,8 +40,13 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
 
-                Section("Behavior") {
+                Section {
                     Toggle("Haptics", isOn: $hapticsEnabled)
+                    Toggle("Start at song highlight", isOn: $useHotPreview)
+                } header: {
+                    Text("Behavior")
+                } footer: {
+                    Text("Plays Apple Music's curated preview clip (~30s) instead of starting from the beginning. Falls back to the full song when no preview is available.")
                 }
 
                 Section {

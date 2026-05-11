@@ -342,11 +342,81 @@ final class MusicLibraryService {
 
     func playPreview(for song: Song) {
         let useHotPreview = UserDefaults.standard.bool(forKey: "useHotPreview")
-        if useHotPreview, let url = song.previewAssets?.first?.url {
-            playHotClip(url: url, songID: song.id.rawValue)
+        print("[hotpreview] play title=\"\(song.title)\" toggle=\(useHotPreview) previewAssets=\(song.previewAssets?.count ?? 0) isrc=\(song.isrc ?? "nil") id=\(song.id.rawValue)")
+        if useHotPreview {
+            Task { @MainActor in
+                await playWithHotClipIfPossible(song)
+            }
             return
         }
         playFullSong(song)
+    }
+
+    private func playWithHotClipIfPossible(_ song: Song) async {
+        if let url = await resolveHotClipURL(for: song) {
+            print("[hotpreview] playing hot clip: \(url.lastPathComponent)")
+            playHotClip(url: url, songID: song.id.rawValue)
+        } else {
+            print("[hotpreview] no preview URL resolved — falling back to full song")
+            playFullSong(song)
+        }
+    }
+
+    // Library songs from MusicLibraryRequest come back with empty
+    // previewAssets and nil isrc, so we bridge by searching the Apple Music
+    // catalog using title + artist and pick the best title/artist match.
+    private func resolveHotClipURL(for song: Song) async -> URL? {
+        if let url = song.previewAssets?.first?.url {
+            print("[hotpreview] direct previewAssets URL on song")
+            return url
+        }
+
+        if let isrc = song.isrc, !isrc.isEmpty {
+            do {
+                let request = MusicCatalogResourceRequest<Song>(matching: \.isrc, equalTo: isrc)
+                let response = try await request.response()
+                if let url = response.items.first?.previewAssets?.first?.url {
+                    print("[hotpreview] isrc lookup matched")
+                    return url
+                }
+            } catch {
+                print("[hotpreview] isrc lookup failed: \(error)")
+            }
+        }
+
+        let term = "\(song.title) \(song.artistName)"
+        do {
+            var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
+            request.limit = 10
+            let response = try await request.response()
+            let candidates = response.songs
+
+            let titleLower = song.title.lowercased()
+            let artistLower = song.artistName.lowercased()
+            let albumLower = song.albumTitle?.lowercased()
+
+            // Prefer an exact title+artist+album hit, then title+artist, then
+            // anything we can play a preview for.
+            let best = candidates.first(where: {
+                $0.title.lowercased() == titleLower &&
+                $0.artistName.lowercased() == artistLower &&
+                albumLower != nil &&
+                $0.albumTitle?.lowercased() == albumLower
+            }) ?? candidates.first(where: {
+                $0.title.lowercased() == titleLower &&
+                $0.artistName.lowercased() == artistLower
+            }) ?? candidates.first(where: { $0.previewAssets?.first?.url != nil })
+
+            if let url = best?.previewAssets?.first?.url {
+                print("[hotpreview] catalog search matched: \"\(best!.title)\" — \(best!.artistName)")
+                return url
+            }
+            print("[hotpreview] catalog search returned \(candidates.count) results, no usable preview")
+            return nil
+        } catch {
+            print("[hotpreview] catalog search failed: \(error)")
+            return nil
+        }
     }
 
     func stopPreview() {
@@ -358,7 +428,7 @@ final class MusicLibraryService {
 
     private func playFullSong(_ song: Song) {
         stopClipPlayer()
-        Task {
+        Task { @MainActor in
             do {
                 player.queue = ApplicationMusicPlayer.Queue(for: [song])
                 try await player.play()
@@ -376,6 +446,15 @@ final class MusicLibraryService {
         player.pause()
         stopClipPlayer()
 
+        // AVPlayer doesn't auto-configure the audio session the way
+        // ApplicationMusicPlayer does — without this the clip can be silent.
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("[hotpreview] audio session setup failed: \(error)")
+        }
+
         let item = AVPlayerItem(url: url)
         clipPlayer.replaceCurrentItem(with: item)
 
@@ -386,8 +465,9 @@ final class MusicLibraryService {
             object: item,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stopPreview()
+            guard let self else { return }
+            Task { @MainActor [self] in
+                self.stopPreview()
             }
         }
 

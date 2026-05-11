@@ -46,7 +46,10 @@ struct MusicSwipeView: View {
             flashUndo()
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
-            Task { await viewModel.rebuildMembershipIndex() }
+            Task {
+                await viewModel.rebuildMembershipIndex()
+                await viewModel.refreshUnsortedExclusion()
+            }
         }
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }

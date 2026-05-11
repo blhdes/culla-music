@@ -55,7 +55,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Playlist chips")
                 } footer: {
-                    Text("When swiping, the chips under each song show which playlists it's already in. Turn this on to also include editorial, replay, and auto-mix playlists.")
+                    Text("When swiping, the chips under each song show which playlists it's already in. Turn this on to also include editorial, replay, and auto-mix playlists — those songs will still appear in the unsorted deck for triage. When off, songs only in Apple-curated playlists are hidden from the unsorted deck too.")
                 }
 
                 Section {

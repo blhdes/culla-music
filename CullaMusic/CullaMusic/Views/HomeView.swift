@@ -29,7 +29,10 @@ final class HomeViewModel {
         let dateKey  = "music.unsortedCountDate"
         let fingerprintKey = "music.unsortedCountFingerprint"
         let today = todayString()
-        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
+        // Include the chip toggle in the fingerprint so flipping it invalidates
+        // the cached count — the exclusion scope changes with the toggle.
+        let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
+        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot):curated=\(chipToggleOn)"
         let cachedDate  = UserDefaults.standard.string(forKey: dateKey) ?? ""
         let cachedFingerprint = UserDefaults.standard.string(forKey: fingerprintKey) ?? ""
         let cachedCount = UserDefaults.standard.integer(forKey: cacheKey)
@@ -40,9 +43,11 @@ final class HomeViewModel {
         }
 
         do {
-            let editableIDs = try await MusicLibraryService.shared.fetchEditablePlaylistSongIDs()
+            let playlistIDs = try await MusicLibraryService.shared.fetchPlaylistSongIDs(
+                includeCurated: !chipToggleOn
+            )
             let sortedIDs = Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
-            let exclusion = editableIDs.union(sortedIDs)
+            let exclusion = playlistIDs.union(sortedIDs)
 
             var count = 0
             let pageSize = 100

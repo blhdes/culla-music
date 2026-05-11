@@ -276,11 +276,15 @@ final class MusicLibraryService {
 
     // MARK: - Unsorted Mode
 
-    /// Returns song IDs that belong to at least one user-controlled playlist.
-    /// Editorial / auto-generated kinds are excluded (songs only in those still
-    /// count as "unsorted" since the user didn't actively organise them).
+    /// Returns the set of song IDs that belong to at least one playlist. Used
+    /// to compute the unsorted-mode exclusion set. The `membershipIncludeCurated`
+    /// toggle drives which scope the caller asks for: when the toggle is on,
+    /// the user wants to engage with editorial / personalMix / replay playlists
+    /// (chips show them, songs in them are still triageable → editable-only),
+    /// when off they want them ignored everywhere (chips hide them, songs only
+    /// in them shouldn't appear in unsorted → include curated in the result).
     /// Caller must have called refreshUserPlaylists() first so the cache is warm.
-    func fetchEditablePlaylistSongIDs() async throws -> Set<String> {
+    func fetchPlaylistSongIDs(includeCurated: Bool) async throws -> Set<String> {
         if playlistCache.isEmpty {
             try await refreshUserPlaylists()
         }
@@ -288,7 +292,7 @@ final class MusicLibraryService {
         var songIDs = Set<String>()
 
         for playlist in playlistCache.values {
-            guard isUserControlled(playlist.kind) else { continue }
+            if !includeCurated, !isUserControlled(playlist.kind) { continue }
 
             // Explicit type annotation gives the compiler the context it needs to
             // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.
@@ -304,7 +308,7 @@ final class MusicLibraryService {
     /// Builds a per-song index of playlist memberships. Used by the swipe card
     /// to show which playlist(s) a song already belongs to.
     /// When `includeCurated` is false, editorial / personalMix / replay playlists
-    /// are skipped (same filter as `fetchEditablePlaylistSongIDs`).
+    /// are skipped (same filter as `fetchPlaylistSongIDs`).
     func fetchPlaylistMembershipIndex(includeCurated: Bool) async throws -> [String: [MusicItemID]] {
         if playlistCache.isEmpty {
             try await refreshUserPlaylists()

@@ -85,9 +85,17 @@ final class MusicSwipeViewModel {
                 populateQueue(with: songs)
 
             case .unsorted:
-                let editableIDs = try await service.fetchEditablePlaylistSongIDs()
+                // When the chip toggle is OFF, the user is ignoring Apple-curated
+                // playlists app-wide — so songs only in those playlists shouldn't
+                // appear in the unsorted deck either. Inverted: chip toggle ON
+                // means we keep only editable-playlist songs excluded, so curated-
+                // only songs remain triageable.
+                let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
+                let playlistSongIDs = try await service.fetchPlaylistSongIDs(
+                    includeCurated: !chipToggleOn
+                )
                 let sortedIDs = fetchSortedSongIDs()
-                sessionExclusionSet = editableIDs.union(sortedIDs)
+                sessionExclusionSet = playlistSongIDs.union(sortedIDs)
                 let songs = try await service.fetchNextLibrarySongs(
                     excluding: sessionExclusionSet,
                     desired: batchSize,
@@ -129,6 +137,25 @@ final class MusicSwipeViewModel {
             )
         } catch {
             print("rebuildMembershipIndex failed: \(error)")
+        }
+    }
+
+    /// Recomputes the exclusion set in unsorted mode after the toggle flips.
+    /// Future refills will respect the new scope; the currently-visible song
+    /// and the small in-flight queue stay as-is until naturally swiped, which
+    /// preserves the undo history.
+    @MainActor
+    func refreshUnsortedExclusion() async {
+        guard config.mode == .unsorted else { return }
+        do {
+            let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
+            let playlistSongIDs = try await service.fetchPlaylistSongIDs(
+                includeCurated: !chipToggleOn
+            )
+            let sortedIDs = fetchSortedSongIDs()
+            sessionExclusionSet = playlistSongIDs.union(sortedIDs)
+        } catch {
+            print("refreshUnsortedExclusion failed: \(error)")
         }
     }
 

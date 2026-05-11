@@ -6,6 +6,8 @@ struct MusicSwipeView: View {
     @Bindable var viewModel: MusicSwipeViewModel
     var onBack: (() -> Void)?
 
+    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
+
     // Drag state
     @State private var cardOffset: CGSize = .zero
     @State private var highlightedID: UUID?
@@ -42,6 +44,9 @@ struct MusicSwipeView: View {
         }
         .onChange(of: viewModel.actionHistory.count) { _, _ in
             flashUndo()
+        }
+        .onChange(of: membershipIncludeCurated) { _, _ in
+            Task { await viewModel.rebuildMembershipIndex() }
         }
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }
@@ -141,6 +146,7 @@ struct MusicSwipeView: View {
                     isPlaying: false,
                     playbackPosition: 0,
                     playbackDuration: 0,
+                    memberships: viewModel.playlistMemberships(for: next),
                     onTogglePlay: {},
                     onSeek: { _ in }
                 )
@@ -162,6 +168,7 @@ struct MusicSwipeView: View {
                     isPlaying: isPlayingThis,
                     playbackPosition: isPlayingThis ? service.playbackPosition : 0,
                     playbackDuration: isPlayingThis ? service.playbackDuration : 0,
+                    memberships: viewModel.playlistMemberships(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) }
                 )

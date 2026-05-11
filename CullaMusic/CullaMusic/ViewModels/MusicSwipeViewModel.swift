@@ -31,6 +31,10 @@ final class MusicSwipeViewModel {
     private(set) var sessionDismissedCount: Int = 0
     private(set) var sessionSkippedCount: Int = 0
 
+    /// Per-song Apple Music playlist memberships. Built once per session and
+    /// updated optimistically when the user sorts / undoes a sort.
+    private(set) var membershipIndex: [String: [MusicItemID]] = [:]
+
     private(set) var actionHistory: [SwipeAction] = []
     var canUndo: Bool { !actionHistory.isEmpty }
 
@@ -71,6 +75,7 @@ final class MusicSwipeViewModel {
         service.resetLibraryCursor()
 
         await syncPlaylistsFromAppleMusic()
+        await rebuildMembershipIndex()
 
         do {
             switch config.mode {
@@ -106,8 +111,41 @@ final class MusicSwipeViewModel {
         nextSong = nil
         songQueue.removeAll()
         sessionExclusionSet = []
+        membershipIndex = [:]
         isEmpty = false
         await loadInitial()
+    }
+
+    // MARK: - Playlist Membership Index
+
+    /// Builds the per-song playlist membership index from Apple Music.
+    /// Reads the `membershipIncludeCurated` toggle to decide whether to include
+    /// editorial / replay / personalMix playlists.
+    func rebuildMembershipIndex() async {
+        let includeCurated = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
+        do {
+            membershipIndex = try await service.fetchPlaylistMembershipIndex(
+                includeCurated: includeCurated
+            )
+        } catch {
+            print("rebuildMembershipIndex failed: \(error)")
+        }
+    }
+
+    /// Returns the local `Playlist` rows (sorted by displayOrder) that the
+    /// given song currently belongs to. Returns an empty array when the song
+    /// isn't in any tracked playlist.
+    func playlistMemberships(for song: Song) -> [Playlist] {
+        let ids = membershipIndex[song.id.rawValue] ?? []
+        guard !ids.isEmpty else { return [] }
+
+        let idStrings = Set(ids.map(\.rawValue))
+        return playlists
+            .filter {
+                guard let amID = $0.appleMusicPlaylistID else { return false }
+                return idStrings.contains(amID)
+            }
+            .sorted { $0.displayOrder < $1.displayOrder }
     }
 
     // MARK: - Playlists Sync
@@ -247,6 +285,7 @@ final class MusicSwipeViewModel {
                 originalDismissedAt: originalDismissedAt
             ))
             sessionSortedCount += 1
+            addMembership(songID: song.id.rawValue, playlistAMID: amID)
             toastMessage = "Added to \(playlist.name)"
             advance()
 
@@ -264,6 +303,7 @@ final class MusicSwipeViewModel {
         actionHistory.append(.sorted(song: song, playlist: playlist, record: record))
         sessionExclusionSet.insert(song.id.rawValue)
         sessionSortedCount += 1
+        addMembership(songID: song.id.rawValue, playlistAMID: amID)
         toastMessage = "Added to \(playlist.name)"
         advance()
 
@@ -319,6 +359,7 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
+            removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
             remoteRestoreToSourceIfNeeded(song: song, destinationPlaylist: playlist)
@@ -330,8 +371,27 @@ final class MusicSwipeViewModel {
             modelContext.insert(restored)
             try? modelContext.save()
             sessionSortedCount = max(sessionSortedCount - 1, 0)
+            removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
+        }
+    }
+
+    private func addMembership(songID: String, playlistAMID: MusicItemID) {
+        var current = membershipIndex[songID] ?? []
+        if !current.contains(playlistAMID) {
+            current.append(playlistAMID)
+            membershipIndex[songID] = current
+        }
+    }
+
+    private func removeMembership(songID: String, playlistAMID: String?) {
+        guard let playlistAMID, var current = membershipIndex[songID] else { return }
+        current.removeAll { $0.rawValue == playlistAMID }
+        if current.isEmpty {
+            membershipIndex.removeValue(forKey: songID)
+        } else {
+            membershipIndex[songID] = current
         }
     }
 

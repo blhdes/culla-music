@@ -288,17 +288,7 @@ final class MusicLibraryService {
         var songIDs = Set<String>()
 
         for playlist in playlistCache.values {
-            // Use Playlist.Kind instead of curatorName — Apple stamps the
-            // creating app's name into curatorName for third-party-created
-            // playlists, which would otherwise exclude Culla-created lists.
-            let isUserControlled: Bool
-            switch playlist.kind {
-            case .editorial, .personalMix, .replay:
-                isUserControlled = false
-            default:
-                isUserControlled = true
-            }
-            guard isUserControlled else { continue }
+            guard isUserControlled(playlist.kind) else { continue }
 
             // Explicit type annotation gives the compiler the context it needs to
             // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.
@@ -309,6 +299,41 @@ final class MusicLibraryService {
         }
 
         return songIDs
+    }
+
+    /// Builds a per-song index of playlist memberships. Used by the swipe card
+    /// to show which playlist(s) a song already belongs to.
+    /// When `includeCurated` is false, editorial / personalMix / replay playlists
+    /// are skipped (same filter as `fetchEditablePlaylistSongIDs`).
+    func fetchPlaylistMembershipIndex(includeCurated: Bool) async throws -> [String: [MusicItemID]] {
+        if playlistCache.isEmpty {
+            try await refreshUserPlaylists()
+        }
+
+        var index: [String: [MusicItemID]] = [:]
+
+        for playlist in playlistCache.values {
+            if !includeCurated, !isUserControlled(playlist.kind) { continue }
+
+            let populated: MusicKit.Playlist = try await playlist.with([.tracks])
+            for track in (populated.tracks ?? []) {
+                index[track.id.rawValue, default: []].append(playlist.id)
+            }
+        }
+
+        return index
+    }
+
+    // Apple stamps the creating app's name into curatorName for third-party-
+    // created playlists, so we rely on Playlist.Kind. Editorial / auto-generated
+    // kinds are not user-controlled; everything else is.
+    private func isUserControlled(_ kind: MusicKit.Playlist.Kind?) -> Bool {
+        switch kind {
+        case .editorial, .personalMix, .replay:
+            return false
+        default:
+            return true
+        }
     }
 
     // MARK: - Dismissed Mode

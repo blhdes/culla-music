@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
+    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
 
     var body: some View {
@@ -47,6 +48,14 @@ struct SettingsView: View {
                     Text("Behavior")
                 } footer: {
                     Text("Plays Apple Music's curated preview clip (~30s) instead of starting from the beginning. Falls back to the full song when no preview is available.")
+                }
+
+                Section {
+                    Toggle("Include Apple-curated playlists", isOn: $membershipIncludeCurated)
+                } header: {
+                    Text("Playlist chips")
+                } footer: {
+                    Text("When swiping, the chips under each song show which playlists it's already in. Turn this on to also include editorial, replay, and auto-mix playlists.")
                 }
 
                 Section {

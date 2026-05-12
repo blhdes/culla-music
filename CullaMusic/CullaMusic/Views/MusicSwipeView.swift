@@ -13,6 +13,9 @@ struct MusicSwipeView: View {
     @State private var highlightedID: UUID?
     @State private var playlistFrames: [UUID: CGRect] = [:]
 
+    // Long-press preview — fully reveals the sidebar while held
+    @State private var isLongPressing = false
+
     // Sheet
     @State private var showManageSheet = false
 
@@ -79,17 +82,19 @@ struct MusicSwipeView: View {
                         Haptics.skip()
                     }
                 }
-                .gesture(dragGesture)
+                .gesture(longPressGesture)
+                .highPriorityGesture(dragGesture)
                 .overlay {
+                    let progress = isLongPressing ? 1.0 : sidebarProgress
                     HStack(spacing: 0) {
                         Spacer()
                         PlaylistSidebarView(
                             playlists: viewModel.sidebarPlaylists,
                             highlightedID: highlightedID,
-                            dragProgress: sidebarProgress
+                            dragProgress: progress
                         )
                         .frame(width: geo.size.width * 0.8)
-                        .offset(x: (1.0 - sidebarProgress) * 80)
+                        .offset(x: (1.0 - progress) * 80)
                     }
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -184,6 +189,23 @@ struct MusicSwipeView: View {
         }
     }
 
+    // MARK: - Long Press
+
+    private var longPressGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.3)
+            .onEnded { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isLongPressing = true
+                }
+            }
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onEnded { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isLongPressing = false
+                }
+            }
+    }
+
     // MARK: - Drag
 
     private var dragGesture: some Gesture {
@@ -268,7 +290,8 @@ struct MusicSwipeView: View {
     }
 
     private var chromeOpacity: Double {
-        Double(1.0 - rightDragProgress)
+        if isLongPressing { return 0 }
+        return Double(1.0 - rightDragProgress)
     }
 
     private func findPlaylist(at point: CGPoint) -> UUID? {

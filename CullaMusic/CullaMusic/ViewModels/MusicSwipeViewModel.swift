@@ -194,11 +194,11 @@ final class MusicSwipeViewModel {
                 // Use Playlist.Kind to decide editability — curatorName is
                 // unreliable (Apple sometimes attributes user-created playlists
                 // to the user themselves, which would mark them read-only).
-                // Editorial / auto-generated kinds are read-only; user-shared
-                // and external kinds are user-controlled.
+                // Editorial / auto-generated / externally-shared kinds are
+                // read-only; everything else is user-controlled.
                 let editable: Bool
                 switch amPlaylist.kind {
-                case .editorial, .personalMix, .replay:
+                case .editorial, .external, .personalMix, .replay:
                     editable = false
                 default:
                     editable = true

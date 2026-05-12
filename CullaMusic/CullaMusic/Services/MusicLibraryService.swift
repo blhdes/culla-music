@@ -330,10 +330,10 @@ final class MusicLibraryService {
 
     // Apple stamps the creating app's name into curatorName for third-party-
     // created playlists, so we rely on Playlist.Kind. Editorial / auto-generated
-    // kinds are not user-controlled; everything else is.
+    // / externally-shared kinds are read-only; everything else is user-controlled.
     private func isUserControlled(_ kind: MusicKit.Playlist.Kind?) -> Bool {
         switch kind {
-        case .editorial, .personalMix, .replay:
+        case .editorial, .external, .personalMix, .replay:
             return false
         default:
             return true

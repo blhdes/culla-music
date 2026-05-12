@@ -51,11 +51,11 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Include Apple-curated playlists", isOn: $membershipIncludeCurated)
+                    Toggle("Include read-only playlists", isOn: $membershipIncludeCurated)
                 } header: {
-                    Text("Playlist chips")
+                    Text("Playlist scope")
                 } footer: {
-                    Text("When swiping, the chips under each song show which playlists it's already in. Turn this on to also include editorial, replay, and auto-mix playlists — those songs will still appear in the unsorted deck for triage. When off, songs only in Apple-curated playlists are hidden from the unsorted deck too.")
+                    Text("Show editorial, replay, auto-mix, and shared playlists in chips and Unsorted.")
                 }
 
                 Section {

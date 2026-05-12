@@ -18,9 +18,17 @@ final class HomeViewModel {
 
     func loadCounts() async {
         await syncPlaylistsFromAppleMusic()
-        let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
+        await recomputeUnsortedCount()
+    }
+
+    /// Recomputes (or reads from cache) the unsorted count. Safe to call after
+    /// the chip toggle flips — the fingerprint includes the toggle state, so
+    /// the cache will miss and force a fresh count.
+    func recomputeUnsortedCount() async {
+        let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
+        let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
 
         // Cache is invalidated by either a calendar-day rollover OR a change in
         // the local Sorted/Dismissed counts — so the count refreshes whenever
@@ -41,6 +49,10 @@ final class HomeViewModel {
             unsortedCount = cachedCount
             return
         }
+
+        // Cache miss — show the loader while we recompute so the user sees
+        // the count update isn't stuck on a stale value.
+        unsortedCount = nil
 
         do {
             let playlistIDs = try await MusicLibraryService.shared.fetchPlaylistSongIDs(
@@ -98,7 +110,7 @@ final class HomeViewModel {
             for amPlaylist in amPlaylists {
                 let editable: Bool
                 switch amPlaylist.kind {
-                case .editorial, .personalMix, .replay:
+                case .editorial, .external, .personalMix, .replay:
                     editable = false
                 default:
                     editable = true
@@ -148,6 +160,9 @@ struct HomeView: View {
     @State private var showSettings = false
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
+    // Observed so the unsorted count recomputes instantly when the toggle
+    // flips in Settings — without this, the change would only land on next launch.
+    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
 
     var body: some View {
         ZStack {
@@ -260,6 +275,9 @@ struct HomeView: View {
             if newValue != .library {
                 sourcePlaylistID = ""
             }
+        }
+        .onChange(of: membershipIncludeCurated) { _, _ in
+            Task { await homeVM?.recomputeUnsortedCount() }
         }
         .sheet(isPresented: $showSourcePicker) {
             SourcePlaylistPickerSheet(

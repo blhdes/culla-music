@@ -388,7 +388,7 @@ final class MusicLibraryService {
     private func playWithHotClipIfPossible(_ song: Song) async {
         if let url = await resolveHotClipURL(for: song) {
             print("[hotpreview] playing hot clip: \(url.lastPathComponent)")
-            playHotClip(url: url, songID: song.id.rawValue)
+            await playHotClip(url: url, songID: song.id.rawValue)
         } else {
             print("[hotpreview] no preview URL resolved — falling back to full song")
             playFullSong(song)
@@ -494,7 +494,7 @@ final class MusicLibraryService {
         }
     }
 
-    private func playHotClip(url: URL, songID: String) {
+    private func playHotClip(url: URL, songID: String) async {
         player.pause()
         stopClipPlayer()
         stopPositionObservers()
@@ -508,7 +508,9 @@ final class MusicLibraryService {
             print("[hotpreview] audio session setup failed: \(error)")
         }
 
-        let item = AVPlayerItem(url: url)
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        await applyFadeEnvelope(to: item, asset: asset)
         clipPlayer.replaceCurrentItem(with: item)
 
         // The 30s preview is a finite clip — when it reaches the end, treat it
@@ -532,6 +534,35 @@ final class MusicLibraryService {
         startClipPositionObserver()
     }
 
+    // Volume ramps on the player item so the preview doesn't click at the
+    // boundaries. Must be applied before play() so the first frames ramp from 0.
+    private func applyFadeEnvelope(to item: AVPlayerItem, asset: AVURLAsset) async {
+        let fade = CMTime(seconds: 0.6, preferredTimescale: 600)
+        do {
+            let duration = try await asset.load(.duration)
+            let tracks = try await asset.loadTracks(withMediaType: .audio)
+            guard let track = tracks.first,
+                  duration.isNumeric,
+                  duration.seconds > fade.seconds * 2 else { return }
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.setVolumeRamp(
+                fromStartVolume: 0.0,
+                toEndVolume: 1.0,
+                timeRange: CMTimeRange(start: .zero, duration: fade)
+            )
+            params.setVolumeRamp(
+                fromStartVolume: 1.0,
+                toEndVolume: 0.0,
+                timeRange: CMTimeRange(start: CMTimeSubtract(duration, fade), duration: fade)
+            )
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = mix
+        } catch {
+            print("[hotpreview] fade envelope setup failed: \(error)")
+        }
+    }
+
     private func stopClipPlayer() {
         if let token = clipEndObserver {
             NotificationCenter.default.removeObserver(token)
@@ -547,11 +578,15 @@ final class MusicLibraryService {
             forInterval: interval,
             queue: .main
         ) { [weak self] time in
-            guard let self else { return }
-            self.playbackPosition = time.seconds
-            if let dur = self.clipPlayer.currentItem?.duration,
-               dur.isNumeric, dur.seconds > 0 {
-                self.playbackDuration = dur.seconds
+            // queue: .main guarantees this runs on the main thread, but the
+            // closure type is @Sendable so the compiler can't infer it.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.playbackPosition = time.seconds
+                if let dur = self.clipPlayer.currentItem?.duration,
+                   dur.isNumeric, dur.seconds > 0 {
+                    self.playbackDuration = dur.seconds
+                }
             }
         }
     }

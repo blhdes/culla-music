@@ -7,6 +7,8 @@ struct PlaylistSidebarView: View {
     let highlightedID: UUID?
     let dragProgress: CGFloat
 
+    @Environment(\.appAccentSecondary) private var accentSecondary
+
     private var isDragging: Bool { dragProgress > 0 }
 
     var body: some View {
@@ -33,9 +35,25 @@ struct PlaylistSidebarView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(panelTint)
             }
         }
         .opacity(Double(dragProgress))
+    }
+
+    /// Very faint top-to-bottom wash using the secondary accent — gives the
+    /// sidebar panel a tint that's tied to the song without competing with
+    /// the drop-target glow on individual rows.
+    @ViewBuilder
+    private var panelTint: some View {
+        if let accentSecondary {
+            LinearGradient(
+                colors: [accentSecondary.opacity(0.10), accentSecondary.opacity(0.04)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        }
     }
 
     private var emptyState: some View {
@@ -72,6 +90,7 @@ struct PlaylistSidebarItem: View {
     let dragProgress: CGFloat
 
     @Environment(\.appAccent) private var appAccent
+    @Environment(\.appAccentSecondary) private var appAccentSecondary
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -80,8 +99,14 @@ struct PlaylistSidebarItem: View {
                 .opacity(Double(dragProgress))
 
             // Soft accent highlight when this row is the drop target — neutral elsewhere.
-            appAccent
-                .opacity(isHighlighted ? 0.6 : 0)
+            // Gradient between the song's primary + secondary tones for richness;
+            // collapses to a flat fill when no secondary is present.
+            LinearGradient(
+                colors: [appAccent, appAccentSecondary ?? appAccent],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .opacity(isHighlighted ? 0.6 : 0)
 
             HStack(spacing: 12) {
                 PlaylistCoverView(

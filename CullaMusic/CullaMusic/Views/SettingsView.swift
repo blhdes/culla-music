@@ -5,6 +5,7 @@ struct SettingsView: View {
 
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
+    @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
@@ -13,7 +14,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Appearance") {
+                Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Theme")
                             .font(.subheadline)
@@ -28,6 +29,7 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
 
                     VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Match song artwork", isOn: $useDynamicAccent)
                         Text("Sidebar accent")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -37,8 +39,13 @@ struct SettingsView: View {
                             }
                             Spacer()
                         }
+                        .opacity(useDynamicAccent ? 0.5 : 1.0)
                     }
                     .padding(.vertical, 4)
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("Pulls the sidebar accent from the current song's cover art. Falls back to the palette above when off.")
                 }
 
                 Section {

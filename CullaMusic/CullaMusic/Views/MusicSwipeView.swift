@@ -7,6 +7,13 @@ struct MusicSwipeView: View {
     var onBack: (() -> Void)?
 
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
+    @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
+
+    @Environment(\.appAccent) private var paletteAccent
+
+    // Dynamic accent pair sampled from the current song's artwork. Nil → fall
+    // back to the palette accent so the UI never goes uncolored.
+    @State private var dynamicAccent: ArtworkAccent?
 
     // Drag state
     @State private var cardOffset: CGSize = .zero
@@ -42,8 +49,20 @@ struct MusicSwipeView: View {
         }
         .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
+        .environment(\.appAccent, effectiveAccent.primary)
+        .environment(\.appAccentSecondary, effectiveAccent.secondary)
         .sheet(isPresented: $showManageSheet) {
             ManagePlaylistsSheet(viewModel: viewModel)
+        }
+        .task(id: viewModel.currentSong?.id.rawValue) {
+            await refreshDynamicAccent()
+        }
+        .onChange(of: useDynamicAccent) { _, enabled in
+            if !enabled {
+                withAnimation(.easeInOut(duration: 0.35)) { dynamicAccent = nil }
+            } else {
+                Task { await refreshDynamicAccent() }
+            }
         }
         .onChange(of: viewModel.actionHistory.count) { _, _ in
             flashUndo()
@@ -272,6 +291,23 @@ struct MusicSwipeView: View {
             cardOffset = .zero
         }
         highlightedID = nil
+    }
+
+    // MARK: - Dynamic accent
+
+    private var effectiveAccent: ArtworkAccent {
+        if useDynamicAccent, let dynamicAccent { return dynamicAccent }
+        return .flat(paletteAccent)
+    }
+
+    private func refreshDynamicAccent() async {
+        guard useDynamicAccent, let song = viewModel.currentSong else { return }
+        let extracted = await AccentExtractor.shared.accent(for: song)
+        // Bail if the song changed under us while we were sampling.
+        guard viewModel.currentSong?.id.rawValue == song.id.rawValue else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            dynamicAccent = extracted
+        }
     }
 
     // MARK: - Helpers

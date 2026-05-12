@@ -437,7 +437,7 @@ private struct ModeCard: View {
 
                 Group {
                     if isLoadingCount {
-                        ProgressView().scaleEffect(0.7)
+                        LinearLoader()
                     } else if let count {
                         Text(count.formatted())
                             .font(.subheadline.weight(.medium))

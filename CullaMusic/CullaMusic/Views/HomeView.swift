@@ -8,6 +8,7 @@ import MusicKit
 final class HomeViewModel {
     var dismissedCount: Int = 0
     var unsortedCount: Int? = nil   // nil = computing
+    var libraryCount: Int? = nil    // nil = computing
     var playlists: [Playlist] = []
 
     private let modelContext: ModelContext
@@ -20,48 +21,64 @@ final class HomeViewModel {
         await syncPlaylistsFromAppleMusic()
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
-        await recomputeUnsortedCount()
+        await recomputeCounts()
     }
 
-    /// Recomputes (or reads from cache) the unsorted count. Safe to call after
-    /// the chip toggle flips — the fingerprint includes the toggle state, so
-    /// the cache will miss and force a fresh count.
-    func recomputeUnsortedCount() async {
+    /// Recomputes (or reads from cache) the library and unsorted counts. Both
+    /// modes need to walk the full library on a cache miss, so we do it in a
+    /// single pass and tally each count from the same iteration.
+    ///
+    /// Library cache is fingerprinted by Sorted/Dismissed counts + calendar
+    /// day. Unsorted adds the chip toggle to its fingerprint, so flipping the
+    /// toggle invalidates only the unsorted slot — the library cache stays warm.
+    func recomputeCounts() async {
         let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
-
-        // Cache is invalidated by either a calendar-day rollover OR a change in
-        // the local Sorted/Dismissed counts — so the count refreshes whenever
-        // the user has actually done something in Culla, not just once per day.
-        let cacheKey = "music.unsortedCountCached"
-        let dateKey  = "music.unsortedCountDate"
-        let fingerprintKey = "music.unsortedCountFingerprint"
         let today = todayString()
-        // Include the chip toggle in the fingerprint so flipping it invalidates
-        // the cached count — the exclusion scope changes with the toggle.
         let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
-        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot):curated=\(chipToggleOn)"
-        let cachedDate  = UserDefaults.standard.string(forKey: dateKey) ?? ""
-        let cachedFingerprint = UserDefaults.standard.string(forKey: fingerprintKey) ?? ""
-        let cachedCount = UserDefaults.standard.integer(forKey: cacheKey)
 
-        if cachedDate == today, cachedFingerprint == fingerprint {
-            unsortedCount = cachedCount
-            return
-        }
+        // Library cache — count is unaffected by the chip toggle.
+        let libraryFingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
+        let libraryCachedDate = UserDefaults.standard.string(forKey: "music.libraryCountDate") ?? ""
+        let libraryCachedFP = UserDefaults.standard.string(forKey: "music.libraryCountFingerprint") ?? ""
+        let libraryCachedValue = UserDefaults.standard.integer(forKey: "music.libraryCountCached")
+        let libraryFresh = (libraryCachedDate == today && libraryCachedFP == libraryFingerprint)
 
-        // Cache miss — show the loader while we recompute so the user sees
-        // the count update isn't stuck on a stale value.
-        unsortedCount = nil
+        // Unsorted cache — toggle-aware, so the scope swap forces a refetch.
+        let unsortedFingerprint = "\(sortedSnapshot):\(dismissedSnapshot):curated=\(chipToggleOn)"
+        let unsortedCachedDate = UserDefaults.standard.string(forKey: "music.unsortedCountDate") ?? ""
+        let unsortedCachedFP = UserDefaults.standard.string(forKey: "music.unsortedCountFingerprint") ?? ""
+        let unsortedCachedValue = UserDefaults.standard.integer(forKey: "music.unsortedCountCached")
+        let unsortedFresh = (unsortedCachedDate == today && unsortedCachedFP == unsortedFingerprint)
+
+        if libraryFresh { libraryCount = libraryCachedValue }
+        if unsortedFresh { unsortedCount = unsortedCachedValue }
+
+        guard !libraryFresh || !unsortedFresh else { return }
+
+        // Cache miss — show the loader for whichever slot is stale so the user
+        // sees the count update isn't stuck on a stale value.
+        if !libraryFresh { libraryCount = nil }
+        if !unsortedFresh { unsortedCount = nil }
 
         do {
-            let playlistIDs = try await MusicLibraryService.shared.fetchPlaylistSongIDs(
-                includeCurated: !chipToggleOn
-            )
+            // Only fetch playlist memberships when unsorted needs them — saves
+            // the round-trip on a toggle-only or library-only invalidation.
+            let playlistIDs: Set<String>
+            if !unsortedFresh {
+                playlistIDs = try await MusicLibraryService.shared.fetchPlaylistSongIDs(
+                    includeCurated: !chipToggleOn
+                )
+            } else {
+                playlistIDs = []
+            }
             let sortedIDs = Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
-            let exclusion = playlistIDs.union(sortedIDs)
+            let dismissedIDs = Set((try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? [])
+            let unsortedExclusion = playlistIDs.union(sortedIDs)
+            let libraryExclusion = sortedIDs.union(dismissedIDs)
 
-            var count = 0
+            var libCount = 0
+            var unsCount = 0
             let pageSize = 100
             var offset = 0
 
@@ -72,20 +89,34 @@ final class HomeViewModel {
                 let response = try await request.response()
                 let page = response.items
 
-                for song in page where !exclusion.contains(song.id.rawValue) {
-                    count += 1
+                for song in page {
+                    let id = song.id.rawValue
+                    if !libraryFresh, !libraryExclusion.contains(id) {
+                        libCount += 1
+                    }
+                    if !unsortedFresh, !unsortedExclusion.contains(id) {
+                        unsCount += 1
+                    }
                 }
 
                 offset += page.count
                 if page.count < pageSize { break }
             }
 
-            unsortedCount = count
-            UserDefaults.standard.set(count, forKey: cacheKey)
-            UserDefaults.standard.set(today, forKey: dateKey)
-            UserDefaults.standard.set(fingerprint, forKey: fingerprintKey)
+            if !libraryFresh {
+                libraryCount = libCount
+                UserDefaults.standard.set(libCount, forKey: "music.libraryCountCached")
+                UserDefaults.standard.set(today, forKey: "music.libraryCountDate")
+                UserDefaults.standard.set(libraryFingerprint, forKey: "music.libraryCountFingerprint")
+            }
+            if !unsortedFresh {
+                unsortedCount = unsCount
+                UserDefaults.standard.set(unsCount, forKey: "music.unsortedCountCached")
+                UserDefaults.standard.set(today, forKey: "music.unsortedCountDate")
+                UserDefaults.standard.set(unsortedFingerprint, forKey: "music.unsortedCountFingerprint")
+            }
         } catch {
-            print("Unsorted count failed: \(error)")
+            print("Recompute counts failed: \(error)")
         }
     }
 
@@ -277,7 +308,7 @@ struct HomeView: View {
             }
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
-            Task { await homeVM?.recomputeUnsortedCount() }
+            Task { await homeVM?.recomputeCounts() }
         }
         .sheet(isPresented: $showSourcePicker) {
             SourcePlaylistPickerSheet(
@@ -359,7 +390,7 @@ struct HomeView: View {
     private func count(for mode: ReviewMode) -> Int? {
         guard let vm = homeVM else { return nil }
         switch mode {
-        case .library:   return nil
+        case .library:   return vm.libraryCount
         case .unsorted:  return vm.unsortedCount
         case .dismissed: return vm.dismissedCount
         }
@@ -368,7 +399,7 @@ struct HomeView: View {
     private func isLoadingCount(for mode: ReviewMode) -> Bool {
         guard homeVM != nil else { return false }
         switch mode {
-        case .library:   return false
+        case .library:   return homeVM?.libraryCount == nil
         case .unsorted:  return homeVM?.unsortedCount == nil
         case .dismissed: return false
         }

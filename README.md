@@ -12,12 +12,13 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
   - **Library** — full library minus what the app has already touched.
   - **Unsorted** — songs not in any of your personal playlists (editorial / replay / personalMix / external are hidden by default).
   - **Dismissed** — the rejected pile, with an un-dismiss path.
-- **Source playlist sorting** — point the deck at a specific playlist, then **COPY** songs into other playlists or **MOVE** them out as you go.
+- **Source playlist sorting** — point the deck at a specific playlist, then **COPY** songs into other playlists or **MOVE** them out as you go. Read-only sources (Apple-curated, shared, smart Favorites) are allowed too, locked to copy.
+- **Up-swipe = Loved** — pull a card upward to drop the song into a "Loved" playlist. Defaults to a Culla-created *Culla Loves* (auto-created on first up-swipe); any of your own playlists can be picked as the target in Settings.
 - **Hot-clip preview** (optional) — plays Apple Music's curated ~30s preview instead of streaming from 0:00. Faster triage, no 20-second intro to skip.
 - **Scrubbable progress bar** with haptic ticks; cross-fades on track change.
-- **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed.
-- **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, author-name override for created playlists, read-only-playlist scope toggle.
-- **Undo history** — every swipe is reversible, including the playlist write on Apple Music's side.
+- **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed. The Loved chip is marked with a ♥.
+- **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, author-name override for created playlists, read-only-playlist scope toggle, up-swipe Loved-playlist target.
+- **Undo history** — every swipe is reversible, including the playlist write on Apple Music's side. Failed remote writes roll back the local state too, so a swipe that didn't reach Apple Music leaves no trace.
 
 ---
 

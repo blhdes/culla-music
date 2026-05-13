@@ -33,7 +33,7 @@ struct PlaylistMembershipChips: View {
     @ViewBuilder
     private func chip(for playlist: Playlist) -> some View {
         let isLoved = !lovedPlaylistID.isEmpty
-            && playlist.id.uuidString == lovedPlaylistID
+            && playlist.appleMusicPlaylistID == lovedPlaylistID
 
         HStack(spacing: 3) {
             if isLoved {

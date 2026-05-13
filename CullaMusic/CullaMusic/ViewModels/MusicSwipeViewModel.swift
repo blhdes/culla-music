@@ -411,15 +411,16 @@ final class MusicSwipeViewModel {
         }
     }
 
-    /// Returns the configured loved-playlist (matching `lovedPlaylistID` in
-    /// UserDefaults). Creates "Culla Loves" on first call. Returns nil only if
-    /// playlist creation itself fails — the caller surfaces a toast.
+    /// Returns the configured loved-playlist (matching `lovedPlaylistID` —
+    /// the Apple Music playlist ID — in UserDefaults). Creates "Culla Loves"
+    /// on first call or when the stored target no longer exists. Returns nil
+    /// only if creation itself fails; the caller surfaces a toast.
     @MainActor
     private func resolveOrCreateLovedPlaylist() async -> Playlist? {
         let defaults = UserDefaults.standard
         if let stored = defaults.string(forKey: lovedPlaylistDefaultsKey),
-           let storedUUID = UUID(uuidString: stored),
-           let match = playlists.first(where: { $0.id == storedUUID }) {
+           !stored.isEmpty,
+           let match = playlists.first(where: { $0.appleMusicPlaylistID == stored }) {
             return match
         }
 
@@ -437,7 +438,7 @@ final class MusicSwipeViewModel {
             modelContext.insert(local)
             try? modelContext.save()
             playlists = fetchLocalPlaylists()
-            defaults.set(local.id.uuidString, forKey: lovedPlaylistDefaultsKey)
+            defaults.set(amPlaylist.id.rawValue, forKey: lovedPlaylistDefaultsKey)
             return local
         } catch {
             return nil
@@ -681,8 +682,8 @@ enum SwipeAction {
     case loved(song: Song, playlist: Playlist, record: SortedSong)
 }
 
-/// Key under which the loved-playlist's local UUID is persisted. Stored as a
-/// string so the future Settings picker can read/write it without any
-/// type coupling.
+/// Key under which the loved-playlist's Apple Music ID is persisted. Stored
+/// as a string so the Settings picker can read/write it without any type
+/// coupling — empty string means "auto-create Culla Loves on first up-swipe".
 private let lovedPlaylistDefaultsKey = "lovedPlaylistID"
 private let defaultLovedPlaylistName = "Culla Loves"

@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -10,6 +11,20 @@ struct SettingsView: View {
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
+    @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+
+    @Query(sort: \Playlist.displayOrder) private var allPlaylists: [Playlist]
+
+    @State private var showLovedPicker = false
+
+    private var pickablePlaylists: [Playlist] {
+        allPlaylists.filter { $0.isEditable && $0.appleMusicPlaylistID != nil }
+    }
+
+    private var selectedLovedPlaylist: Playlist? {
+        guard !lovedPlaylistID.isEmpty else { return nil }
+        return pickablePlaylists.first { $0.appleMusicPlaylistID == lovedPlaylistID }
+    }
 
     var body: some View {
         NavigationStack {
@@ -66,6 +81,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    lovedTargetRow
+                } header: {
+                    Text("Up-swipe")
+                } footer: {
+                    Text("Up-swipe on a song adds it to this playlist. Leave on Auto to use a \"Culla Loves\" playlist Culla creates for you.")
+                }
+
+                Section {
                     TextField("Your name", text: $authorDisplayName)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled(true)
@@ -83,7 +106,37 @@ struct SettingsView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .sheet(isPresented: $showLovedPicker) {
+                LovedPlaylistPickerSheet(
+                    playlists: pickablePlaylists,
+                    selectedID: lovedPlaylistID
+                ) { picked in
+                    lovedPlaylistID = picked?.appleMusicPlaylistID ?? ""
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private var lovedTargetRow: some View {
+        Button {
+            showLovedPicker = true
+        } label: {
+            HStack {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.pink)
+                Text("Loved playlist")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(selectedLovedPlaylist?.name ?? "Auto")
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

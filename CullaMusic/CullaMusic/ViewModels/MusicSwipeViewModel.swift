@@ -396,6 +396,7 @@ final class MusicSwipeViewModel {
             let record = SortedSong(songID: song.id.rawValue, playlist: playlist)
             modelContext.insert(record)
             try? modelContext.save()
+            let recordID = record.id
             actionHistory.append(.loved(song: song, playlist: playlist, record: record))
             sessionExclusionSet.insert(song.id.rawValue)
             sessionSortedCount += 1
@@ -406,9 +407,45 @@ final class MusicSwipeViewModel {
             do {
                 try await service.addSong(song, toPlaylistID: amID)
             } catch {
+                // Some playlists (Apple Music's smart Favorites, anything
+                // Apple marks read-only) reject programmatic writes. Without
+                // rolling back the local SortedSong, the song silently
+                // disappears from the library deck next session — we treat
+                // SortedSong membership as "permanently sorted".
+                rollbackLoved(
+                    songID: song.id.rawValue,
+                    recordID: recordID,
+                    playlistAMID: amID
+                )
                 toastMessage = "Couldn't add to \(playlist.name)"
             }
         }
+    }
+
+    /// Reverses every side-effect of an optimistic `loveCurrent` write when
+    /// the Apple Music call fails. Removes the action from history first so
+    /// the soon-to-be-deleted SortedSong reference doesn't outlive its row.
+    private func rollbackLoved(
+        songID: String,
+        recordID: UUID,
+        playlistAMID: MusicItemID
+    ) {
+        actionHistory.removeAll { action in
+            if case .loved(_, _, let r) = action { return r.id == recordID }
+            return false
+        }
+
+        let descriptor = FetchDescriptor<SortedSong>(
+            predicate: #Predicate { $0.id == recordID }
+        )
+        if let row = (try? modelContext.fetch(descriptor))?.first {
+            modelContext.delete(row)
+            try? modelContext.save()
+        }
+
+        sessionExclusionSet.remove(songID)
+        sessionSortedCount = max(sessionSortedCount - 1, 0)
+        removeMembership(songID: songID, playlistAMID: playlistAMID.rawValue)
     }
 
     /// Returns the configured loved-playlist (matching `lovedPlaylistID` —

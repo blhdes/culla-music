@@ -263,8 +263,12 @@ struct HomeView: View {
 
                 Button {
                     let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
-                    let transferMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
+                    let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
                     let source = selectedMode == .library ? selectedSourcePlaylist : nil
+                    // Force `.copy` for read-only sources — we can't remove
+                    // from Apple-curated, smart Favorites, or shared playlists.
+                    let transferMode: SourceTransferMode =
+                        (source?.isEditable ?? true) ? storedMode : .copy
                     onStart(SwipeConfig(
                         mode: selectedMode,
                         order: order,
@@ -327,12 +331,20 @@ struct HomeView: View {
 
     private var sourcePlaylists: [Playlist] {
         (homeVM?.playlists ?? [])
-            .filter { $0.isEditable && $0.appleMusicPlaylistID != nil }
+            .filter { $0.appleMusicPlaylistID != nil }
             .sorted { $0.displayOrder < $1.displayOrder }
     }
 
     private var selectedSourcePlaylist: Playlist? {
         sourcePlaylists.first { $0.appleMusicPlaylistID == sourcePlaylistID }
+    }
+
+    /// True when the user has picked a Sort From source that we can't remove
+    /// songs from (Apple-curated, smart Favorites, shared-by-others, etc.).
+    /// Forces the transfer mode to `.copy` so we never attempt a doomed write.
+    private var selectedSourceIsReadOnly: Bool {
+        guard let p = selectedSourcePlaylist else { return false }
+        return !p.isEditable
     }
 
     private var sourceFilterButton: some View {
@@ -367,9 +379,15 @@ struct HomeView: View {
     }
 
     private var sourceTransferPicker: some View {
-        VStack(spacing: 6) {
+        // For read-only sources the picker is forced to Keep — Apple doesn't
+        // let us remove songs from those, so Move would silently fail.
+        let isReadOnly = selectedSourceIsReadOnly
+        let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
+        let displayMode: SourceTransferMode = isReadOnly ? .copy : storedMode
+
+        return VStack(spacing: 6) {
             Picker("Source behavior", selection: Binding(
-                get: { SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy },
+                get: { displayMode },
                 set: { sourceTransferModeRaw = $0.rawValue }
             )) {
                 ForEach(SourceTransferMode.allCases, id: \.self) { mode in
@@ -377,14 +395,22 @@ struct HomeView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .disabled(isReadOnly)
 
-            Text((SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy) == .copy
-                 ? "Sorted songs stay in the source playlist too."
-                 : "Sorted songs are removed from the source playlist.")
+            Text(transferModeFooter(isReadOnly: isReadOnly, mode: displayMode))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 24)
+    }
+
+    private func transferModeFooter(isReadOnly: Bool, mode: SourceTransferMode) -> String {
+        if isReadOnly {
+            return "This playlist is read-only — sorted songs stay where they are."
+        }
+        return mode == .copy
+            ? "Sorted songs stay in the source playlist too."
+            : "Sorted songs are removed from the source playlist."
     }
 
     private func count(for mode: ReviewMode) -> Int? {

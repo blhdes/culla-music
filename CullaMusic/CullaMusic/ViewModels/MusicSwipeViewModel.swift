@@ -191,28 +191,32 @@ final class MusicSwipeViewModel {
 
             for amPlaylist in amPlaylists {
                 let amID = amPlaylist.id.rawValue
-                // Use Playlist.Kind to decide editability — curatorName is
-                // unreliable (Apple sometimes attributes user-created playlists
-                // to the user themselves, which would mark them read-only).
-                // Editorial / auto-generated / externally-shared kinds are
-                // read-only; everything else is user-controlled.
+                // Editorial / personalMix / replay / external are Apple-managed
+                // and read-only. The smart Favorites playlist is detected by
+                // name across locales (no metadata fingerprint distinguishes it
+                // from a user-made playlist).
                 let editable: Bool
                 switch amPlaylist.kind {
                 case .editorial, .external, .personalMix, .replay:
                     editable = false
                 default:
-                    editable = true
+                    editable = !smartFavoritesNames.contains(amPlaylist.name)
                 }
 
                 if let existing = localByAMID[amID] {
-                    // Preserve isEditable=true; only re-apply the signal to
-                    // records that were previously read-only. This auto-repairs
-                    // playlists that were wrongly downgraded by the old
-                    // curatorName-based check.
-                    if !existing.isEditable {
-                        existing.isEditable = editable
-                    }
+                    let wasEditable = existing.isEditable
+                    existing.isEditable = editable
                     existing.name = amPlaylist.name
+
+                    // Downgrade transition: heal stale UI state pointing at a
+                    // playlist we now know we can't write to.
+                    if wasEditable && !editable {
+                        if existing.isInSidebar { existing.isInSidebar = false }
+                        let defaults = UserDefaults.standard
+                        if defaults.string(forKey: lovedPlaylistDefaultsKey) == amID {
+                            defaults.removeObject(forKey: lovedPlaylistDefaultsKey)
+                        }
+                    }
                 } else {
                     let row = Playlist(
                         name: amPlaylist.name,
@@ -724,3 +728,29 @@ enum SwipeAction {
 /// coupling — empty string means "auto-create Culla Loves on first up-swipe".
 private let lovedPlaylistDefaultsKey = "lovedPlaylistID"
 private let defaultLovedPlaylistName = "Culla Loves"
+
+/// Apple's system "Favorite Songs" playlist (populated by the heart button)
+/// surfaces through `MusicLibraryRequest<Playlist>` with `kind=nil` and
+/// `curatorName=nil` — the same signature as a user-created playlist. The
+/// only stable signal is the localized name. Programmatic adds via
+/// `MusicLibrary.shared.add(...)` fail silently for it, so we hide it from
+/// pickers / sidebar and force "keep" if it's used as a Sort From source.
+/// New locales can be added here as we discover them.
+private let smartFavoritesNames: Set<String> = [
+    "Favorite Songs",         // en
+    "Favorites",              // en (alt / older)
+    "Canciones favoritas",    // es
+    "Morceaux favoris",       // fr
+    "Titres favoris",         // fr (alt)
+    "Lieblingstitel",         // de
+    "Lieblingssongs",         // de (alt)
+    "Brani preferiti",        // it
+    "Canzoni preferite",      // it (alt)
+    "Músicas favoritas",      // pt
+    "お気に入りの曲",            // ja
+    "좋아하는 노래",             // ko
+    "喜爱的歌曲",                // zh-Hans
+    "喜愛的歌曲",                // zh-Hant
+    "Любимые песни",           // ru
+    "Favoriete nummers",      // nl
+]

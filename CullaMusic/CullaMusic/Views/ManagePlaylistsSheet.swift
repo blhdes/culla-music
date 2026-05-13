@@ -10,6 +10,10 @@ struct ManagePlaylistsSheet: View {
 
     private var maxSidebar: Int { MusicSwipeViewModel.maxSidebar }
 
+    private var editablePlaylists: [Playlist] {
+        viewModel.playlists.filter(\.isEditable)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -22,11 +26,11 @@ struct ManagePlaylistsSheet: View {
                 }
 
                 Section {
-                    if viewModel.playlists.isEmpty {
+                    if editablePlaylists.isEmpty {
                         Text("No playlists yet — create one above.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(viewModel.playlists, id: \.id) { playlist in
+                        ForEach(editablePlaylists, id: \.id) { playlist in
                             row(for: playlist)
                         }
                     }
@@ -64,8 +68,7 @@ struct ManagePlaylistsSheet: View {
     @ViewBuilder
     private func row(for playlist: Playlist) -> some View {
         let isOn = playlist.isInSidebar
-        let isEditable = playlist.isEditable
-        let canEnable = isEditable && viewModel.canAddToSidebar
+        let canEnable = viewModel.canAddToSidebar
         let isTappable = isOn || canEnable
 
         Button {
@@ -78,15 +81,8 @@ struct ManagePlaylistsSheet: View {
             HStack(spacing: 12) {
                 PlaylistCoverView(appleMusicPlaylistID: playlist.appleMusicPlaylistID)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(playlist.name)
-                        .foregroundStyle(.primary)
-                    if !isEditable {
-                        Text("Read-only")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(playlist.name)
+                    .foregroundStyle(.primary)
 
                 Spacer()
 

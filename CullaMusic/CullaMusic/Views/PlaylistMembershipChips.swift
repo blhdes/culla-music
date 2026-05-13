@@ -4,13 +4,15 @@ struct PlaylistMembershipChips: View {
     let playlists: [Playlist]
     var maxVisible: Int = 3
 
+    @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+
     var body: some View {
         if playlists.isEmpty {
             EmptyView()
         } else {
             HStack(spacing: 6) {
                 ForEach(visiblePlaylists, id: \.id) { playlist in
-                    chip(text: playlist.name)
+                    chip(for: playlist)
                 }
                 if overflowCount > 0 {
                     chip(text: "+\(overflowCount)")
@@ -26,6 +28,27 @@ struct PlaylistMembershipChips: View {
 
     private var overflowCount: Int {
         max(playlists.count - maxVisible, 0)
+    }
+
+    @ViewBuilder
+    private func chip(for playlist: Playlist) -> some View {
+        let isLoved = !lovedPlaylistID.isEmpty
+            && playlist.id.uuidString == lovedPlaylistID
+
+        HStack(spacing: 3) {
+            if isLoved {
+                Image(systemName: "heart.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.pink)
+            }
+            Text(playlist.name)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(.quaternary, in: Capsule())
     }
 
     private func chip(text: String) -> some View {

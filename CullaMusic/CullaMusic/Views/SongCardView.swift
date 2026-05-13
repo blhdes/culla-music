@@ -158,11 +158,24 @@ struct SongCardView: View {
 
     @ViewBuilder
     private var swipeOverlay: some View {
-        if offset.width < 0 {
+        // Dominant-axis gating mirrors the gesture's direction lock so the
+        // overlays don't double up on diagonal drags.
+        let horizontalDominant = abs(offset.width) >= abs(offset.height)
+
+        if horizontalDominant, offset.width < 0 {
             let progress = min(abs(offset.width) / swipeThreshold, 1.0)
             ZStack {
                 Color.red.opacity(0.25 * progress)
                 Image(systemName: "trash.fill")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.white.opacity(0.8 * progress))
+            }
+            .allowsHitTesting(false)
+        } else if !horizontalDominant, offset.height < 0 {
+            let progress = min(abs(offset.height) / swipeThreshold, 1.0)
+            ZStack {
+                Color.pink.opacity(0.25 * progress)
+                Image(systemName: "heart.fill")
                     .font(.system(size: 60))
                     .foregroundStyle(.white.opacity(0.8 * progress))
             }

@@ -364,6 +364,86 @@ final class MusicSwipeViewModel {
         }
     }
 
+    // MARK: - Loved (up-swipe)
+
+    /// Up-swipe target. Mirrors `assignToPlaylist` but resolves the destination
+    /// from the persisted `lovedPlaylistID` (auto-creates "Culla Loves" the
+    /// first time). Returns immediately if the song already belongs to the
+    /// loved playlist, so a stray second up-swipe no-ops gracefully.
+    func loveCurrent() {
+        guard let song = currentSong else { return }
+
+        Task { @MainActor in
+            guard let playlist = await resolveOrCreateLovedPlaylist() else {
+                toastMessage = "Couldn't open Loved playlist"
+                return
+            }
+
+            guard let amIDString = playlist.appleMusicPlaylistID else {
+                toastMessage = "Loved playlist not synced — try again"
+                return
+            }
+            let amID = MusicItemID(amIDString)
+
+            // Already loved? Skip silently — chip + a toast tell the user.
+            let existing = membershipIndex[song.id.rawValue] ?? []
+            if existing.contains(amID) {
+                toastMessage = "Already loved"
+                advance()
+                return
+            }
+
+            let record = SortedSong(songID: song.id.rawValue, playlist: playlist)
+            modelContext.insert(record)
+            try? modelContext.save()
+            actionHistory.append(.loved(song: song, playlist: playlist, record: record))
+            sessionExclusionSet.insert(song.id.rawValue)
+            sessionSortedCount += 1
+            addMembership(songID: song.id.rawValue, playlistAMID: amID)
+            toastMessage = "Loved"
+            advance()
+
+            do {
+                try await service.addSong(song, toPlaylistID: amID)
+            } catch {
+                toastMessage = "Couldn't add to \(playlist.name)"
+            }
+        }
+    }
+
+    /// Returns the configured loved-playlist (matching `lovedPlaylistID` in
+    /// UserDefaults). Creates "Culla Loves" on first call. Returns nil only if
+    /// playlist creation itself fails — the caller surfaces a toast.
+    @MainActor
+    private func resolveOrCreateLovedPlaylist() async -> Playlist? {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: lovedPlaylistDefaultsKey),
+           let storedUUID = UUID(uuidString: stored),
+           let match = playlists.first(where: { $0.id == storedUUID }) {
+            return match
+        }
+
+        // No setting (or it points to a deleted playlist) — auto-create one.
+        do {
+            let amPlaylist = try await service.createPlaylist(name: defaultLovedPlaylistName)
+            let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
+            let local = Playlist(
+                name: defaultLovedPlaylistName,
+                displayOrder: nextOrder,
+                appleMusicPlaylistID: amPlaylist.id.rawValue,
+                isInSidebar: false,
+                isEditable: true
+            )
+            modelContext.insert(local)
+            try? modelContext.save()
+            playlists = fetchLocalPlaylists()
+            defaults.set(local.id.uuidString, forKey: lovedPlaylistDefaultsKey)
+            return local
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Undo
 
     func undo() {
@@ -397,6 +477,15 @@ final class MusicSwipeViewModel {
             restored.dismissedAt = originalDismissedAt
             modelContext.insert(restored)
             try? modelContext.save()
+            sessionSortedCount = max(sessionSortedCount - 1, 0)
+            removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
+            pushBackToFront(song: song)
+            remoteRemove(song: song, fromPlaylist: playlist)
+
+        case .loved(let song, let playlist, let record):
+            modelContext.delete(record)
+            try? modelContext.save()
+            sessionExclusionSet.remove(song.id.rawValue)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
@@ -588,4 +677,12 @@ enum SwipeAction {
     case sortedFromDismissed(song: Song, playlist: Playlist, sortedRecord: SortedSong, originalDismissedAt: Date)
     /// Down-swipe: in-session only, song reappears next launch.
     case skipped(song: Song)
+    /// Up-swipe: adds to the user's loved playlist (auto-created on first use).
+    case loved(song: Song, playlist: Playlist, record: SortedSong)
 }
+
+/// Key under which the loved-playlist's local UUID is persisted. Stored as a
+/// string so the future Settings picker can read/write it without any
+/// type coupling.
+private let lovedPlaylistDefaultsKey = "lovedPlaylistID"
+private let defaultLovedPlaylistName = "Culla Loves"

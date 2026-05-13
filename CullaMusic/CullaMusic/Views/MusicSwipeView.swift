@@ -231,7 +231,11 @@ struct MusicSwipeView: View {
         DragGesture(coordinateSpace: .global)
             .onChanged { value in
                 cardOffset = value.translation
-                if value.translation.width > 30 {
+                let dx = value.translation.width
+                let dy = value.translation.height
+                // Only highlight while horizontal motion dominates — keeps the
+                // sidebar quiet during up-swipes.
+                if dx > 30, abs(dx) >= abs(dy) {
                     highlightedID = findPlaylist(at: value.location)
                 } else {
                     highlightedID = nil
@@ -244,10 +248,28 @@ struct MusicSwipeView: View {
 
     private func handleSwipeEnd(_ value: DragGesture.Value) {
         let tx = value.translation.width
+        let ty = value.translation.height
         let ptx = value.predictedEndTranslation.width
+        let pty = value.predictedEndTranslation.height
+
+        // Direction lock — pick the dominant axis from whichever value (actual
+        // or predicted) crossed the threshold first. Prevents a fast right-up
+        // flick from cross-triggering Loved when the user meant playlist-add.
+        let horizontalMagnitude = max(abs(tx), abs(ptx))
+        let verticalMagnitude = max(abs(ty), abs(pty))
+        let horizontalDominant = horizontalMagnitude >= verticalMagnitude
+
+        // Up swipe — Loved. Requires vertical to be dominant.
+        if !horizontalDominant, ty < -swipeThreshold || pty < -swipeThreshold {
+            flyOff(y: -700) {
+                viewModel.loveCurrent()
+                Haptics.swipeRight()
+            }
+            return
+        }
 
         // Right swipe — assign to highlighted playlist
-        if tx > swipeThreshold || ptx > swipeThreshold {
+        if horizontalDominant, tx > swipeThreshold || ptx > swipeThreshold {
             if let id = highlightedID,
                let playlist = viewModel.sidebarPlaylists.first(where: { $0.id == id }) {
                 flyOff(x: 500) {
@@ -262,7 +284,7 @@ struct MusicSwipeView: View {
         }
 
         // Left swipe — dismiss
-        if tx < -swipeThreshold || ptx < -swipeThreshold {
+        if horizontalDominant, tx < -swipeThreshold || ptx < -swipeThreshold {
             flyOff(x: -500) {
                 viewModel.dismissCurrent()
                 Haptics.swipeLeft()

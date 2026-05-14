@@ -35,6 +35,13 @@ final class MusicSwipeViewModel {
     /// updated optimistically when the user sorts / undoes a sort.
     private(set) var membershipIndex: [String: [MusicItemID]] = [:]
 
+    /// Apple Music ID of the loved playlist that *this* process created via
+    /// `resolveOrCreateLovedPlaylist`. Lets `loveCurrent` distinguish "first
+    /// add to a brand-new playlist that Apple hasn't fully propagated" from
+    /// "tried to write into a genuinely read-only playlist" so we don't trash
+    /// our own freshly-created playlist on a transient timing failure.
+    private var sessionCreatedLovedAMID: String?
+
     private(set) var actionHistory: [SwipeAction] = []
     var canUndo: Bool { !actionHistory.isEmpty }
 
@@ -405,33 +412,45 @@ final class MusicSwipeViewModel {
             do {
                 try await service.addSong(song, toPlaylistID: amID)
             } catch {
-                // Some playlists (Apple Music's smart Favorites, anything
-                // Apple marks read-only) reject programmatic writes. Without
-                // rolling back the local SortedSong, the song silently
-                // disappears from the library deck next session — we treat
-                // SortedSong membership as "permanently sorted".
+                print("loveCurrent addSong failed: \(error)")
+                // Either way, undo the optimistic local write so the song
+                // doesn't silently disappear from the library deck next
+                // session — we treat SortedSong membership as "permanently
+                // sorted".
                 rollbackLoved(
                     songID: song.id.rawValue,
                     recordID: recordID,
                     playlistAMID: amID
                 )
 
-                // Self-heal: name-based detection can't cover every locale
-                // (and Apple ships new system playlists over time). Mark the
-                // playlist read-only locally so the picker, sidebar, and
-                // sort-from sources hide it from now on. Sticky-downgrade in
-                // sync stops the heuristic re-upgrading it on next launch.
-                let displayName = playlist.name
-                playlist.isEditable = false
-                if playlist.isInSidebar { playlist.isInSidebar = false }
-                try? modelContext.save()
-                let defaults = UserDefaults.standard
-                if defaults.string(forKey: lovedPlaylistDefaultsKey) == amIDString {
-                    defaults.removeObject(forKey: lovedPlaylistDefaultsKey)
-                }
-                playlists = fetchLocalPlaylists()
+                if sessionCreatedLovedAMID == amIDString {
+                    // We created this playlist ourselves earlier in this
+                    // process — Apple Music's library is eventually consistent
+                    // for new playlists, so the first add usually fails even
+                    // when the playlist is healthy. Leaving defaults +
+                    // editability alone lets the next up-swipe (this session
+                    // or next launch) hit the same playlist instead of
+                    // creating a fresh duplicate every time.
+                    toastMessage = "Couldn't reach \(playlist.name) — try again"
+                } else {
+                    // Self-heal: name-based detection can't cover every locale
+                    // (and Apple ships new system playlists over time). Mark
+                    // the playlist read-only locally so the picker, sidebar,
+                    // and sort-from sources hide it from now on. Sticky-
+                    // downgrade in sync stops the heuristic re-upgrading it
+                    // on next launch.
+                    let displayName = playlist.name
+                    playlist.isEditable = false
+                    if playlist.isInSidebar { playlist.isInSidebar = false }
+                    try? modelContext.save()
+                    let defaults = UserDefaults.standard
+                    if defaults.string(forKey: lovedPlaylistDefaultsKey) == amIDString {
+                        defaults.removeObject(forKey: lovedPlaylistDefaultsKey)
+                    }
+                    playlists = fetchLocalPlaylists()
 
-                toastMessage = "Couldn't add to \(displayName)"
+                    toastMessage = "Couldn't add to \(displayName)"
+                }
             }
         }
     }
@@ -482,6 +501,12 @@ final class MusicSwipeViewModel {
         // No setting (or it points to a deleted / now-read-only playlist) — auto-create one.
         do {
             let amPlaylist = try await service.createPlaylist(name: defaultLovedPlaylistName)
+            // Apple Music's library is eventually consistent — give the new
+            // playlist a moment to be queryable before the caller tries to
+            // add a song. Without this, the first up-swipe almost always
+            // hits the catch path because MusicLibraryRequest can't yet see
+            // the playlist we literally just created.
+            try? await Task.sleep(for: .milliseconds(600))
             let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
             let local = Playlist(
                 name: defaultLovedPlaylistName,
@@ -494,6 +519,7 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             playlists = fetchLocalPlaylists()
             defaults.set(amPlaylist.id.rawValue, forKey: lovedPlaylistDefaultsKey)
+            sessionCreatedLovedAMID = amPlaylist.id.rawValue
             return local
         } catch {
             return nil

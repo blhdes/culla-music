@@ -8,10 +8,22 @@ struct ManagePlaylistsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showCreate = false
 
+    /// The up-swipe loved target. Hidden from the sidebar list below since the
+    /// up-swipe already covers that playlist and double-listing it implies a
+    /// toggle that wouldn't add anything. Configured in Settings.
+    @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+
     private var maxSidebar: Int { MusicSwipeViewModel.maxSidebar }
 
     private var editablePlaylists: [Playlist] {
-        viewModel.playlists.filter(\.isEditable)
+        viewModel.playlists.filter { playlist in
+            guard playlist.isEditable else { return false }
+            if !lovedPlaylistID.isEmpty,
+               playlist.appleMusicPlaylistID == lovedPlaylistID {
+                return false
+            }
+            return true
+        }
     }
 
     var body: some View {

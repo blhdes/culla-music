@@ -57,6 +57,14 @@ struct MusicSwipeView: View {
         .task(id: viewModel.currentSong?.id.rawValue) {
             await refreshDynamicAccent()
         }
+        .task(id: viewModel.nextSong?.id.rawValue) {
+            // Warm the accent cache for the upcoming card so its color
+            // transition is instant when it slides in. Result is discarded —
+            // we just want the cache populated before refreshDynamicAccent
+            // asks for it.
+            guard useDynamicAccent, let next = viewModel.nextSong else { return }
+            _ = await AccentExtractor.shared.accent(for: next)
+        }
         .onChange(of: useDynamicAccent) { _, enabled in
             if !enabled {
                 withAnimation(.easeInOut(duration: 0.35)) { dynamicAccent = nil }
@@ -329,7 +337,8 @@ struct MusicSwipeView: View {
         // easeOut continues the drag's velocity instead of restarting from rest —
         // easeIn paused at the release point before accelerating, which made
         // partial drags look like two separate motions.
-        let duration: Double = 0.22
+        let flyDuration: Double = 0.18
+        let slideInDuration: Double = 0.25
         // Pre-divide y by the card's vertical damping so the up-swipe actually
         // clears the screen — otherwise the card only travels 40% of the
         // requested distance and the next song appears to snap in instead of
@@ -337,12 +346,12 @@ struct MusicSwipeView: View {
         // transition. The slide-back-to-zero then mirrors the right-swipe by
         // pulling the new card in from off-screen.
         let targetY = y / SongCardView.yVisualDamping
-        withAnimation(.easeOut(duration: duration)) {
+        withAnimation(.easeOut(duration: flyDuration)) {
             cardOffset = CGSize(width: x, height: targetY)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + flyDuration) {
             highlightedID = nil
-            withAnimation(.easeOut(duration: 0.35)) {
+            withAnimation(.easeOut(duration: slideInDuration)) {
                 cardOffset = .zero
                 action()
             }

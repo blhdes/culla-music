@@ -87,11 +87,11 @@ final class AccentExtractor {
         guard let raw = ctx.data else { return nil }
         let pixels = raw.bindMemory(to: UInt8.self, capacity: size * size * 4)
 
-        // First pass: build a histogram of meaningfully-colored pixels and
-        // track the best-scoring bucket along the way.
-        var counts: [UInt16: Int] = [:]
-        var scores: [UInt16: Double] = [:]
-        var hues: [UInt16: Double] = [:]
+        // Single pass: bucket every meaningfully-colored pixel into a 4-bit-
+        // per-channel histogram, accumulating rgb sums + a quality score per
+        // bucket. The pre-aggregated stats let `bucketColor` compute centroids
+        // without re-scanning the pixel grid.
+        var stats: [UInt16: BucketStats] = [:]
 
         for y in 0..<size {
             for x in 0..<size {
@@ -110,30 +110,34 @@ final class AccentExtractor {
                 if s < 0.25 || l < 0.15 || l > 0.85 { continue }
 
                 let key = (UInt16(r >> 4) << 8) | (UInt16(g >> 4) << 4) | UInt16(b >> 4)
-                counts[key, default: 0] += 1
-                hues[key] = h
-
                 let lightnessScore = 1.0 - abs(l - 0.55) / 0.55
-                scores[key] = Double(counts[key]!) * s * lightnessScore
+
+                var entry = stats[key] ?? BucketStats()
+                entry.count += 1
+                entry.rSum += Int(r)
+                entry.gSum += Int(g)
+                entry.bSum += Int(b)
+                entry.score += s * lightnessScore
+                entry.hue = h
+                stats[key] = entry
             }
         }
 
-        // Best bucket = primary.
-        guard let primaryKey = scores.max(by: { $0.value < $1.value })?.key else {
+        guard let primaryEntry = stats.max(by: { $0.value.score < $1.value.score }) else {
             return nil
         }
-        let primaryHue = hues[primaryKey] ?? 0
-        let primaryColor = bucketColor(key: primaryKey, pixels: pixels, size: size)
-        guard let primaryColor else { return nil }
+        let primaryKey = primaryEntry.key
+        let primaryHue = primaryEntry.value.hue
+        guard let primaryColor = bucketColor(stats: primaryEntry.value) else { return nil }
 
         // Best bucket whose hue is ≥ ~40° (~0.11 in [0,1]) from primary = secondary.
         let hueGate: Double = 0.11
-        let secondaryKey = scores
-            .filter { hueDistance(hues[$0.key] ?? 0, primaryHue) >= hueGate }
-            .max(by: { $0.value < $1.value })?.key
+        let secondaryEntry = stats
+            .filter { $0.key != primaryKey && hueDistance($0.value.hue, primaryHue) >= hueGate }
+            .max(by: { $0.value.score < $1.value.score })
 
         let secondaryColor: Color
-        if let secondaryKey, let extracted = bucketColor(key: secondaryKey, pixels: pixels, size: size) {
+        if let secondaryEntry, let extracted = bucketColor(stats: secondaryEntry.value) {
             secondaryColor = extracted
         } else {
             // Monochrome artwork — derive a sibling by rotating the primary's hue.
@@ -143,33 +147,17 @@ final class AccentExtractor {
         return ArtworkAccent(primary: primaryColor, secondary: secondaryColor)
     }
 
-    /// Average pixels in a bucket for a stable centroid, then clamp into the
+    /// Reads the bucket's pre-aggregated centroid + clamps into the
     /// comfortable HSL accent range.
-    nonisolated private static func bucketColor(
-        key: UInt16,
-        pixels: UnsafeMutablePointer<UInt8>,
-        size: Int
-    ) -> Color? {
-        var rSum = 0, gSum = 0, bSum = 0, n = 0
-        for y in 0..<size {
-            for x in 0..<size {
-                let i = (y * size + x) * 4
-                let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
-                let k = (UInt16(r >> 4) << 8) | (UInt16(g >> 4) << 4) | UInt16(b >> 4)
-                if k == key {
-                    rSum += Int(r); gSum += Int(g); bSum += Int(b); n += 1
-                }
-            }
-        }
-        guard n > 0 else { return nil }
+    nonisolated private static func bucketColor(stats: BucketStats) -> Color? {
+        guard stats.count > 0 else { return nil }
+        let rAvg = Double(stats.rSum) / Double(stats.count) / 255
+        let gAvg = Double(stats.gSum) / Double(stats.count) / 255
+        let bAvg = Double(stats.bSum) / Double(stats.count) / 255
 
-        let rAvg = Double(rSum) / Double(n) / 255
-        let gAvg = Double(gSum) / Double(n) / 255
-        let bAvg = Double(bSum) / Double(n) / 255
-
-        var (h, s, l) = rgbToHSL(r: rAvg, g: gAvg, b: bAvg)
-        s = max(s, 0.45)
-        l = min(max(l, 0.45), 0.70)
+        let (h, sRaw, lRaw) = rgbToHSL(r: rAvg, g: gAvg, b: bAvg)
+        let s = max(sRaw, 0.45)
+        let l = min(max(lRaw, 0.45), 0.70)
         let (rOut, gOut, bOut) = hslToRGB(h: h, s: s, l: l)
         return Color(red: rOut, green: gOut, blue: bOut)
     }
@@ -240,4 +228,25 @@ final class AccentExtractor {
         if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6 }
         return p
     }
+}
+
+/// Per-bucket accumulator used by `AccentExtractor.dominantAccent`. Storing
+/// rgb sums in the first pass means `bucketColor` no longer has to re-walk
+/// all 1024 pixels twice (once per output color) — it reads the centroid
+/// out of the pre-aggregated stats directly.
+///
+/// `nonisolated` because the project sets `SWIFT_DEFAULT_ACTOR_ISOLATION =
+/// MainActor`, which would otherwise make this struct's init @MainActor and
+/// trip a warning when the nonisolated `dominantAccent` constructs one.
+nonisolated fileprivate struct BucketStats {
+    var count: Int = 0
+    var rSum: Int = 0
+    var gSum: Int = 0
+    var bSum: Int = 0
+    /// Sum of `s * lightnessScore` across pixels in this bucket. Replaces
+    /// the old `scores[key] = count * s * lightnessScore` line that was
+    /// overwriting on every hit — the final score reflected just the
+    /// last pixel's color quality, not the bucket's overall.
+    var score: Double = 0
+    var hue: Double = 0
 }

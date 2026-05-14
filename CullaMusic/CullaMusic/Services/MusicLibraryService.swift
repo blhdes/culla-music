@@ -320,56 +320,70 @@ final class MusicLibraryService {
 
     // MARK: - Unsorted Mode
 
-    /// Returns the set of song IDs that belong to at least one playlist. Used
-    /// to compute the unsorted-mode exclusion set. The `membershipIncludeCurated`
-    /// toggle drives which scope the caller asks for: when the toggle is on,
-    /// the user wants to engage with editorial / personalMix / replay playlists
-    /// (chips show them, songs in them are still triageable → editable-only),
-    /// when off they want them ignored everywhere (chips hide them, songs only
-    /// in them shouldn't appear in unsorted → include curated in the result).
-    /// Caller must have called refreshUserPlaylists() first so the cache is warm.
-    func fetchPlaylistSongIDs(includeCurated: Bool) async throws -> Set<String> {
+    /// Fetches every selected playlist's tracks concurrently and returns BOTH
+    /// the per-song membership index and the flat set of song IDs in one pass.
+    /// Replaces the older sequential walks — with N playlists this used to be
+    /// N round-trips on the main actor, now they run in parallel as a single
+    /// `withThrowingTaskGroup` batch.
+    ///
+    /// The `includeCurated` toggle drives scope: when on, editorial / replay /
+    /// personalMix playlists are walked too; when off they're skipped (chips
+    /// hide them, unsorted excludes only editable-playlist songs).
+    func fetchAllPlaylistData(
+        includeCurated: Bool
+    ) async throws -> (membershipIndex: [String: [MusicItemID]], songIDs: Set<String>) {
         if playlistCache.isEmpty {
             try await refreshUserPlaylists()
         }
 
-        var songIDs = Set<String>()
+        let candidates: [MusicKit.Playlist] = playlistCache.values.filter {
+            includeCurated || isUserControlled($0.kind)
+        }
 
-        for playlist in playlistCache.values {
-            if !includeCurated, !isUserControlled(playlist.kind) { continue }
-
-            // Explicit type annotation gives the compiler the context it needs to
-            // resolve .tracks as PartialMusicAsyncProperty<MusicKit.Playlist>.
-            let populated: MusicKit.Playlist = try await playlist.with([.tracks])
-            for track in (populated.tracks ?? []) {
-                songIDs.insert(track.id.rawValue)
+        // TaskGroup child closures are @Sendable and don't capture self —
+        // each captures its own `playlist` value, so MusicKit's `.with(...)`
+        // round-trips run truly concurrently rather than serialized.
+        let perPlaylist: [(MusicItemID, [String])] = try await withThrowingTaskGroup(
+            of: (MusicItemID, [String]).self
+        ) { group in
+            for playlist in candidates {
+                group.addTask {
+                    let populated: MusicKit.Playlist = try await playlist.with([.tracks])
+                    let ids = (populated.tracks ?? []).map { $0.id.rawValue }
+                    return (playlist.id, ids)
+                }
             }
-        }
-
-        return songIDs
-    }
-
-    /// Builds a per-song index of playlist memberships. Used by the swipe card
-    /// to show which playlist(s) a song already belongs to.
-    /// When `includeCurated` is false, editorial / personalMix / replay playlists
-    /// are skipped (same filter as `fetchPlaylistSongIDs`).
-    func fetchPlaylistMembershipIndex(includeCurated: Bool) async throws -> [String: [MusicItemID]] {
-        if playlistCache.isEmpty {
-            try await refreshUserPlaylists()
+            var results: [(MusicItemID, [String])] = []
+            results.reserveCapacity(candidates.count)
+            for try await pair in group {
+                results.append(pair)
+            }
+            return results
         }
 
         var index: [String: [MusicItemID]] = [:]
-
-        for playlist in playlistCache.values {
-            if !includeCurated, !isUserControlled(playlist.kind) { continue }
-
-            let populated: MusicKit.Playlist = try await playlist.with([.tracks])
-            for track in (populated.tracks ?? []) {
-                index[track.id.rawValue, default: []].append(playlist.id)
+        var songIDs = Set<String>()
+        for (playlistID, ids) in perPlaylist {
+            for id in ids {
+                index[id, default: []].append(playlistID)
+                songIDs.insert(id)
             }
         }
+        return (index, songIDs)
+    }
 
-        return index
+    /// Returns the set of song IDs that belong to at least one playlist. Used
+    /// to compute the unsorted-mode exclusion set. Now a thin wrapper over the
+    /// parallel `fetchAllPlaylistData` — same scope toggle semantics.
+    func fetchPlaylistSongIDs(includeCurated: Bool) async throws -> Set<String> {
+        try await fetchAllPlaylistData(includeCurated: includeCurated).songIDs
+    }
+
+    /// Builds a per-song index of playlist memberships. Used by the swipe card
+    /// to show which playlist(s) a song already belongs to. Now a thin wrapper
+    /// over `fetchAllPlaylistData`.
+    func fetchPlaylistMembershipIndex(includeCurated: Bool) async throws -> [String: [MusicItemID]] {
+        try await fetchAllPlaylistData(includeCurated: includeCurated).membershipIndex
     }
 
     // Apple stamps the creating app's name into curatorName for third-party-
@@ -497,6 +511,11 @@ final class MusicLibraryService {
     }
 
     func stopPreview() {
+        // The swipe path calls this on every `advance()`, even when nothing's
+        // actually playing. Without this guard we'd run the pause/observer
+        // teardown AND fire spurious @Observable writes that re-render every
+        // view watching playback state — once per swipe.
+        guard isPlayingPreview else { return }
         player.pause()
         stopClipPlayer()
         stopPositionObservers()

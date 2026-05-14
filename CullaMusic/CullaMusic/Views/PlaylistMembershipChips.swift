@@ -2,18 +2,18 @@ import SwiftUI
 
 struct PlaylistMembershipChips: View {
     let playlists: [Playlist]
-    var isDismissed: Bool = false
+    var dismissedAt: Date? = nil
     var maxVisible: Int = 3
 
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
 
     var body: some View {
-        if playlists.isEmpty && !isDismissed {
+        if playlists.isEmpty && dismissedAt == nil {
             EmptyView()
         } else {
             HStack(spacing: 6) {
-                if isDismissed {
-                    dismissedChip
+                if let dismissedAt {
+                    dismissedChip(date: dismissedAt)
                 }
                 ForEach(visiblePlaylists, id: \.id) { playlist in
                     chip(for: playlist)
@@ -34,14 +34,30 @@ struct PlaylistMembershipChips: View {
         max(playlists.count - maxVisible, 0)
     }
 
-    private var dismissedChip: some View {
-        Text("Dismissed")
+    private func dismissedChip(date: Date) -> some View {
+        Text("Dismissed \(Self.relativeAge(from: date))")
             .font(.caption.weight(.semibold))
             .lineLimit(1)
-            .foregroundStyle(.white)
+            .foregroundStyle(.red)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(.red.opacity(0.85), in: Capsule())
+            .background(.red.opacity(0.15), in: Capsule())
+    }
+
+    /// Compact relative-age string: "just now", "3h ago", "5d ago", "2w ago",
+    /// "5mo ago", "2y ago". Sub-day dismissals get an hours tier so a card
+    /// dismissed an hour ago doesn't read the same as one dismissed yesterday.
+    /// Future/clock-skew dates clamp to "just now".
+    static func relativeAge(from date: Date) -> String {
+        let seconds = max(Date().timeIntervalSince(date), 0)
+        let hours = Int(seconds / 3_600)
+        if hours < 1 { return "just now" }
+        if hours < 24 { return "\(hours)h ago" }
+        let days = hours / 24
+        if days < 7 { return "\(days)d ago" }
+        if days < 30 { return "\(days / 7)w ago" }
+        if days < 365 { return "\(days / 30)mo ago" }
+        return "\(days / 365)y ago"
     }
 
     @ViewBuilder
@@ -91,8 +107,10 @@ struct PlaylistMembershipChips: View {
         PlaylistMembershipChips(playlists: [p1, p2])
         PlaylistMembershipChips(playlists: [p1, p2, p3, p4, p5])
 
-        PlaylistMembershipChips(playlists: [], isDismissed: true)
-        PlaylistMembershipChips(playlists: [p1, p2], isDismissed: true)
+        let twoDaysAgo = Date().addingTimeInterval(-2 * 86_400)
+        let threeMonthsAgo = Date().addingTimeInterval(-90 * 86_400)
+        PlaylistMembershipChips(playlists: [], dismissedAt: twoDaysAgo)
+        PlaylistMembershipChips(playlists: [p1, p2], dismissedAt: threeMonthsAgo)
     }
     .padding()
 }

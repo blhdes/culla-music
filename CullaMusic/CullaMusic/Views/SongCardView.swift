@@ -8,7 +8,7 @@ struct SongCardView: View {
     let playbackPosition: TimeInterval
     let playbackDuration: TimeInterval
     let memberships: [Playlist]
-    var isDismissed: Bool = false
+    var dismissedAt: Date? = nil
     let onTogglePlay: () -> Void
     let onSeek: (TimeInterval) -> Void
 
@@ -56,7 +56,7 @@ struct SongCardView: View {
 
                             PlaylistMembershipChips(
                                 playlists: memberships,
-                                isDismissed: isDismissed
+                                dismissedAt: dismissedAt
                             )
                         }
                         .padding(.horizontal, 24)

@@ -162,6 +162,11 @@ struct SongCardView: View {
         // overlays don't double up on diagonal drags.
         let horizontalDominant = abs(offset.width) >= abs(offset.height)
 
+        // Sidebar deadzone — once the card has moved right past this, the
+        // user is engaging the sidebar and neither the trash nor the heart
+        // overlay should fire even if vertical motion later dominates.
+        let sidebarDeadzone: CGFloat = 35
+
         if horizontalDominant, offset.width < 0 {
             let progress = min(abs(offset.width) / swipeThreshold, 1.0)
             ZStack {
@@ -171,7 +176,7 @@ struct SongCardView: View {
                     .foregroundStyle(.white.opacity(0.8 * progress))
             }
             .allowsHitTesting(false)
-        } else if !horizontalDominant, offset.height < 0 {
+        } else if !horizontalDominant, offset.height < 0, offset.width < sidebarDeadzone {
             let progress = min(abs(offset.height) / swipeThreshold, 1.0)
             ZStack {
                 Color.pink.opacity(0.25 * progress)

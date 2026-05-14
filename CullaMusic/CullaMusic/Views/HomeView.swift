@@ -139,18 +139,13 @@ final class HomeViewModel {
             var nextOrder = (local.map(\.displayOrder).max() ?? -1) + 1
 
             for amPlaylist in amPlaylists {
-                let editable: Bool
-                switch amPlaylist.kind {
-                case .editorial, .external, .personalMix, .replay:
-                    editable = false
-                default:
-                    editable = true
-                }
+                let editable = computeEditability(for: amPlaylist)
 
                 if let existing = localByAMID[amPlaylist.id.rawValue] {
-                    if !existing.isEditable {
-                        existing.isEditable = editable
-                    }
+                    // Sticky-downgrade: never re-upgrade a playlist that was
+                    // previously marked read-only (by either sync's heuristic
+                    // or by the self-heal path in MusicSwipeViewModel.loveCurrent).
+                    existing.isEditable = existing.isEditable && editable
                     existing.name = amPlaylist.name
                 } else {
                     let row = Playlist(

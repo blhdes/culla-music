@@ -191,26 +191,20 @@ final class MusicSwipeViewModel {
 
             for amPlaylist in amPlaylists {
                 let amID = amPlaylist.id.rawValue
-                // Editorial / personalMix / replay / external are Apple-managed
-                // and read-only. The smart Favorites playlist is detected by
-                // name across locales (no metadata fingerprint distinguishes it
-                // from a user-made playlist).
-                let editable: Bool
-                switch amPlaylist.kind {
-                case .editorial, .external, .personalMix, .replay:
-                    editable = false
-                default:
-                    editable = !smartFavoritesNames.contains(amPlaylist.name)
-                }
+                let editable = computeEditability(for: amPlaylist)
 
                 if let existing = localByAMID[amID] {
                     let wasEditable = existing.isEditable
-                    existing.isEditable = editable
+                    // Sticky-downgrade: once a playlist is known read-only
+                    // (heuristic match OR a write that actually failed via
+                    // the self-heal path in `loveCurrent`), keep it that
+                    // way. Sync can downgrade an editable playlist but must
+                    // never re-upgrade a read-only one.
+                    let newEditable = wasEditable && editable
+                    existing.isEditable = newEditable
                     existing.name = amPlaylist.name
 
-                    // Downgrade transition: heal stale UI state pointing at a
-                    // playlist we now know we can't write to.
-                    if wasEditable && !editable {
+                    if wasEditable && !newEditable {
                         if existing.isInSidebar { existing.isInSidebar = false }
                         let defaults = UserDefaults.standard
                         if defaults.string(forKey: lovedPlaylistDefaultsKey) == amID {
@@ -421,7 +415,23 @@ final class MusicSwipeViewModel {
                     recordID: recordID,
                     playlistAMID: amID
                 )
-                toastMessage = "Couldn't add to \(playlist.name)"
+
+                // Self-heal: name-based detection can't cover every locale
+                // (and Apple ships new system playlists over time). Mark the
+                // playlist read-only locally so the picker, sidebar, and
+                // sort-from sources hide it from now on. Sticky-downgrade in
+                // sync stops the heuristic re-upgrading it on next launch.
+                let displayName = playlist.name
+                playlist.isEditable = false
+                if playlist.isInSidebar { playlist.isInSidebar = false }
+                try? modelContext.save()
+                let defaults = UserDefaults.standard
+                if defaults.string(forKey: lovedPlaylistDefaultsKey) == amIDString {
+                    defaults.removeObject(forKey: lovedPlaylistDefaultsKey)
+                }
+                playlists = fetchLocalPlaylists()
+
+                toastMessage = "Couldn't add to \(displayName)"
             }
         }
     }
@@ -459,13 +469,17 @@ final class MusicSwipeViewModel {
     @MainActor
     private func resolveOrCreateLovedPlaylist() async -> Playlist? {
         let defaults = UserDefaults.standard
+        // Require `isEditable` so a stored target that's since been flagged
+        // read-only (by sync or by an earlier write failure) falls through to
+        // auto-create instead of repeating the failed write.
         if let stored = defaults.string(forKey: lovedPlaylistDefaultsKey),
            !stored.isEmpty,
-           let match = playlists.first(where: { $0.appleMusicPlaylistID == stored }) {
+           let match = playlists.first(where: { $0.appleMusicPlaylistID == stored }),
+           match.isEditable {
             return match
         }
 
-        // No setting (or it points to a deleted playlist) — auto-create one.
+        // No setting (or it points to a deleted / now-read-only playlist) — auto-create one.
         do {
             let amPlaylist = try await service.createPlaylist(name: defaultLovedPlaylistName)
             let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
@@ -728,29 +742,3 @@ enum SwipeAction {
 /// coupling — empty string means "auto-create Culla Loves on first up-swipe".
 private let lovedPlaylistDefaultsKey = "lovedPlaylistID"
 private let defaultLovedPlaylistName = "Culla Loves"
-
-/// Apple's system "Favorite Songs" playlist (populated by the heart button)
-/// surfaces through `MusicLibraryRequest<Playlist>` with `kind=nil` and
-/// `curatorName=nil` — the same signature as a user-created playlist. The
-/// only stable signal is the localized name. Programmatic adds via
-/// `MusicLibrary.shared.add(...)` fail silently for it, so we hide it from
-/// pickers / sidebar and force "keep" if it's used as a Sort From source.
-/// New locales can be added here as we discover them.
-private let smartFavoritesNames: Set<String> = [
-    "Favorite Songs",         // en
-    "Favorites",              // en (alt / older)
-    "Canciones favoritas",    // es
-    "Morceaux favoris",       // fr
-    "Titres favoris",         // fr (alt)
-    "Lieblingstitel",         // de
-    "Lieblingssongs",         // de (alt)
-    "Brani preferiti",        // it
-    "Canzoni preferite",      // it (alt)
-    "Músicas favoritas",      // pt
-    "お気に入りの曲",            // ja
-    "좋아하는 노래",             // ko
-    "喜爱的歌曲",                // zh-Hans
-    "喜愛的歌曲",                // zh-Hant
-    "Любимые песни",           // ru
-    "Favoriete nummers",      // nl
-]

@@ -233,9 +233,10 @@ struct MusicSwipeView: View {
                 cardOffset = value.translation
                 let dx = value.translation.width
                 let dy = value.translation.height
-                // Only highlight while horizontal motion dominates — keeps the
-                // sidebar quiet during up-swipes.
-                if dx > 30, abs(dx) >= abs(dy) {
+                // Once the finger is inside the sidebar, keep highlighting the
+                // row underneath even if motion turns vertical — the user is
+                // sliding between rows, not signaling a Loved swipe.
+                if isLocationInSidebar(value.location) || (dx > 30 && abs(dx) >= abs(dy)) {
                     highlightedID = findPlaylist(at: value.location)
                 } else {
                     highlightedID = nil
@@ -251,6 +252,23 @@ struct MusicSwipeView: View {
         let ty = value.translation.height
         let ptx = value.predictedEndTranslation.width
         let pty = value.predictedEndTranslation.height
+
+        // Sidebar claims the gesture: while the finger is parked over a
+        // playlist row, only right-swipe-onto-playlist applies. Vertical
+        // motion across rows must not trigger Loved or Dismiss.
+        if isLocationInSidebar(value.location) {
+            if let id = findPlaylist(at: value.location),
+               let playlist = viewModel.sidebarPlaylists.first(where: { $0.id == id }),
+               tx > swipeThreshold || ptx > swipeThreshold {
+                flyOff(x: 500) {
+                    viewModel.assignToPlaylist(playlist)
+                    Haptics.swipeRight()
+                }
+                return
+            }
+            snapBack()
+            return
+        }
 
         // Direction lock — pick the dominant axis from whichever value (actual
         // or predicted) crossed the threshold first. Prevents a fast right-up
@@ -295,11 +313,27 @@ struct MusicSwipeView: View {
         snapBack()
     }
 
+    /// True when `point` sits inside the sidebar's row region AND the sidebar
+    /// is actually revealed. The progress gate is essential: at rest the row
+    /// frames still occupy the right ~60% of the screen (the panel is parked
+    /// offscreen by only 80pt), so without it any up-swipe ending on the
+    /// right half of the card would be incorrectly claimed as a sidebar
+    /// gesture and Loved would never fire.
+    private func isLocationInSidebar(_ point: CGPoint) -> Bool {
+        guard isLongPressing || sidebarProgress > 0,
+              let leftEdge = playlistFrames.values.map(\.minX).min() else { return false }
+        return point.x >= leftEdge
+    }
+
     private func flyOff(x: CGFloat = 0, y: CGFloat = 0, action: @escaping () -> Void) {
-        withAnimation(.easeIn(duration: 0.25)) {
+        // easeOut continues the drag's velocity instead of restarting from rest —
+        // easeIn paused at the release point before accelerating, which made
+        // partial drags look like two separate motions.
+        let duration: Double = 0.22
+        withAnimation(.easeOut(duration: duration)) {
             cardOffset = CGSize(width: x, height: y)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             highlightedID = nil
             withAnimation(.easeOut(duration: 0.35)) {
                 cardOffset = .zero

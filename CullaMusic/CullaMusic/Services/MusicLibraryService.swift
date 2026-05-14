@@ -2,6 +2,50 @@ import AVFoundation
 import Foundation
 import MusicKit
 
+/// True if `amPlaylist` accepts programmatic writes via `MusicLibrary.shared.add(...)`.
+/// Editorial / external / personalMix / replay are stamped by Apple as read-only.
+/// The smart "Favorites" playlist (populated by the Apple Music heart button)
+/// has `kind=nil` / `curatorName=nil` — identical to a user-made playlist — so
+/// it can only be flagged by name. Add new locales below as we discover them;
+/// callers also stickily downgrade any playlist that a write actually fails
+/// against, so unknown locales heal themselves on first use.
+func computeEditability(for amPlaylist: MusicKit.Playlist) -> Bool {
+    switch amPlaylist.kind {
+    case .editorial, .external, .personalMix, .replay:
+        return false
+    default:
+        return !smartFavoritesNames.contains(amPlaylist.name)
+    }
+}
+
+/// Localized names of Apple Music's system "Favorite Songs" playlist.
+/// Detection is name-based because the playlist's metadata is identical to a
+/// user-made one. New locales can be added here; missed ones self-heal via
+/// the write-failure path in the up-swipe Loved action.
+let smartFavoritesNames: Set<String> = [
+    "Favorite Songs",         // en
+    "Favorites",              // en (alt / older)
+    "Favourites",             // en-GB
+    "Favourite Songs",        // en-GB (alt)
+    "Canciones favoritas",    // es
+    "Favoritos",              // es (alt / iOS 18+)
+    "Mis favoritos",          // es (alt)
+    "Morceaux favoris",       // fr
+    "Titres favoris",         // fr (alt)
+    "Favoris",                // fr (alt / iOS 18+)
+    "Lieblingstitel",         // de
+    "Lieblingssongs",         // de (alt)
+    "Brani preferiti",        // it
+    "Canzoni preferite",      // it (alt)
+    "Músicas favoritas",      // pt
+    "お気に入りの曲",            // ja
+    "좋아하는 노래",             // ko
+    "喜爱的歌曲",                // zh-Hans
+    "喜愛的歌曲",                // zh-Hant
+    "Любимые песни",           // ru
+    "Favoriete nummers",      // nl
+]
+
 @Observable
 @MainActor
 final class MusicLibraryService {

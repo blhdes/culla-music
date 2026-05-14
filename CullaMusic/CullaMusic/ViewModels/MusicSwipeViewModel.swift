@@ -560,8 +560,9 @@ final class MusicSwipeViewModel {
     }
 
     /// Returns the configured loved-playlist (matching `lovedPlaylistID` —
-    /// the Apple Music playlist ID — in UserDefaults). Creates "Culla Loves"
-    /// on first call or when the stored target no longer exists. Returns nil
+    /// the Apple Music playlist ID — in UserDefaults). Adopts an existing
+    /// "Culla Loves" in Apple Music when present (cleaning up after the older
+    /// bug that left duplicates), otherwise creates a fresh one. Returns nil
     /// only if creation itself fails; the caller surfaces a toast.
     @MainActor
     private func resolveOrCreateLovedPlaylist() async -> Playlist? {
@@ -576,7 +577,22 @@ final class MusicSwipeViewModel {
             return match
         }
 
-        // No setting (or it points to a deleted / now-read-only playlist) — auto-create one.
+        // Stored ID is missing / read-only. Before creating yet another
+        // duplicate, look for an existing "Culla Loves" already in Apple's
+        // library — could be from a previous buggy session where the
+        // create-response ID didn't match the canonical library ID, or one
+        // the user made manually. Adopt the first editable match instead of
+        // spawning another empty playlist every launch.
+        if let refreshed = try? await service.refreshUserPlaylists() {
+            let candidates = refreshed.filter {
+                $0.name == defaultLovedPlaylistName && computeEditability(for: $0)
+            }
+            if let adopted = candidates.first {
+                return upsertLocalLovedRow(amID: adopted.id.rawValue)
+            }
+        }
+
+        // Genuinely missing — create one.
         do {
             let amPlaylist = try await service.createPlaylist(name: defaultLovedPlaylistName)
             // Apple Music's library is eventually consistent — give the new
@@ -585,23 +601,61 @@ final class MusicSwipeViewModel {
             // hits the catch path because MusicLibraryRequest can't yet see
             // the playlist we literally just created.
             try? await Task.sleep(for: .milliseconds(600))
-            let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
-            let local = Playlist(
-                name: defaultLovedPlaylistName,
-                displayOrder: nextOrder,
-                appleMusicPlaylistID: amPlaylist.id.rawValue,
-                isInSidebar: false,
-                isEditable: true
-            )
-            modelContext.insert(local)
-            try? modelContext.save()
-            refreshLocalPlaylists()
-            defaults.set(amPlaylist.id.rawValue, forKey: lovedPlaylistDefaultsKey)
-            sessionCreatedLovedAMID = amPlaylist.id.rawValue
-            return local
+
+            // The `.id` returned by `MusicLibrary.shared.createPlaylist` does
+            // not always match the library ID that subsequent
+            // `MusicLibraryRequest<MusicKit.Playlist>` fetches return for the
+            // same playlist. If we anchor on the create-response ID,
+            // `addSong` resolves via `MusicLibraryRequest.filter(matching: \.id, ...)`,
+            // gets nothing, throws `playlistNotFound`, and the next launch's
+            // self-heal nukes defaults and spawns a fresh duplicate — every
+            // session. Re-fetch and prefer the new playlist (matched by name,
+            // with an ID not yet in our local SwiftData) so we record the
+            // canonical library ID instead.
+            let existingAMIDs = Set(playlists.compactMap(\.appleMusicPlaylistID))
+            var canonicalAMID = amPlaylist.id.rawValue
+            if let refreshed = try? await service.refreshUserPlaylists(),
+               let canonical = refreshed.first(where: {
+                   $0.name == defaultLovedPlaylistName
+                       && !existingAMIDs.contains($0.id.rawValue)
+               }) {
+                canonicalAMID = canonical.id.rawValue
+            }
+            return upsertLocalLovedRow(amID: canonicalAMID)
         } catch {
             return nil
         }
+    }
+
+    /// Either returns the existing local `Playlist` row tagged with this AM ID
+    /// (re-enabling it if it was previously disabled) or inserts a new one.
+    /// Also points `lovedPlaylistID` defaults at this AM ID and arms the
+    /// session-created flag so a transient first-add failure doesn't kick off
+    /// the duplicate-spawning self-heal.
+    @MainActor
+    @discardableResult
+    private func upsertLocalLovedRow(amID: String) -> Playlist {
+        let row: Playlist
+        if let existing = playlists.first(where: { $0.appleMusicPlaylistID == amID }) {
+            existing.isEditable = true
+            row = existing
+        } else {
+            let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
+            let inserted = Playlist(
+                name: defaultLovedPlaylistName,
+                displayOrder: nextOrder,
+                appleMusicPlaylistID: amID,
+                isInSidebar: false,
+                isEditable: true
+            )
+            modelContext.insert(inserted)
+            row = inserted
+        }
+        try? modelContext.save()
+        refreshLocalPlaylists()
+        UserDefaults.standard.set(amID, forKey: lovedPlaylistDefaultsKey)
+        sessionCreatedLovedAMID = amID
+        return row
     }
 
     // MARK: - Undo

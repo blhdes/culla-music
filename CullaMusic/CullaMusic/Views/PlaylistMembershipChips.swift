@@ -2,15 +2,19 @@ import SwiftUI
 
 struct PlaylistMembershipChips: View {
     let playlists: [Playlist]
+    var isDismissed: Bool = false
     var maxVisible: Int = 3
 
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
 
     var body: some View {
-        if playlists.isEmpty {
+        if playlists.isEmpty && !isDismissed {
             EmptyView()
         } else {
             HStack(spacing: 6) {
+                if isDismissed {
+                    dismissedChip
+                }
                 ForEach(visiblePlaylists, id: \.id) { playlist in
                     chip(for: playlist)
                 }
@@ -28,6 +32,16 @@ struct PlaylistMembershipChips: View {
 
     private var overflowCount: Int {
         max(playlists.count - maxVisible, 0)
+    }
+
+    private var dismissedChip: some View {
+        Text("Dismissed")
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.red.opacity(0.85), in: Capsule())
     }
 
     @ViewBuilder
@@ -76,6 +90,9 @@ struct PlaylistMembershipChips: View {
         PlaylistMembershipChips(playlists: [p1])
         PlaylistMembershipChips(playlists: [p1, p2])
         PlaylistMembershipChips(playlists: [p1, p2, p3, p4, p5])
+
+        PlaylistMembershipChips(playlists: [], isDismissed: true)
+        PlaylistMembershipChips(playlists: [p1, p2], isDismissed: true)
     }
     .padding()
 }

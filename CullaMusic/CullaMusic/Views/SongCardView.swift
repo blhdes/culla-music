@@ -8,6 +8,7 @@ struct SongCardView: View {
     let playbackPosition: TimeInterval
     let playbackDuration: TimeInterval
     let memberships: [Playlist]
+    var isDismissed: Bool = false
     let onTogglePlay: () -> Void
     let onSeek: (TimeInterval) -> Void
 
@@ -53,7 +54,10 @@ struct SongCardView: View {
                                 .multilineTextAlignment(.center)
                                 .lineLimit(1)
 
-                            PlaylistMembershipChips(playlists: memberships)
+                            PlaylistMembershipChips(
+                                playlists: memberships,
+                                isDismissed: isDismissed
+                            )
                         }
                         .padding(.horizontal, 24)
                     }

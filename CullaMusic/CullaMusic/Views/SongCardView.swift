@@ -16,6 +16,12 @@ struct SongCardView: View {
 
     private let swipeThreshold: CGFloat = 100
 
+    /// Vertical translation is shown at this fraction of the raw value so
+    /// dragging up doesn't yank the card off-screen. `MusicSwipeView.flyOff`
+    /// pre-divides by this when animating the up-swipe so the card still
+    /// clears the screen during the Loved transition.
+    static let yVisualDamping: CGFloat = 0.4
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -59,7 +65,7 @@ struct SongCardView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .opacity(cardOpacity)
             .rotationEffect(.degrees(Double(offset.width / 40)))
-            .offset(x: offset.width, y: offset.height * 0.4)
+            .offset(x: offset.width, y: offset.height * Self.yVisualDamping)
             .clipped()
         }
         .ignoresSafeArea()

@@ -330,8 +330,15 @@ struct MusicSwipeView: View {
         // easeIn paused at the release point before accelerating, which made
         // partial drags look like two separate motions.
         let duration: Double = 0.22
+        // Pre-divide y by the card's vertical damping so the up-swipe actually
+        // clears the screen — otherwise the card only travels 40% of the
+        // requested distance and the next song appears to snap in instead of
+        // sliding, while the right-swipe (undampened) reads as a clean
+        // transition. The slide-back-to-zero then mirrors the right-swipe by
+        // pulling the new card in from off-screen.
+        let targetY = y / SongCardView.yVisualDamping
         withAnimation(.easeOut(duration: duration)) {
-            cardOffset = CGSize(width: x, height: y)
+            cardOffset = CGSize(width: x, height: targetY)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             highlightedID = nil

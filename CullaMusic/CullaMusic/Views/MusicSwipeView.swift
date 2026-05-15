@@ -26,6 +26,11 @@ struct MusicSwipeView: View {
     // Sheet
     @State private var showManageSheet = false
 
+    // Destructive long-press menu in Dismissed mode
+    @State private var showRemoveAllConfirm = false
+
+    @Environment(\.openURL) private var openURL
+
     // Toast / undo timers
     @State private var toastTimer: Task<Void, Never>?
     @State private var showUndo = false
@@ -101,16 +106,7 @@ struct MusicSwipeView: View {
     @ViewBuilder
     private var swipeContent: some View {
         GeometryReader { geo in
-            cardStack
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    flyOff(y: 700) {
-                        viewModel.skipCurrent()
-                        Haptics.skip()
-                    }
-                }
-                .gesture(longPressGesture)
-                .highPriorityGesture(dragGesture)
+            cardStackWithGestures
                 .overlay {
                     let progress = isLongPressing ? 1.0 : sidebarProgress
                     HStack(spacing: 0) {
@@ -167,6 +163,84 @@ struct MusicSwipeView: View {
             undoButton
                 .padding(.bottom, 32)
                 .opacity(chromeOpacity)
+        }
+    }
+
+    /// Card stack with the right gesture set for the current mode. Dismissed
+    /// mode swaps the long-press sidebar preview for a `.contextMenu` so the
+    /// destructive long-press menu can fire without competing with a 0.3s
+    /// LongPressGesture claiming the touch first.
+    @ViewBuilder
+    private var cardStackWithGestures: some View {
+        let base = cardStack
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                flyOff(y: 700) {
+                    viewModel.skipCurrent()
+                    Haptics.skip()
+                }
+            }
+            .highPriorityGesture(dragGesture)
+
+        if viewModel.config.mode == .dismissed {
+            base
+                .contextMenu { dismissedMenuItems }
+                .confirmationDialog(
+                    removeAllConfirmTitle,
+                    isPresented: $showRemoveAllConfirm,
+                    titleVisibility: .visible,
+                    presenting: viewModel.currentSong
+                ) { _ in
+                    Button("Remove all", role: .destructive) {
+                        viewModel.removeFromAllPlaylists()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: { current in
+                    Text(viewModel.playlistMemberships(for: current)
+                        .map(\.name)
+                        .joined(separator: ", "))
+                }
+        } else {
+            base.gesture(longPressGesture)
+        }
+    }
+
+    @ViewBuilder
+    private var dismissedMenuItems: some View {
+        if let current = viewModel.currentSong {
+            let memberships = viewModel.playlistMemberships(for: current)
+            if !memberships.isEmpty {
+                Button(role: .destructive) {
+                    showRemoveAllConfirm = true
+                } label: {
+                    Label(
+                        "Remove from all playlists (\(memberships.count))",
+                        systemImage: "trash"
+                    )
+                }
+            }
+            Button {
+                openSongInAppleMusic(current)
+            } label: {
+                Label("Open in Apple Music", systemImage: "arrow.up.right.square")
+            }
+        }
+    }
+
+    private var removeAllConfirmTitle: String {
+        guard let current = viewModel.currentSong else {
+            return "Remove from all playlists?"
+        }
+        let count = viewModel.playlistMemberships(for: current).count
+        let plural = count == 1 ? "" : "s"
+        return "Remove \"\(current.title)\" from \(count) playlist\(plural)?"
+    }
+
+    private func openSongInAppleMusic(_ song: Song) {
+        if let url = song.url {
+            openURL(url)
+        } else {
+            viewModel.toastMessage = "Couldn't open in Apple Music"
         }
     }
 

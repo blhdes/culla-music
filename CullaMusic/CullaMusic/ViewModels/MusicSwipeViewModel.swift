@@ -422,6 +422,71 @@ final class MusicSwipeViewModel {
         }
     }
 
+    /// Strips the current song from every Apple Music playlist it's in.
+    /// Used by the long-press menu in Dismissed mode. The `DismissedSong`
+    /// row is left intact — the song stays dismissed, it just stops showing
+    /// up in any playlist. Local `SortedSong` rows for those playlists are
+    /// deleted too; their `sortedAt` is captured so undo can recreate them.
+    func removeFromAllPlaylists() {
+        guard let song = currentSong else { return }
+        let memberships = playlistMemberships(for: song)
+        guard !memberships.isEmpty else { return }
+
+        let songID = song.id.rawValue
+
+        // Snapshot existing SortedSong rows so undo can recreate them with
+        // their original sortedAt instead of resetting to .now.
+        let sortedDescriptor = FetchDescriptor<SortedSong>(
+            predicate: #Predicate { $0.songID == songID }
+        )
+        let existingRecords = (try? modelContext.fetch(sortedDescriptor)) ?? []
+        let sortedAtByPlaylistAMID: [String: Date] = Dictionary(
+            uniqueKeysWithValues: existingRecords.compactMap { record in
+                guard let amID = record.playlist?.appleMusicPlaylistID else { return nil }
+                return (amID, record.sortedAt)
+            }
+        )
+
+        let snapshots = memberships.map { playlist in
+            PlaylistRemovalSnapshot(
+                playlist: playlist,
+                sortedAt: playlist.appleMusicPlaylistID.flatMap { sortedAtByPlaylistAMID[$0] }
+            )
+        }
+
+        for record in existingRecords {
+            modelContext.delete(record)
+        }
+        try? modelContext.save()
+
+        membershipIndex.removeValue(forKey: songID)
+        membershipsCache.removeValue(forKey: songID)
+        actionHistory.append(.removedFromAllPlaylists(song: song, removals: snapshots))
+
+        let count = snapshots.count
+        let plural = count == 1 ? "" : "s"
+        toastMessage = "Removing from \(count) playlist\(plural)…"
+
+        Task { @MainActor in
+            var failures = 0
+            for snapshot in snapshots {
+                guard let amIDString = snapshot.playlist.appleMusicPlaylistID else { continue }
+                let amID = MusicItemID(amIDString)
+                do {
+                    try await service.removeSong(song, fromPlaylistID: amID)
+                } catch {
+                    failures += 1
+                }
+            }
+            let succeeded = count - failures
+            if failures == 0 {
+                toastMessage = "Removed from \(count) playlist\(plural)"
+            } else {
+                toastMessage = "Removed from \(succeeded), \(failures) failed"
+            }
+        }
+    }
+
     func createPlaylist(name: String, addToSidebar: Bool) async {
         do {
             let amPlaylist = try await service.createPlaylist(name: name)
@@ -760,6 +825,52 @@ final class MusicSwipeViewModel {
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
+
+        case .removedFromAllPlaylists(let song, let removals):
+            // Recreate any SortedSong rows that existed, preserving sortedAt.
+            for removal in removals {
+                if let sortedAt = removal.sortedAt {
+                    let record = SortedSong(songID: song.id.rawValue, playlist: removal.playlist)
+                    record.sortedAt = sortedAt
+                    modelContext.insert(record)
+                }
+            }
+            try? modelContext.save()
+
+            // Rebuild membership index for this song in one shot.
+            let restoredAMIDs = removals.compactMap { snapshot -> MusicItemID? in
+                guard let amID = snapshot.playlist.appleMusicPlaylistID else { return nil }
+                return MusicItemID(amID)
+            }
+            if !restoredAMIDs.isEmpty {
+                membershipIndex[song.id.rawValue] = restoredAMIDs
+                membershipsCache.removeValue(forKey: song.id.rawValue)
+            }
+
+            // The card never advanced, so no pushBackToFront — undo restores
+            // memberships in place. Apple Music re-adds happen in the
+            // background; toast reports the outcome.
+            let count = removals.count
+            let plural = count == 1 ? "" : "s"
+            toastMessage = "Restoring to \(count) playlist\(plural)…"
+
+            Task { @MainActor in
+                var failures = 0
+                for removal in removals {
+                    guard let amIDString = removal.playlist.appleMusicPlaylistID else { continue }
+                    let amID = MusicItemID(amIDString)
+                    do {
+                        try await service.addSong(song, toPlaylistID: amID)
+                    } catch {
+                        failures += 1
+                    }
+                }
+                if failures == 0 {
+                    toastMessage = "Restored to \(count) playlist\(plural)"
+                } else {
+                    toastMessage = "Restored to \(count - failures), \(failures) failed"
+                }
+            }
         }
     }
 
@@ -983,6 +1094,15 @@ final class MusicSwipeViewModel {
 
 // MARK: - Supporting Types
 
+/// Captures a single playlist the song was removed from, plus enough state
+/// to recreate the corresponding `SortedSong` row on undo. `sortedAt` is
+/// nil when the song was only in the Apple Music playlist (added outside
+/// Culla) — undo still re-adds to Apple Music but skips the local row.
+struct PlaylistRemovalSnapshot {
+    let playlist: Playlist
+    let sortedAt: Date?
+}
+
 enum SwipeAction {
     case dismissed(song: Song, record: DismissedSong)
     /// Left-swipe on a song that *already* has a DismissedSong row (resurfaced
@@ -1000,6 +1120,11 @@ enum SwipeAction {
     /// `originalDismissedAt` lets undo restore the prior dismissed timestamp
     /// so the song goes back where it was, not to "now".
     case lovedFromDismissed(song: Song, playlist: Playlist, record: SortedSong, originalDismissedAt: Date)
+    /// Long-press menu in Dismissed mode → "Remove from all playlists".
+    /// Strips the song from every Apple Music playlist it was in. The
+    /// `DismissedSong` row is untouched. Undo re-adds the song to each
+    /// playlist and recreates any `SortedSong` rows that previously existed.
+    case removedFromAllPlaylists(song: Song, removals: [PlaylistRemovalSnapshot])
 }
 
 /// Key under which the loved-playlist's Apple Music ID is persisted. Stored

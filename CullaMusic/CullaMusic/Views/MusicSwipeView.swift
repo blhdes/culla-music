@@ -9,6 +9,11 @@ struct MusicSwipeView: View {
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
 
+    /// One-time discovery hint for the long-press cleanup menu. Flips to true
+    /// the first time the user successfully long-presses in Dismissed mode (or
+    /// taps the banner's close button).
+    @AppStorage("hasSeenDismissedLongPressTip") private var hasSeenDismissedLongPressTip: Bool = false
+
     @Environment(\.appAccent) private var paletteAccent
 
     // Dynamic accent pair sampled from the current song's artwork. Nil → fall
@@ -27,7 +32,7 @@ struct MusicSwipeView: View {
     @State private var showManageSheet = false
 
     // Destructive long-press menu in Dismissed mode
-    @State private var showRemoveAllConfirm = false
+    @State private var showRemovalSheet = false
 
     @Environment(\.openURL) private var openURL
 
@@ -89,12 +94,14 @@ struct MusicSwipeView: View {
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }
             toastTimer?.cancel()
+            let duration: Duration = viewModel.toastUndoable ? .seconds(6) : .seconds(1.4)
             toastTimer = Task {
-                try? await Task.sleep(for: .seconds(1.4))
+                try? await Task.sleep(for: duration)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.3)) {
                         viewModel.toastMessage = nil
+                        viewModel.toastUndoable = false
                     }
                 }
             }
@@ -149,11 +156,7 @@ struct MusicSwipeView: View {
         }
         .overlay(alignment: .top) {
             if let toast = viewModel.toastMessage {
-                Text(toast)
-                    .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                toastCapsule(message: toast)
                     .padding(.top, 12)
                     .opacity(chromeOpacity)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -164,6 +167,49 @@ struct MusicSwipeView: View {
                 .padding(.bottom, 32)
                 .opacity(chromeOpacity)
         }
+        .overlay(alignment: .top) {
+            if shouldShowDismissedLongPressTip {
+                dismissedLongPressTip
+                    .padding(.top, 60)
+                    .padding(.horizontal, 20)
+                    .opacity(chromeOpacity)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+    }
+
+    private var shouldShowDismissedLongPressTip: Bool {
+        viewModel.config.mode == .dismissed
+            && !hasSeenDismissedLongPressTip
+            && !viewModel.isEmpty
+            && !viewModel.isLoading
+    }
+
+    @ViewBuilder
+    private var dismissedLongPressTip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "hand.tap.fill")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text("Long-press a card for cleanup options")
+                .font(.footnote)
+                .foregroundStyle(.primary)
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    hasSeenDismissedLongPressTip = true
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 
     /// Card stack with the right gesture set for the current mode. Dismissed
@@ -184,25 +230,86 @@ struct MusicSwipeView: View {
 
         if viewModel.config.mode == .dismissed {
             base
-                .contextMenu { dismissedMenuItems }
-                .confirmationDialog(
-                    removeAllConfirmTitle,
-                    isPresented: $showRemoveAllConfirm,
-                    titleVisibility: .visible,
-                    presenting: viewModel.currentSong
-                ) { _ in
-                    Button("Remove all", role: .destructive) {
-                        viewModel.removeFromAllPlaylists()
+                .contextMenu {
+                    dismissedMenuItems
+                } preview: {
+                    if let current = viewModel.currentSong {
+                        removalPreview(
+                            song: current,
+                            memberships: viewModel.playlistMemberships(for: current)
+                        )
                     }
-                    Button("Cancel", role: .cancel) {}
-                } message: { current in
-                    Text(viewModel.playlistMemberships(for: current)
-                        .map(\.name)
-                        .joined(separator: ", "))
+                }
+                .simultaneousGesture(
+                    // Fires alongside (not in place of) the system context
+                    // menu's long-press recognizer — 0.45s lines up with when
+                    // the menu actually appears, so the heavy impact reads as
+                    // the menu's own opening feedback. Doubles as the signal
+                    // to retire the one-time discoverability tip.
+                    LongPressGesture(minimumDuration: 0.45)
+                        .onEnded { _ in
+                            Haptics.contextMenuOpen()
+                            if !hasSeenDismissedLongPressTip {
+                                withAnimation(.easeOut(duration: 0.3)) {
+                                    hasSeenDismissedLongPressTip = true
+                                }
+                            }
+                        }
+                )
+                .sheet(isPresented: $showRemovalSheet) {
+                    if let current = viewModel.currentSong {
+                        RemoveFromPlaylistsSheet(
+                            song: current,
+                            memberships: viewModel.playlistMemberships(for: current),
+                            onRemove: { selected in
+                                viewModel.removeFromPlaylists(selected)
+                            }
+                        )
+                    }
                 }
         } else {
             base.gesture(longPressGesture)
         }
+    }
+
+    /// Shown above the dismissed-mode context menu so the user can see what
+    /// they're about to act on — the song plus every playlist it lives in —
+    /// before tapping "Remove from all".
+    @ViewBuilder
+    private func removalPreview(song: Song, memberships: [Playlist]) -> some View {
+        VStack(spacing: 14) {
+            if let artwork = song.artwork {
+                ArtworkImage(artwork, width: 140, height: 140)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            VStack(spacing: 4) {
+                Text(song.title)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Text(song.artistName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if memberships.isEmpty {
+                Text("Not in any of your playlists")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 6) {
+                    Text("In \(memberships.count) playlist\(memberships.count == 1 ? "" : "s")")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Text(memberships.map(\.name).joined(separator: " · "))
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 320)
     }
 
     @ViewBuilder
@@ -211,13 +318,18 @@ struct MusicSwipeView: View {
             let memberships = viewModel.playlistMemberships(for: current)
             if !memberships.isEmpty {
                 Button(role: .destructive) {
-                    showRemoveAllConfirm = true
+                    showRemovalSheet = true
                 } label: {
                     Label(
-                        "Remove from all playlists (\(memberships.count))",
+                        "Remove from playlists… (\(memberships.count))",
                         systemImage: "trash"
                     )
                 }
+            }
+            Button {
+                viewModel.forgetCurrentDismissal()
+            } label: {
+                Label("Forget dismissal", systemImage: "tray.and.arrow.up")
             }
             Button {
                 openSongInAppleMusic(current)
@@ -225,15 +337,6 @@ struct MusicSwipeView: View {
                 Label("Open in Apple Music", systemImage: "arrow.up.right.square")
             }
         }
-    }
-
-    private var removeAllConfirmTitle: String {
-        guard let current = viewModel.currentSong else {
-            return "Remove from all playlists?"
-        }
-        let count = viewModel.playlistMemberships(for: current).count
-        let plural = count == 1 ? "" : "s"
-        return "Remove \"\(current.title)\" from \(count) playlist\(plural)?"
     }
 
     private func openSongInAppleMusic(_ song: Song) {
@@ -500,9 +603,36 @@ struct MusicSwipeView: View {
     }
 
     @ViewBuilder
+    private func toastCapsule(message: String) -> some View {
+        HStack(spacing: 10) {
+            Text(message)
+                .font(.subheadline.weight(.medium))
+            if viewModel.toastUndoable, viewModel.canUndo {
+                Divider().frame(height: 14)
+                Button {
+                    Haptics.undo()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        viewModel.undo()
+                    }
+                    viewModel.toastMessage = nil
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                        .font(.subheadline.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    @ViewBuilder
     private var undoButton: some View {
-        if viewModel.canUndo, showUndo {
+        if viewModel.canUndo, showUndo, !viewModel.toastUndoable {
             Button {
+                Haptics.undo()
                 withAnimation(.easeInOut(duration: 0.2)) {
                     viewModel.undo()
                 }

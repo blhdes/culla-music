@@ -12,6 +12,7 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
   - **Library** — full library minus what the app has already touched.
   - **Unsorted** — songs not in any of your personal playlists (editorial / replay / personalMix / external are hidden by default).
   - **Dismissed** — the rejected pile, with an un-dismiss path.
+- **Dismissed-mode cleanup menu** — long-press a dismissed card to see a preview of every playlist that song lives in, then **selectively strip it from any subset** of them (toggleable rows, all selected by default). Or pick **Forget dismissal** to un-dismiss without sorting. Destructive removals get a 6 s inline-snackbar Undo that also cancels the in-flight Apple Music task before reverting — no remove/add race.
 - **Source playlist sorting** — point the deck at a specific playlist, then **COPY** songs into other playlists or **MOVE** them out as you go. Read-only sources (Apple-curated, shared, smart Favorites) are allowed too, locked to copy.
 - **Up-swipe = Loved** — pull a card upward to drop the song into a "Loved" playlist. Defaults to a Culla-created *Culla Loves* (auto-created on first up-swipe); any of your own playlists can be picked as the target in Settings.
 - **Hot-clip preview** (optional) — plays Apple Music's curated ~30s preview instead of streaming from 0:00. Faster triage, no 20-second intro to skip.

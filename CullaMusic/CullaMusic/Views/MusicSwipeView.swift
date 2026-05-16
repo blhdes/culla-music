@@ -232,10 +232,13 @@ struct MusicSwipeView: View {
             base
                 // `contentShape(.contextMenuPreview, …)` defines the shape iOS
                 // uses for the press-in lift, separately from the view's hit
-                // area. Without this, the lift snapshots the full-bleed
-                // SongCardView (which `.ignoresSafeArea()`s) and the snapshot
-                // gets clipped against the screen edges. The rounded rect
-                // gives the lift a clean card-like silhouette.
+                // area. Without it, the lift snapshots the full-bleed
+                // SongCardView (which `.ignoresSafeArea()`s) and clips
+                // against the screen edges. A rounded rect over the whole
+                // card gives a clean card-like silhouette. We can't shrink
+                // it to just the cover — iOS clips the entire source view
+                // to this shape during the press, which would hide the
+                // title/artist/chips for the duration of the hold.
                 .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 28))
                 .contextMenu {
                     dismissedMenuItems

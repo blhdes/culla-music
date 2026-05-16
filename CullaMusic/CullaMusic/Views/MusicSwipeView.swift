@@ -57,6 +57,21 @@ struct MusicSwipeView: View {
                 }
             }
         }
+        .overlay(alignment: .topLeading) {
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.title3.weight(.medium))
+                        .frame(width: 24, height: 24)
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 16)
+                .padding(.top, 8)
+                .opacity(chromeOpacity)
+            }
+        }
         .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
         .environment(\.appAccent, effectiveAccent.primary)
@@ -130,21 +145,6 @@ struct MusicSwipeView: View {
                     .allowsHitTesting(false)
                     .onPreferenceChange(PlaylistFramePreferenceKey.self) { frames in
                         playlistFrames = frames
-                    }
-                }
-                .overlay(alignment: .topLeading) {
-                    if let onBack {
-                        Button(action: onBack) {
-                            Image(systemName: "chevron.left")
-                                .font(.title3.weight(.medium))
-                                .frame(width: 24, height: 24)
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 16)
-                        .padding(.top, 8)
-                        .opacity(chromeOpacity)
                     }
                 }
                 .overlay(alignment: .bottomLeading) {
@@ -230,6 +230,13 @@ struct MusicSwipeView: View {
 
         if viewModel.config.mode == .dismissed {
             base
+                // `contentShape(.contextMenuPreview, …)` defines the shape iOS
+                // uses for the press-in lift, separately from the view's hit
+                // area. Without this, the lift snapshots the full-bleed
+                // SongCardView (which `.ignoresSafeArea()`s) and the snapshot
+                // gets clipped against the screen edges. The rounded rect
+                // gives the lift a clean card-like silhouette.
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 28))
                 .contextMenu {
                     dismissedMenuItems
                 } preview: {
@@ -241,11 +248,11 @@ struct MusicSwipeView: View {
                     }
                 }
                 .simultaneousGesture(
-                    // Fires alongside (not in place of) the system context
-                    // menu's long-press recognizer — 0.45s lines up with when
-                    // the menu actually appears, so the heavy impact reads as
-                    // the menu's own opening feedback. Doubles as the signal
-                    // to retire the one-time discoverability tip.
+                    // Fires alongside the system context menu's own long-press
+                    // recognizer. 0.45s lines up with when the menu actually
+                    // appears, so the heavy impact reads as the menu's own
+                    // opening feedback. Doubles as the signal to retire the
+                    // one-time discoverability tip.
                     LongPressGesture(minimumDuration: 0.45)
                         .onEnded { _ in
                             Haptics.contextMenuOpen()

@@ -159,6 +159,19 @@ final class HomeViewModel {
                 }
             }
 
+            // Prune local rows whose Apple Music source no longer exists —
+            // without this, playlists deleted from Apple Music stick around
+            // forever in the picker and sidebar. SwiftData cascades the
+            // delete to their SortedSong records, which is correct: that
+            // history is meaningless once the destination playlist is gone.
+            let liveAMIDs = Set(amPlaylists.map { $0.id.rawValue })
+            for playlist in local {
+                guard let amID = playlist.appleMusicPlaylistID else { continue }
+                if !liveAMIDs.contains(amID) {
+                    modelContext.delete(playlist)
+                }
+            }
+
             try? modelContext.save()
             playlists = fetchLocalPlaylists()
         } catch {
@@ -208,6 +221,7 @@ struct HomeView: View {
                         ModeCard(
                             mode: mode,
                             isSelected: selectedMode == mode,
+                            isDisabled: !sourcePlaylistID.isEmpty,
                             count: count(for: mode),
                             isLoadingCount: isLoadingCount(for: mode)
                         ) {
@@ -217,17 +231,17 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 24)
 
-                if selectedMode == .library {
-                    sourceFilterButton
-                        .padding(.top, 18)
-                        .transition(.opacity)
-                }
-
                 Spacer()
 
                 Divider()
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
+
+                if selectedMode == .library {
+                    sourceFilterButton
+                        .padding(.bottom, 12)
+                        .transition(.opacity)
+                }
 
                 if selectedMode == .library, !sourcePlaylistID.isEmpty {
                     sourceTransferPicker
@@ -432,6 +446,7 @@ struct HomeView: View {
 private struct ModeCard: View {
     let mode: ReviewMode
     let isSelected: Bool
+    let isDisabled: Bool
     let count: Int?
     let isLoadingCount: Bool
     let onTap: () -> Void
@@ -484,7 +499,10 @@ private struct ModeCard: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1.0)
         .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .animation(.easeInOut(duration: 0.2), value: isDisabled)
     }
 }
 

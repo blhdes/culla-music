@@ -37,3 +37,6 @@ Carthage/Build/
 # IDEs
 .idea/
 .vscode/
+
+# Claude Code — per-machine permissions and runtime state
+.claude/

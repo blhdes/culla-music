@@ -167,7 +167,11 @@ final class AccentExtractor {
         }
 
         guard let primaryEntry = stats.max(by: { $0.value.score < $1.value.score }) else {
-            return nil
+            // No bucket cleared the saturation gate → cover is essentially
+            // monochrome. Don't bail: synthesize a tinted-slate pair keyed to
+            // the cover's average lightness so B&W artwork still gets a
+            // coherent sidebar tint instead of falling back to the palette.
+            return monochromeAccent(pixels: pixels, size: size)
         }
         let primaryKey = primaryEntry.key
         let primaryHue = primaryEntry.value.hue
@@ -188,6 +192,45 @@ final class AccentExtractor {
         }
 
         return ArtworkAccent(primary: primaryColor, secondary: secondaryColor)
+    }
+
+    /// Fallback for greyscale artwork: averages lightness across the same
+    /// pixel grid (without the saturation gate) and builds a low-saturation
+    /// tinted-slate pair. Dark covers get a cool slate (steel blue); light
+    /// covers get a warm slate (sand). Per-cover lightness keeps the tint
+    /// visibly varying between B&W songs instead of being one fixed grey.
+    nonisolated private static func monochromeAccent(
+        pixels: UnsafeMutablePointer<UInt8>,
+        size: Int
+    ) -> ArtworkAccent? {
+        var lSum: Double = 0
+        var count = 0
+        for y in 0..<size {
+            for x in 0..<size {
+                let i = (y * size + x) * 4
+                guard pixels[i + 3] > 200 else { continue }
+                let r = Double(pixels[i]) / 255
+                let g = Double(pixels[i + 1]) / 255
+                let b = Double(pixels[i + 2]) / 255
+                let (_, _, l) = rgbToHSL(r: r, g: g, b: b)
+                if l < 0.05 || l > 0.95 { continue }
+                lSum += l
+                count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        let avgL = lSum / Double(count)
+
+        let hue = avgL < 0.5 ? 215.0 / 360.0 : 35.0 / 360.0
+        let s = 0.22
+        let l = min(max(avgL, 0.50), 0.65)
+        let (r1, g1, b1) = hslToRGB(h: hue, s: s, l: l)
+        let primary = Color(red: r1, green: g1, blue: b1)
+
+        let secondHue = (hue + 40.0 / 360.0).truncatingRemainder(dividingBy: 1.0)
+        let (r2, g2, b2) = hslToRGB(h: secondHue, s: s, l: l)
+        let secondary = Color(red: r2, green: g2, blue: b2)
+        return ArtworkAccent(primary: primary, secondary: secondary)
     }
 
     /// Reads the bucket's pre-aggregated centroid + clamps into the

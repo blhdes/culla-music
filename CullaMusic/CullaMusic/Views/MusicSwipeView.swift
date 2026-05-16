@@ -82,7 +82,7 @@ struct MusicSwipeView: View {
                 Task { await refreshDynamicAccent() }
             }
         }
-        .onChange(of: viewModel.actionHistory.count) { _, _ in
+        .onChange(of: viewModel.actionCount) { _, _ in
             flashUndo()
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
@@ -638,7 +638,7 @@ struct MusicSwipeView: View {
                 }
                 flashUndo()
             } label: {
-                let count = viewModel.actionHistory.count
+                let count = viewModel.actionCount
                 Label(
                     count > 1 ? "Undo (\(count))" : "Undo",
                     systemImage: "arrow.uturn.backward"

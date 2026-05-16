@@ -65,8 +65,9 @@ final class MusicSwipeViewModel {
     /// our own freshly-created playlist on a transient timing failure.
     private var sessionCreatedLovedAMID: String?
 
-    private(set) var actionHistory: [SwipeAction] = []
-    var canUndo: Bool { !actionHistory.isEmpty }
+    let undoCoordinator = UndoCoordinator()
+    var canUndo: Bool { undoCoordinator.canUndo }
+    var actionCount: Int { undoCoordinator.count }
 
     // MARK: - Dependencies
 
@@ -101,7 +102,7 @@ final class MusicSwipeViewModel {
     func loadInitial() async {
         guard service.authorizationStatus == .authorized else { return }
         isLoading = true
-        actionHistory.removeAll()
+        undoCoordinator.clear()
         service.resetLibraryCursor()
 
         // Sync is one round-trip and needed for sidebar + chips; keep it
@@ -335,7 +336,7 @@ final class MusicSwipeViewModel {
             let originalDismissedAt = existing.dismissedAt
             existing.dismissedAt = .now
             try? modelContext.save()
-            actionHistory.append(.redismissed(
+            undoCoordinator.record(.redismissed(
                 song: song,
                 record: existing,
                 originalDismissedAt: originalDismissedAt
@@ -351,7 +352,7 @@ final class MusicSwipeViewModel {
         let record = DismissedSong(songID: songID)
         modelContext.insert(record)
         try? modelContext.save()
-        actionHistory.append(.dismissed(song: song, record: record))
+        undoCoordinator.record(.dismissed(song: song, record: record))
         sessionExclusionSet.insert(songID)
         dismissedDates[songID] = record.dismissedAt
         sessionDismissedCount += 1
@@ -365,7 +366,7 @@ final class MusicSwipeViewModel {
         guard let song = currentSong else { return }
         sessionExclusionSet.insert(song.id.rawValue)
         sessionSkippedCount += 1
-        actionHistory.append(.skipped(song: song))
+        undoCoordinator.record(.skipped(song: song))
         setToast("Skipped")
         advance()
     }
@@ -393,7 +394,7 @@ final class MusicSwipeViewModel {
             let sortedRecord = SortedSong(songID: song.id.rawValue, playlist: playlist)
             modelContext.insert(sortedRecord)
             try? modelContext.save()
-            actionHistory.append(.sortedFromDismissed(
+            undoCoordinator.record(.sortedFromDismissed(
                 song: song,
                 playlist: playlist,
                 sortedRecord: sortedRecord,
@@ -415,7 +416,7 @@ final class MusicSwipeViewModel {
         let record = SortedSong(songID: song.id.rawValue, playlist: playlist)
         modelContext.insert(record)
         try? modelContext.save()
-        actionHistory.append(.sorted(song: song, playlist: playlist, record: record))
+        undoCoordinator.record(.sorted(song: song, playlist: playlist, record: record))
         sessionExclusionSet.insert(song.id.rawValue)
         sessionSortedCount += 1
         addMembership(songID: song.id.rawValue, playlistAMID: amID)
@@ -485,7 +486,7 @@ final class MusicSwipeViewModel {
             }
         }
         membershipsCache.removeValue(forKey: songID)
-        actionHistory.append(.removedFromPlaylists(song: song, removals: snapshots))
+        undoCoordinator.record(.removedFromPlaylists(song: song, removals: snapshots))
 
         let count = snapshots.count
         let plural = count == 1 ? "" : "s"
@@ -530,7 +531,7 @@ final class MusicSwipeViewModel {
 
         dismissedDates.removeValue(forKey: songID)
         sessionExclusionSet.insert(songID)
-        actionHistory.append(.forgotDismissal(song: song, dismissedAt: originalDismissedAt))
+        undoCoordinator.record(.forgotDismissal(song: song, dismissedAt: originalDismissedAt))
         setToast("Dismissal forgotten")
         advance()
     }
@@ -602,14 +603,14 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             let recordID = record.id
             if let originalDismissedAt {
-                actionHistory.append(.lovedFromDismissed(
+                undoCoordinator.record(.lovedFromDismissed(
                     song: song,
                     playlist: playlist,
                     record: record,
                     originalDismissedAt: originalDismissedAt
                 ))
             } else {
-                actionHistory.append(.loved(song: song, playlist: playlist, record: record))
+                undoCoordinator.record(.loved(song: song, playlist: playlist, record: record))
             }
             sessionExclusionSet.insert(songID)
             sessionSortedCount += 1
@@ -676,7 +677,7 @@ final class MusicSwipeViewModel {
         playlistAMID: MusicItemID,
         restoreDismissedAt: Date? = nil
     ) {
-        actionHistory.removeAll { action in
+        undoCoordinator.remove { action in
             if case .loved(_, _, let r) = action { return r.id == recordID }
             if case .lovedFromDismissed(_, _, let r, _) = action { return r.id == recordID }
             return false
@@ -805,7 +806,7 @@ final class MusicSwipeViewModel {
     // MARK: - Undo
 
     func undo() {
-        guard let action = actionHistory.popLast() else { return }
+        guard let action = undoCoordinator.popLast() else { return }
         switch action {
         case .dismissed(let song, let record):
             modelContext.delete(record)
@@ -1169,46 +1170,6 @@ final class MusicSwipeViewModel {
     private func fetchSortedSongIDs() -> Set<String> {
         Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
     }
-}
-
-// MARK: - Supporting Types
-
-/// Captures a single playlist the song was removed from, plus enough state
-/// to recreate the corresponding `SortedSong` row on undo. `sortedAt` is
-/// nil when the song was only in the Apple Music playlist (added outside
-/// Culla) — undo still re-adds to Apple Music but skips the local row.
-struct PlaylistRemovalSnapshot {
-    let playlist: Playlist
-    let sortedAt: Date?
-}
-
-enum SwipeAction {
-    case dismissed(song: Song, record: DismissedSong)
-    /// Left-swipe on a song that *already* has a DismissedSong row (resurfaced
-    /// in Unsorted). The row is reused — only its timestamp moves to now —
-    /// so undo restores the original dismissedAt instead of deleting it.
-    case redismissed(song: Song, record: DismissedSong, originalDismissedAt: Date)
-    case sorted(song: Song, playlist: Playlist, record: SortedSong)
-    /// Right-swipe in dismissed mode: un-dismisses + adds to playlist.
-    case sortedFromDismissed(song: Song, playlist: Playlist, sortedRecord: SortedSong, originalDismissedAt: Date)
-    /// Down-swipe: in-session only, song reappears next launch.
-    case skipped(song: Song)
-    /// Up-swipe: adds to the user's loved playlist (auto-created on first use).
-    case loved(song: Song, playlist: Playlist, record: SortedSong)
-    /// Up-swipe on a song that was dismissed: loves it AND un-dismisses it.
-    /// `originalDismissedAt` lets undo restore the prior dismissed timestamp
-    /// so the song goes back where it was, not to "now".
-    case lovedFromDismissed(song: Song, playlist: Playlist, record: SortedSong, originalDismissedAt: Date)
-    /// Long-press cleanup sheet in Dismissed mode → "Remove from playlists".
-    /// Strips the song from a user-chosen subset of its Apple Music playlists.
-    /// The `DismissedSong` row is untouched. Undo re-adds the song to each
-    /// playlist and recreates any `SortedSong` rows that previously existed.
-    case removedFromPlaylists(song: Song, removals: [PlaylistRemovalSnapshot])
-    /// Long-press menu in Dismissed mode → "Forget dismissal". Deletes the
-    /// `DismissedSong` row outright. Any `SortedSong` rows are untouched —
-    /// if the song was in playlists it stays there; otherwise it resurfaces
-    /// in Unsorted. Undo recreates the row with its original `dismissedAt`.
-    case forgotDismissal(song: Song, dismissedAt: Date)
 }
 
 /// Key under which the loved-playlist's Apple Music ID is persisted. Stored

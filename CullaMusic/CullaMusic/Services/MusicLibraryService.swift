@@ -433,7 +433,6 @@ final class MusicLibraryService {
 
     func playPreview(for song: Song) {
         let useHotPreview = UserDefaults.standard.bool(forKey: "useHotPreview")
-        print("[hotpreview] play title=\"\(song.title)\" toggle=\(useHotPreview) previewAssets=\(song.previewAssets?.count ?? 0) isrc=\(song.isrc ?? "nil") id=\(song.id.rawValue)")
         if useHotPreview {
             Task { @MainActor in
                 await playWithHotClipIfPossible(song)
@@ -445,10 +444,8 @@ final class MusicLibraryService {
 
     private func playWithHotClipIfPossible(_ song: Song) async {
         if let url = await resolveHotClipURL(for: song) {
-            print("[hotpreview] playing hot clip: \(url.lastPathComponent)")
             await playHotClip(url: url, songID: song.id.rawValue)
         } else {
-            print("[hotpreview] no preview URL resolved — falling back to full song")
             playFullSong(song)
         }
     }
@@ -458,7 +455,6 @@ final class MusicLibraryService {
     // catalog using title + artist and pick the best title/artist match.
     private func resolveHotClipURL(for song: Song) async -> URL? {
         if let url = song.previewAssets?.first?.url {
-            print("[hotpreview] direct previewAssets URL on song")
             return url
         }
 
@@ -467,7 +463,6 @@ final class MusicLibraryService {
                 let request = MusicCatalogResourceRequest<Song>(matching: \.isrc, equalTo: isrc)
                 let response = try await request.response()
                 if let url = response.items.first?.previewAssets?.first?.url {
-                    print("[hotpreview] isrc lookup matched")
                     return url
                 }
             } catch {
@@ -498,12 +493,7 @@ final class MusicLibraryService {
                 $0.artistName.lowercased() == artistLower
             }) ?? candidates.first(where: { $0.previewAssets?.first?.url != nil })
 
-            if let url = best?.previewAssets?.first?.url {
-                print("[hotpreview] catalog search matched: \"\(best!.title)\" — \(best!.artistName)")
-                return url
-            }
-            print("[hotpreview] catalog search returned \(candidates.count) results, no usable preview")
-            return nil
+            return best?.previewAssets?.first?.url
         } catch {
             print("[hotpreview] catalog search failed: \(error)")
             return nil

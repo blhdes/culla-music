@@ -604,10 +604,11 @@ struct MusicSwipeView: View {
             showManageSheet = true
         } label: {
             Text("Manage")
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+                .font(.footnote.weight(.regular))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial.opacity(0.5), in: Capsule())
         }
         .buttonStyle(.plain)
     }

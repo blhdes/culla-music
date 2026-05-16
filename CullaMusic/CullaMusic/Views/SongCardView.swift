@@ -179,22 +179,16 @@ struct SongCardView: View {
 
         if horizontalDominant, offset.width < 0 {
             let progress = min(abs(offset.width) / swipeThreshold, 1.0)
-            ZStack {
-                Color.red.opacity(0.25 * progress)
-                Image(systemName: "trash.fill")
-                    .font(.system(size: 60))
-                    .foregroundStyle(.white.opacity(0.8 * progress))
-            }
-            .allowsHitTesting(false)
+            Image(systemName: "trash.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(.white.opacity(0.8 * progress))
+                .allowsHitTesting(false)
         } else if !horizontalDominant, offset.height < 0, offset.width < sidebarDeadzone {
             let progress = min(abs(offset.height) / swipeThreshold, 1.0)
-            ZStack {
-                Color.pink.opacity(0.25 * progress)
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 60))
-                    .foregroundStyle(.white.opacity(0.8 * progress))
-            }
-            .allowsHitTesting(false)
+            Image(systemName: "heart.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(.white.opacity(0.8 * progress))
+                .allowsHitTesting(false)
         }
     }
 }

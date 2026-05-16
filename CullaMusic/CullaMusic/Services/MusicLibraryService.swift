@@ -69,6 +69,10 @@ final class MusicLibraryService {
     private var playlistCache: [MusicItemID: MusicKit.Playlist] = [:]
     private var playlistMutationTasks: [MusicItemID: PlaylistMutationTask] = [:]
 
+    /// Per-playlist track-IDs cache. Survives launches; checked before each
+    /// `.with([.tracks])` round-trip so unchanged playlists don't refetch.
+    private let playlistTracksCache = PlaylistTracksCache()
+
     private let player = ApplicationMusicPlayer.shared
     private let clipPlayer = AVPlayer()
     private var clipEndObserver: NSObjectProtocol?
@@ -339,17 +343,36 @@ final class MusicLibraryService {
         let candidates: [MusicKit.Playlist] = playlistCache.values.filter {
             includeCurated || isUserControlled($0.kind)
         }
+        let tracksCache = playlistTracksCache
 
         // TaskGroup child closures are @Sendable and don't capture self —
         // each captures its own `playlist` value, so MusicKit's `.with(...)`
         // round-trips run truly concurrently rather than serialized.
+        //
+        // Each child first asks `tracksCache` whether the playlist's
+        // `lastModifiedDate` matches what we last fetched. On hit, we skip
+        // the round-trip entirely (the expensive bit). On miss/refetch,
+        // we upsert the fresh result back for next launch.
         let perPlaylist: [(MusicItemID, [String])] = try await withThrowingTaskGroup(
             of: (MusicItemID, [String]).self
         ) { group in
             for playlist in candidates {
                 group.addTask {
+                    let amID = playlist.id.rawValue
+                    let modifiedAt = playlist.lastModifiedDate
+                    if let cached = await tracksCache.tracks(
+                        forPlaylist: amID,
+                        modifiedAt: modifiedAt
+                    ) {
+                        return (playlist.id, cached)
+                    }
                     let populated: MusicKit.Playlist = try await playlist.with([.tracks])
                     let ids = (populated.tracks ?? []).map { $0.id.rawValue }
+                    await tracksCache.upsert(
+                        playlistAMID: amID,
+                        modifiedAt: modifiedAt,
+                        trackIDs: ids
+                    )
                     return (playlist.id, ids)
                 }
             }
@@ -360,6 +383,13 @@ final class MusicLibraryService {
             }
             return results
         }
+
+        // Drop entries for playlists no longer in the library. Pruning
+        // against the FULL playlistCache (not just `candidates`) so toggling
+        // the curated filter doesn't drop cached entries we'll want back
+        // when the toggle flips.
+        let validIDs = Set(playlistCache.values.map { $0.id.rawValue })
+        await playlistTracksCache.prune(keepingIDs: validIDs)
 
         var index: [String: [MusicItemID]] = [:]
         var songIDs = Set<String>()

@@ -369,6 +369,7 @@ struct MusicSwipeView: View {
                     playbackPosition: 0,
                     playbackDuration: 0,
                     memberships: viewModel.playlistMemberships(for: next),
+                    isLoadingMemberships: viewModel.membershipIndex.showsLoadingPlaceholder,
                     dismissedAt: viewModel.dismissedDate(for: next),
                     onTogglePlay: {},
                     onSeek: { _ in }
@@ -392,6 +393,7 @@ struct MusicSwipeView: View {
                     playbackPosition: isPlayingThis ? service.playbackPosition : 0,
                     playbackDuration: isPlayingThis ? service.playbackDuration : 0,
                     memberships: viewModel.playlistMemberships(for: current),
+                    isLoadingMemberships: viewModel.membershipIndex.showsLoadingPlaceholder,
                     dismissedAt: viewModel.dismissedDate(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) }

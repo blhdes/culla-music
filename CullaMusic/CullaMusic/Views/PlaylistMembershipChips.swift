@@ -5,11 +5,23 @@ struct PlaylistMembershipChips: View {
     var dismissedAt: Date? = nil
     var maxVisible: Int = 3
 
+    /// Set to true on cold launch while the membership index is being built
+    /// for the first time. When there's nothing to render yet, we show a
+    /// single pulsing placeholder pill so the empty space doesn't read as
+    /// "this song has no memberships." Ignored once we have anything to show.
+    var isLoading: Bool = false
+
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+    @State private var placeholderPulse: Bool = false
 
     var body: some View {
         if playlists.isEmpty && dismissedAt == nil {
-            EmptyView()
+            if isLoading {
+                placeholderChip
+                    .padding(.top, 2)
+            } else {
+                EmptyView()
+            }
         } else {
             HStack(spacing: 6) {
                 if let dismissedAt {
@@ -90,12 +102,31 @@ struct PlaylistMembershipChips: View {
             .padding(.vertical, 3)
             .background(.quaternary, in: Capsule())
     }
+
+    /// Width-matched to a typical playlist name so the layout doesn't jump
+    /// when real chips slide in. Pulse animation is subtle on purpose —
+    /// loud enough to signal "loading," quiet enough not to draw the eye
+    /// away from the song's title.
+    private var placeholderChip: some View {
+        Capsule()
+            .fill(.quaternary)
+            .frame(width: 72, height: 20)
+            .opacity(placeholderPulse ? 0.7 : 0.35)
+            .animation(
+                .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                value: placeholderPulse
+            )
+            .onAppear { placeholderPulse = true }
+    }
 }
 
 #Preview {
     VStack(spacing: 24) {
         PlaylistMembershipChips(playlists: [])
         Text("(empty — no row)")
+
+        PlaylistMembershipChips(playlists: [], isLoading: true)
+        Text("(loading — pulsing placeholder)")
 
         let p1 = Playlist(name: "Workout", displayOrder: 0)
         let p2 = Playlist(name: "Chill Evenings", displayOrder: 1)

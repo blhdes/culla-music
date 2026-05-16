@@ -59,7 +59,9 @@ CullaMusic/
     ├── CullaMusicApp.swift
     ├── Models/        — Playlist, SortedSong, DismissedSong, SwipeConfig
     ├── Services/      — MusicLibraryService (MusicKit, players, playlist CRUD)
-    ├── ViewModels/    — MusicSwipeViewModel (deck state, undo, membership)
+    ├── ViewModels/    — MusicSwipeViewModel (deck state) + extracted coordinators:
+    │                    UndoCoordinator, MembershipIndex, LovedPlaylistResolver,
+    │                    DismissedDateStore
     ├── Views/         — Home, Swipe, Sidebar, Manage, Settings sheets
     ├── Helpers/       — AccentPalette, Haptics, shared modifiers
     └── Assets.xcassets/

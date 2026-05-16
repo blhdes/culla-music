@@ -43,9 +43,8 @@ final class AccentExtractor {
         if let cached = cache[id] { return cached }
         if let existing = inFlight[id] { return await existing.value }
 
-        let url = song.artwork?.url(width: 64, height: 64)
         let task = Task<ArtworkAccent?, Never> {
-            guard let url else { return nil }
+            guard let url = await Self.resolveHTTPSArtworkURL(for: song) else { return nil }
             return await Self.extract(from: url)
         }
         inFlight[id] = task
@@ -53,6 +52,50 @@ final class AccentExtractor {
         inFlight.removeValue(forKey: id)
         if let accent { cache[id] = accent }
         return accent
+    }
+
+    // MARK: - URL resolution
+
+    /// Returns a publicly-fetchable HTTPS artwork URL for the song.
+    ///
+    /// Library songs can hand back `musicKit://` artwork URLs that
+    /// `URLSession` can't resolve, so the pixel extractor would silently nil
+    /// out for any library item that wasn't catalog-matched as HTTPS. We
+    /// bridge via the song's catalog twin (ISRC → title+artist) to get a
+    /// public URL, mirroring the same trick `MusicLibraryService` already
+    /// uses for hot-clip preview URLs.
+    private static func resolveHTTPSArtworkURL(for song: Song) async -> URL? {
+        if let url = song.artwork?.url(width: 64, height: 64), url.scheme == "https" {
+            return url
+        }
+
+        if let isrc = song.isrc, !isrc.isEmpty {
+            let request = MusicCatalogResourceRequest<Song>(matching: \.isrc, equalTo: isrc)
+            if let match = try? await request.response().items.first,
+               let url = match.artwork?.url(width: 64, height: 64),
+               url.scheme == "https" {
+                return url
+            }
+        }
+
+        var search = MusicCatalogSearchRequest(
+            term: "\(song.title) \(song.artistName)",
+            types: [Song.self]
+        )
+        search.limit = 10
+        guard let response = try? await search.response() else { return nil }
+
+        let titleLower = song.title.lowercased()
+        let artistLower = song.artistName.lowercased()
+        let best = response.songs.first(where: {
+            $0.title.lowercased() == titleLower &&
+            $0.artistName.lowercased() == artistLower
+        }) ?? response.songs.first
+
+        if let url = best?.artwork?.url(width: 64, height: 64), url.scheme == "https" {
+            return url
+        }
+        return nil
     }
 
     // MARK: - Extraction

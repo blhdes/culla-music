@@ -46,11 +46,10 @@ final class MusicSwipeViewModel {
     /// the action immediately.
     let membershipIndex: MembershipIndex
 
-    /// Per-song dismissal timestamps for every `DismissedSong` row (any age).
-    /// Drives the "Dismissed Xmo ago" chip on the card. Kept in sync alongside
-    /// SwiftData mutations so the chip lookup stays O(1) — the view reads it
-    /// on every drag frame.
-    private(set) var dismissedDates: [String: Date] = [:]
+    /// Per-song dismissal timestamps + the SwiftData queries that read
+    /// `DismissedSong` rows. Kept in lockstep with VM-owned inserts/deletes
+    /// via `set` / `remove`.
+    let dismissedStore: DismissedDateStore
 
     /// Resolves the up-swipe target — the user's picked playlist, an existing
     /// "Culla Loves", or a freshly-created one. Owns the eventual-consistency
@@ -90,6 +89,7 @@ final class MusicSwipeViewModel {
         self.modelContext = modelContext
         self.membershipIndex = MembershipIndex(service: service)
         self.lovedResolver = LovedPlaylistResolver(service: service, modelContext: modelContext)
+        self.dismissedStore = DismissedDateStore(modelContext: modelContext)
         // Wire post-init closures: capturing `self` inside the property
         // initializers above isn't allowed yet (self isn't fully constructed).
         // Weak captures so the coordinators don't outlive the VM.
@@ -121,7 +121,7 @@ final class MusicSwipeViewModel {
             switch config.mode {
             case .library:
                 sessionExclusionSet = fetchExcludedIdentifiers()
-                dismissedDates = fetchAllDismissedDates()
+                dismissedStore.loadAll()
                 let songs = try await fetchNextSessionSongs()
                 populateQueue(with: songs)
                 // Membership chips fill in once the index lands — the card is
@@ -139,12 +139,12 @@ final class MusicSwipeViewModel {
                 membershipIndex.setIndex(data.membershipIndex)
                 let sortedIDs = fetchSortedSongIDs()
                 // Only *recent* dismissals stay excluded — anything older than
-                // dismissedResurfaceAfter comes back into the deck so the user
-                // can give it another chance (marked with the "Dismissed Xmo
-                // ago" chip).
-                let recentDismissed = fetchRecentDismissedSongIDs()
+                // DismissedDateStore.resurfaceWindow comes back into the deck
+                // so the user can give it another chance (marked with the
+                // "Dismissed Xmo ago" chip).
+                let recentDismissed = dismissedStore.recentSongIDs()
                 sessionExclusionSet = data.songIDs.union(sortedIDs).union(recentDismissed)
-                dismissedDates = fetchAllDismissedDates()
+                dismissedStore.loadAll()
                 let songs = try await service.fetchNextLibrarySongs(
                     excluding: sessionExclusionSet,
                     desired: batchSize,
@@ -153,7 +153,7 @@ final class MusicSwipeViewModel {
                 populateQueue(with: songs)
 
             case .dismissed:
-                dismissedDates = fetchAllDismissedDates()
+                dismissedStore.loadAll()
                 try await loadDismissedDeck()
                 Task { @MainActor in await membershipIndex.rebuild() }
             }
@@ -171,7 +171,7 @@ final class MusicSwipeViewModel {
         songQueue.removeAll()
         sessionExclusionSet = []
         membershipIndex.reset()
-        dismissedDates = [:]
+        dismissedStore.reset()
         isEmpty = false
         await loadInitial()
     }
@@ -198,7 +198,7 @@ final class MusicSwipeViewModel {
                 includeCurated: !chipToggleOn
             )
             let sortedIDs = fetchSortedSongIDs()
-            let recentDismissed = fetchRecentDismissedSongIDs()
+            let recentDismissed = dismissedStore.recentSongIDs()
             sessionExclusionSet = playlistSongIDs.union(sortedIDs).union(recentDismissed)
         } catch {
             print("refreshUnsortedExclusion failed: \(error)")
@@ -307,7 +307,7 @@ final class MusicSwipeViewModel {
         // from Unsorted (resurfaced old dismissals) and from Dismissed mode
         // itself (every card has a record). Bump the timestamp so the deck
         // re-orders by recency next session instead of orphaning duplicates.
-        if let existing = fetchDismissedRecord(for: songID) {
+        if let existing = dismissedStore.record(for: songID) {
             let originalDismissedAt = existing.dismissedAt
             existing.dismissedAt = .now
             try? modelContext.save()
@@ -317,7 +317,7 @@ final class MusicSwipeViewModel {
                 originalDismissedAt: originalDismissedAt
             ))
             sessionExclusionSet.insert(songID)
-            dismissedDates[songID] = existing.dismissedAt
+            dismissedStore.set(songID: songID, date: existing.dismissedAt)
             sessionDismissedCount += 1
             setToast("Dismissed")
             advance()
@@ -329,7 +329,7 @@ final class MusicSwipeViewModel {
         try? modelContext.save()
         undoCoordinator.record(.dismissed(song: song, record: record))
         sessionExclusionSet.insert(songID)
-        dismissedDates[songID] = record.dismissedAt
+        dismissedStore.set(songID: songID, date: record.dismissedAt)
         sessionDismissedCount += 1
         setToast("Dismissed")
         advance()
@@ -363,7 +363,7 @@ final class MusicSwipeViewModel {
             let originalDismissedAt = dismissedRecord?.dismissedAt ?? .now
             if let dismissedRecord {
                 modelContext.delete(dismissedRecord)
-                dismissedDates.removeValue(forKey: song.id.rawValue)
+                dismissedStore.remove(songID: song.id.rawValue)
             }
 
             let sortedRecord = SortedSong(songID: song.id.rawValue, playlist: playlist)
@@ -492,13 +492,13 @@ final class MusicSwipeViewModel {
     func forgetCurrentDismissal() {
         guard let song = currentSong else { return }
         let songID = song.id.rawValue
-        guard let record = fetchDismissedRecord(for: songID) else { return }
+        guard let record = dismissedStore.record(for: songID) else { return }
 
         let originalDismissedAt = record.dismissedAt
         modelContext.delete(record)
         try? modelContext.save()
 
-        dismissedDates.removeValue(forKey: songID)
+        dismissedStore.remove(songID: songID)
         sessionExclusionSet.insert(songID)
         undoCoordinator.record(.forgotDismissal(song: song, dismissedAt: originalDismissedAt))
         setToast("Dismissal forgotten")
@@ -560,11 +560,11 @@ final class MusicSwipeViewModel {
             // song lives in both the Loved playlist and the Dismissed deck,
             // which is contradictory. The original dismissedAt rides along
             // so undo can restore the prior state.
-            let dismissedRecord = fetchDismissedRecord(for: songID)
+            let dismissedRecord = dismissedStore.record(for: songID)
             let originalDismissedAt = dismissedRecord?.dismissedAt
             if let dismissedRecord {
                 modelContext.delete(dismissedRecord)
-                dismissedDates.removeValue(forKey: songID)
+                dismissedStore.remove(songID: songID)
             }
 
             let record = SortedSong(songID: songID, playlist: playlist)
@@ -653,7 +653,7 @@ final class MusicSwipeViewModel {
             let restored = DismissedSong(songID: songID)
             restored.dismissedAt = restoreDismissedAt
             modelContext.insert(restored)
-            dismissedDates[songID] = restoreDismissedAt
+            dismissedStore.set(songID: songID, date: restoreDismissedAt)
         }
 
         try? modelContext.save()
@@ -672,7 +672,7 @@ final class MusicSwipeViewModel {
             modelContext.delete(record)
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
-            dismissedDates.removeValue(forKey: song.id.rawValue)
+            dismissedStore.remove(songID: song.id.rawValue)
             sessionDismissedCount = max(sessionDismissedCount - 1, 0)
             pushBackToFront(song: song)
 
@@ -682,7 +682,7 @@ final class MusicSwipeViewModel {
             record.dismissedAt = originalDismissedAt
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
-            dismissedDates[song.id.rawValue] = originalDismissedAt
+            dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             sessionDismissedCount = max(sessionDismissedCount - 1, 0)
             pushBackToFront(song: song)
 
@@ -708,7 +708,7 @@ final class MusicSwipeViewModel {
             modelContext.insert(restored)
             try? modelContext.save()
             sessionSortedCount = max(sessionSortedCount - 1, 0)
-            dismissedDates[song.id.rawValue] = originalDismissedAt
+            dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
@@ -730,7 +730,7 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
-            dismissedDates[song.id.rawValue] = originalDismissedAt
+            dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
@@ -791,7 +791,7 @@ final class MusicSwipeViewModel {
             modelContext.insert(restored)
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
-            dismissedDates[song.id.rawValue] = dismissedAt
+            dismissedStore.set(songID: song.id.rawValue, date: dismissedAt)
             pushBackToFront(song: song)
         }
     }
@@ -923,45 +923,10 @@ final class MusicSwipeViewModel {
         return excluded
     }
 
-    /// Dismissals younger than this resurface in Unsorted with a red pill.
-    /// Older ones stay excluded so the deck doesn't suddenly flood with
-    /// months of rejected tracks. Library mode still hides every dismissal.
-    private static let dismissedResurfaceAfter: TimeInterval = 30 * 24 * 60 * 60
-
-    /// IDs of dismissals still within the resurface window — Unsorted unions
-    /// these into its exclusion set so only stale dismissals come back.
-    private func fetchRecentDismissedSongIDs() -> Set<String> {
-        let cutoff = Date().addingTimeInterval(-Self.dismissedResurfaceAfter)
-        let descriptor = FetchDescriptor<DismissedSong>(
-            predicate: #Predicate { $0.dismissedAt > cutoff }
-        )
-        return Set((try? modelContext.fetch(descriptor))?.map(\.songID) ?? [])
-    }
-
-    /// Snapshot of every song's dismissal timestamp. Used to seed the
-    /// in-memory `dismissedDates` map on load.
-    private func fetchAllDismissedDates() -> [String: Date] {
-        let descriptor = FetchDescriptor<DismissedSong>()
-        let records = (try? modelContext.fetch(descriptor)) ?? []
-        var dict: [String: Date] = [:]
-        for r in records { dict[r.songID] = r.dismissedAt }
-        return dict
-    }
-
-    /// Fetches the single `DismissedSong` row for this songID, if any.
-    /// Used by the re-dismiss path so we can bump the timestamp instead of
-    /// inserting a duplicate.
-    private func fetchDismissedRecord(for songID: String) -> DismissedSong? {
-        let descriptor = FetchDescriptor<DismissedSong>(
-            predicate: #Predicate { $0.songID == songID }
-        )
-        return (try? modelContext.fetch(descriptor))?.first
-    }
-
-    /// Returns the dismissal timestamp for this song, or nil if it isn't
-    /// dismissed. Drives the "Dismissed Xmo ago" chip on the card.
+    /// Passthrough to `dismissedStore.date(for:)` — view body reads this on
+    /// every drag frame; keeping the API on the VM avoids reaching through.
     func dismissedDate(for song: Song) -> Date? {
-        dismissedDates[song.id.rawValue]
+        dismissedStore.date(for: song)
     }
 
     private func fetchNextSessionSongs() async throws -> [Song] {

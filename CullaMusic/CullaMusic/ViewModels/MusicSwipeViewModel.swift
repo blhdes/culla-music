@@ -41,22 +41,16 @@ final class MusicSwipeViewModel {
     private(set) var sessionDismissedCount: Int = 0
     private(set) var sessionSkippedCount: Int = 0
 
-    /// Per-song Apple Music playlist memberships. Built once per session and
-    /// updated optimistically when the user sorts / undoes a sort.
-    private(set) var membershipIndex: [String: [MusicItemID]] = [:]
+    /// Per-song Apple Music playlist memberships + memoized local-Playlist
+    /// resolution. Updated optimistically on sort/love/remove so chips reflect
+    /// the action immediately.
+    let membershipIndex: MembershipIndex
 
     /// Per-song dismissal timestamps for every `DismissedSong` row (any age).
     /// Drives the "Dismissed Xmo ago" chip on the card. Kept in sync alongside
     /// SwiftData mutations so the chip lookup stays O(1) — the view reads it
     /// on every drag frame.
     private(set) var dismissedDates: [String: Date] = [:]
-
-    /// Memoized result of `playlistMemberships(for:)` keyed by songID. The
-    /// view body calls that method on every drag frame, so without this we'd
-    /// re-filter+sort the playlists array 60 times per second AND hand SwiftUI
-    /// a fresh array reference each time (forcing the card to re-render).
-    /// Invalidated whenever `playlists` or `membershipIndex` changes.
-    private var membershipsCache: [String: [Playlist]] = [:]
 
     /// Apple Music ID of the loved playlist that *this* process created via
     /// `resolveOrCreateLovedPlaylist`. Lets `loveCurrent` distinguish "first
@@ -93,8 +87,16 @@ final class MusicSwipeViewModel {
     @MainActor
     init(config: SwipeConfig, modelContext: ModelContext) {
         self.config = config
-        self.service = MusicLibraryService.shared
+        let service = MusicLibraryService.shared
+        self.service = service
         self.modelContext = modelContext
+        self.membershipIndex = MembershipIndex(service: service)
+        // Wire post-init closures: capturing `self` inside the property
+        // initializers above isn't allowed yet (self isn't fully constructed).
+        // Weak captures so the coordinators don't outlive the VM.
+        self.membershipIndex.setPlaylistsProvider { [weak self] in
+            self?.playlists ?? []
+        }
     }
 
     // MARK: - Initial Load
@@ -119,7 +121,7 @@ final class MusicSwipeViewModel {
                 populateQueue(with: songs)
                 // Membership chips fill in once the index lands — the card is
                 // already on screen by then.
-                Task { @MainActor in await rebuildMembershipIndex() }
+                Task { @MainActor in await membershipIndex.rebuild() }
 
             case .unsorted:
                 // Unsorted needs every playlist's tracks anyway (to compute the
@@ -129,8 +131,7 @@ final class MusicSwipeViewModel {
                 let data = try await service.fetchAllPlaylistData(
                     includeCurated: !chipToggleOn
                 )
-                membershipIndex = data.membershipIndex
-                membershipsCache.removeAll(keepingCapacity: true)
+                membershipIndex.setIndex(data.membershipIndex)
                 let sortedIDs = fetchSortedSongIDs()
                 // Only *recent* dismissals stay excluded — anything older than
                 // dismissedResurfaceAfter comes back into the deck so the user
@@ -149,7 +150,7 @@ final class MusicSwipeViewModel {
             case .dismissed:
                 dismissedDates = fetchAllDismissedDates()
                 try await loadDismissedDeck()
-                Task { @MainActor in await rebuildMembershipIndex() }
+                Task { @MainActor in await membershipIndex.rebuild() }
             }
         } catch {
             print("loadInitial failed: \(error)")
@@ -164,8 +165,7 @@ final class MusicSwipeViewModel {
         nextSong = nil
         songQueue.removeAll()
         sessionExclusionSet = []
-        membershipIndex = [:]
-        membershipsCache.removeAll(keepingCapacity: true)
+        membershipIndex.reset()
         dismissedDates = [:]
         isEmpty = false
         await loadInitial()
@@ -173,19 +173,11 @@ final class MusicSwipeViewModel {
 
     // MARK: - Playlist Membership Index
 
-    /// Builds the per-song playlist membership index from Apple Music.
-    /// Reads the `membershipIncludeCurated` toggle to decide whether to include
-    /// editorial / replay / personalMix playlists.
+    /// Passthrough to `membershipIndex.rebuild()` so callers (and the view's
+    /// onChange handler for the curated toggle) don't have to reach through
+    /// the coordinator.
     func rebuildMembershipIndex() async {
-        let includeCurated = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
-        do {
-            membershipIndex = try await service.fetchPlaylistMembershipIndex(
-                includeCurated: includeCurated
-            )
-            membershipsCache.removeAll(keepingCapacity: true)
-        } catch {
-            print("rebuildMembershipIndex failed: \(error)")
-        }
+        await membershipIndex.rebuild()
     }
 
     /// Recomputes the exclusion set in unsorted mode after the toggle flips.
@@ -208,33 +200,11 @@ final class MusicSwipeViewModel {
         }
     }
 
-    /// Returns the local `Playlist` rows (sorted by displayOrder) that the
-    /// given song currently belongs to. Returns an empty array when the song
-    /// isn't in any tracked playlist.
-    ///
-    /// Memoized — the view body asks for this on every drag frame for both
-    /// current and next song; without the cache we'd re-filter+sort the
-    /// playlists array at 60 Hz and SwiftUI would see a brand-new array each
-    /// time, churning the card view.
+    /// Passthrough to `membershipIndex.memberships(for:)` — kept on the VM so
+    /// the view's call sites (read on every drag frame) don't have to reach
+    /// through the coordinator. Memoization lives in `MembershipIndex`.
     func playlistMemberships(for song: Song) -> [Playlist] {
-        let id = song.id.rawValue
-        if let cached = membershipsCache[id] { return cached }
-
-        let ids = membershipIndex[id] ?? []
-        let result: [Playlist]
-        if ids.isEmpty {
-            result = []
-        } else {
-            let idStrings = Set(ids.map(\.rawValue))
-            result = playlists
-                .filter {
-                    guard let amID = $0.appleMusicPlaylistID else { return false }
-                    return idStrings.contains(amID)
-                }
-                .sorted { $0.displayOrder < $1.displayOrder }
-        }
-        membershipsCache[id] = result
-        return result
+        membershipIndex.memberships(for: song)
     }
 
     // MARK: - Playlists Sync
@@ -312,7 +282,7 @@ final class MusicSwipeViewModel {
     /// — going through this helper means no caller forgets the invalidation.
     private func refreshLocalPlaylists() {
         playlists = fetchLocalPlaylists()
-        membershipsCache.removeAll(keepingCapacity: true)
+        membershipIndex.invalidateCache()
     }
 
     func setSidebar(_ playlist: Playlist, included: Bool) {
@@ -477,15 +447,9 @@ final class MusicSwipeViewModel {
 
         // Drop only the affected AM IDs from the membership index — any
         // playlists the user left checked stay in place.
-        if var current = membershipIndex[songID] {
-            current.removeAll { targetAMIDs.contains($0.rawValue) }
-            if current.isEmpty {
-                membershipIndex.removeValue(forKey: songID)
-            } else {
-                membershipIndex[songID] = current
-            }
+        for amID in targetAMIDs {
+            membershipIndex.remove(songID: songID, playlistAMID: amID)
         }
-        membershipsCache.removeValue(forKey: songID)
         undoCoordinator.record(.removedFromPlaylists(song: song, removals: snapshots))
 
         let count = snapshots.count
@@ -578,7 +542,7 @@ final class MusicSwipeViewModel {
             let amID = MusicItemID(amIDString)
 
             // Already loved? Skip silently — chip + a toast tell the user.
-            let existing = membershipIndex[song.id.rawValue] ?? []
+            let existing = membershipIndex.index[song.id.rawValue] ?? []
             if existing.contains(amID) {
                 setToast("Already loved")
                 advance()
@@ -892,20 +856,12 @@ final class MusicSwipeViewModel {
             }
             try? modelContext.save()
 
-            // Merge restored AM IDs back into the membership index. We can't
-            // overwrite — the user may have left some playlists checked, and
-            // those are still in the index. Dedup preserves the existing order.
-            let restoredAMIDs = removals.compactMap { snapshot -> MusicItemID? in
-                guard let amID = snapshot.playlist.appleMusicPlaylistID else { return nil }
-                return MusicItemID(amID)
-            }
-            if !restoredAMIDs.isEmpty {
-                var current = membershipIndex[song.id.rawValue] ?? []
-                for amID in restoredAMIDs where !current.contains(amID) {
-                    current.append(amID)
-                }
-                membershipIndex[song.id.rawValue] = current
-                membershipsCache.removeValue(forKey: song.id.rawValue)
+            // Merge restored AM IDs back into the membership index. `add` is
+            // dedup-safe — playlists the user left checked stay in place, and
+            // the existing order is preserved.
+            for snapshot in removals {
+                guard let amID = snapshot.playlist.appleMusicPlaylistID else { continue }
+                membershipIndex.add(songID: song.id.rawValue, playlistAMID: MusicItemID(amID))
             }
 
             // The card never advanced, so no pushBackToFront — undo restores
@@ -955,23 +911,11 @@ final class MusicSwipeViewModel {
     }
 
     private func addMembership(songID: String, playlistAMID: MusicItemID) {
-        var current = membershipIndex[songID] ?? []
-        if !current.contains(playlistAMID) {
-            current.append(playlistAMID)
-            membershipIndex[songID] = current
-        }
-        membershipsCache.removeValue(forKey: songID)
+        membershipIndex.add(songID: songID, playlistAMID: playlistAMID)
     }
 
     private func removeMembership(songID: String, playlistAMID: String?) {
-        guard let playlistAMID, var current = membershipIndex[songID] else { return }
-        current.removeAll { $0.rawValue == playlistAMID }
-        if current.isEmpty {
-            membershipIndex.removeValue(forKey: songID)
-        } else {
-            membershipIndex[songID] = current
-        }
-        membershipsCache.removeValue(forKey: songID)
+        membershipIndex.remove(songID: songID, playlistAMID: playlistAMID)
     }
 
     private func remoteRemove(song: Song, fromPlaylist playlist: Playlist) {

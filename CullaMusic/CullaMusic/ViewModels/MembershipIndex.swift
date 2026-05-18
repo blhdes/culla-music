@@ -49,6 +49,12 @@ final class MembershipIndex {
     /// Memoized resolution of `index` into local `Playlist` rows.
     private var cache: [String: [Playlist]] = [:]
 
+    /// Memoized inversion of `index` into `[playlistAMID: trackCount]`. Used by
+    /// the playlist sheets to show a per-row count badge without re-walking the
+    /// per-song map on every render. Lazily built on first read and cleared
+    /// whenever `index` mutates.
+    private var countsCache: [String: Int]?
+
     private let service: MusicLibraryService
 
     /// Lookup closure that returns the current `playlists` array from the VM.
@@ -80,6 +86,7 @@ final class MembershipIndex {
     func reset() {
         index = [:]
         cache.removeAll(keepingCapacity: true)
+        countsCache = nil
         hasEverLoaded = false
     }
 
@@ -91,11 +98,30 @@ final class MembershipIndex {
         cache.removeAll(keepingCapacity: true)
     }
 
+    /// Returns the number of indexed songs belonging to the given playlist, or
+    /// `nil` if `amID` is nil. Editable playlists are always walked, so a
+    /// missing key safely means "0 tracks indexed". Curated/read-only
+    /// playlists may be absent when the curated toggle is off.
+    func trackCount(forPlaylistAMID amID: String?) -> Int? {
+        guard let amID else { return nil }
+        if countsCache == nil {
+            var counts: [String: Int] = [:]
+            for amIDs in index.values {
+                for itemID in amIDs {
+                    counts[itemID.rawValue, default: 0] += 1
+                }
+            }
+            countsCache = counts
+        }
+        return countsCache?[amID] ?? 0
+    }
+
     /// Replaces the raw index wholesale (e.g. after a fetch from Apple Music).
     /// Invalidates the cache and triggers a debounced disk write.
     func setIndex(_ newIndex: [String: [MusicItemID]]) {
         index = newIndex
         cache.removeAll(keepingCapacity: true)
+        countsCache = nil
         hasEverLoaded = true
         schedulePersist()
     }
@@ -109,6 +135,7 @@ final class MembershipIndex {
             index[songID] = current
         }
         cache.removeValue(forKey: songID)
+        countsCache = nil
         hasEverLoaded = true
         schedulePersist()
     }
@@ -122,6 +149,7 @@ final class MembershipIndex {
             index[songID] = current
         }
         cache.removeValue(forKey: songID)
+        countsCache = nil
         schedulePersist()
     }
 
@@ -186,6 +214,29 @@ final class MembershipIndex {
             create: true
         ) else { return nil }
         return cachesDir.appendingPathComponent(persistenceFilename)
+    }
+
+    /// Reads the persisted index file directly and returns a per-playlist track
+    /// count snapshot. Used by surfaces that don't have a live `MembershipIndex`
+    /// instance (e.g. `HomeView`'s source picker). One rebuild stale at worst —
+    /// the in-memory index persists with a 250 ms debounce.
+    nonisolated static func diskCountsSnapshot() -> [String: Int] {
+        guard let url = persistenceURL,
+              FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        do {
+            let data = try Data(contentsOf: url)
+            let raw = try JSONDecoder().decode([String: [String]].self, from: data)
+            var counts: [String: Int] = [:]
+            for amIDs in raw.values {
+                for amID in amIDs {
+                    counts[amID, default: 0] += 1
+                }
+            }
+            return counts
+        } catch {
+            print("MembershipIndex.diskCountsSnapshot failed: \(error)")
+            return [:]
+        }
     }
 
     private func loadPersisted() {

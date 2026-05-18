@@ -9,6 +9,11 @@ struct SourcePlaylistPickerSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// Per-playlist track counts loaded from the persisted membership index.
+    /// HomeView has no live `MembershipIndex`, so we read the on-disk snapshot
+    /// the swipe screen writes after each rebuild/swipe.
+    @State private var trackCounts: [String: Int] = [:]
+
     var body: some View {
         NavigationStack {
             List {
@@ -32,6 +37,11 @@ struct SourcePlaylistPickerSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .task {
+                trackCounts = await Task.detached(priority: .userInitiated) {
+                    MembershipIndex.diskCountsSnapshot()
+                }.value
             }
         }
     }
@@ -71,6 +81,16 @@ struct SourcePlaylistPickerSheet: View {
         .buttonStyle(.plain)
     }
 
+    /// Track count to show, or nil to omit the badge. Editable playlists are
+    /// always walked, so a missing key means a true zero. Read-only playlists
+    /// may be skipped when the curated toggle is off — in that case we'd rather
+    /// show nothing than lie with "0".
+    private func displayCount(for playlist: Playlist) -> Int? {
+        guard let amID = playlist.appleMusicPlaylistID else { return nil }
+        if let count = trackCounts[amID] { return count }
+        return playlist.isEditable ? 0 : nil
+    }
+
     private func playlistRow(_ playlist: Playlist) -> some View {
         let isSelected = playlist.appleMusicPlaylistID == selectedID
         return Button {
@@ -91,6 +111,13 @@ struct SourcePlaylistPickerSheet: View {
                 }
 
                 Spacer()
+
+                if let count = displayCount(for: playlist) {
+                    Text(count, format: .number)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
 
                 if isSelected {
                     Image(systemName: "checkmark")

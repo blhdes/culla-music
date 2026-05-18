@@ -98,6 +98,15 @@ struct ManagePlaylistsSheet: View {
 
                 Spacer()
 
+                if let count = viewModel.membershipIndex.trackCount(
+                    forPlaylistAMID: playlist.appleMusicPlaylistID
+                ) {
+                    Text(count, format: .number)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+
                 if isOn {
                     Image(systemName: "checkmark")
                         .foregroundStyle(.tint)

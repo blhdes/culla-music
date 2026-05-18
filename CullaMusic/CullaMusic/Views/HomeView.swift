@@ -360,9 +360,13 @@ struct HomeView: View {
         Button {
             showSourcePicker = true
         } label: {
-            HStack {
-                Image(systemName: "music.note.list")
+            HStack(spacing: 10) {
                 if let playlist = selectedSourcePlaylist {
+                    PlaylistCoverView(
+                        appleMusicPlaylistID: playlist.appleMusicPlaylistID,
+                        size: 28,
+                        cornerRadius: 6
+                    )
                     Text(playlist.name)
                     Spacer()
                     Button {
@@ -373,14 +377,16 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text("General Library")
+                    Image(systemName: "music.note.list")
+                    Text("All Library")
                     Spacer()
-                    Text("Sort from a playlist")
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
             .modifier(GlassOrQuaternaryRounded())
         }
         .buttonStyle(.plain)

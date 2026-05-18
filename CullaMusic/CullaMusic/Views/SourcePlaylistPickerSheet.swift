@@ -55,13 +55,8 @@ struct SourcePlaylistPickerSheet: View {
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("General Library")
-                        .foregroundStyle(.primary)
-                    Text("Your full music library")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("All Library")
+                    .foregroundStyle(.primary)
 
                 Spacer()
 
@@ -85,8 +80,15 @@ struct SourcePlaylistPickerSheet: View {
             HStack(spacing: 12) {
                 PlaylistCoverView(appleMusicPlaylistID: playlist.appleMusicPlaylistID)
 
-                Text(playlist.name)
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .foregroundStyle(.primary)
+                    if !playlist.isEditable {
+                        Text("Read-only")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Spacer()
 

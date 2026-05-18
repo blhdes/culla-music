@@ -150,7 +150,15 @@ final class MusicLibraryService {
             playlistSongIDs[id] = try await fetchSongIDs(inPlaylistID: id)
         }
 
-        let ids = playlistSongIDs[id] ?? []
+        // MusicKit returns tracks in playlist position (oldest-added at the
+        // top, newly-added at the bottom). For "newest first" we walk the
+        // array in reverse so freshly-loved songs surface first instead of
+        // being buried 100+ pages deep. The previous libraryAddedDate sort
+        // only reshuffled within the 50-song slice — and used the wrong field
+        // (library-add date, not playlist-add date) — so it could never lift
+        // newer playlist entries past older ones.
+        let rawIDs = playlistSongIDs[id] ?? []
+        let ids = ascending ? rawIDs : Array(rawIDs.reversed())
         var offset = playlistPageOffsets[id] ?? 0
         var selectedIDs: [String] = []
 
@@ -167,12 +175,7 @@ final class MusicLibraryService {
             playlistExhausted.insert(id)
         }
 
-        let songs = try await resolveSongs(ids: selectedIDs)
-        return songs.sorted {
-            let lhs = $0.libraryAddedDate ?? .distantPast
-            let rhs = $1.libraryAddedDate ?? .distantPast
-            return ascending ? lhs < rhs : lhs > rhs
-        }
+        return try await resolveSongs(ids: selectedIDs)
     }
 
     // MARK: - Playlists

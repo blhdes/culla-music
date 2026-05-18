@@ -914,21 +914,14 @@ final class MusicSwipeViewModel {
 
     private func fetchExcludedIdentifiers() -> Set<String> {
         var excluded = Set<String>()
-        // When sorting *from* a source playlist, songs whose only Sorted
-        // record points to the source itself should still appear — otherwise
-        // freshly-loved songs (which auto-create a SortedSong→CullaLoves row)
-        // get filtered out the moment you pick CullaLoves as the source.
-        // We exclude a song only when it has at least one SortedSong record
-        // pointing to a different playlist.
-        let sourceAMID = config.sourcePlaylistID
-        if let sorted = try? modelContext.fetch(FetchDescriptor<SortedSong>()) {
-            for record in sorted {
-                if let sourceAMID,
-                   record.playlist?.appleMusicPlaylistID == sourceAMID {
-                    continue
-                }
-                excluded.insert(record.songID)
-            }
+        // Source-playlist mode is "revisit this collection with purity" — we
+        // show everything in the playlist regardless of prior sorts so the
+        // user can freely re-categorize, with chips revealing existing
+        // memberships. Only dismissals (a strong "don't show me again" signal)
+        // still filter the deck.
+        if config.sourcePlaylistID == nil,
+           let sorted = try? modelContext.fetch(FetchDescriptor<SortedSong>()) {
+            excluded.formUnion(sorted.map(\.songID))
         }
         if let dismissed = try? modelContext.fetch(FetchDescriptor<DismissedSong>()) {
             excluded.formUnion(dismissed.map(\.songID))

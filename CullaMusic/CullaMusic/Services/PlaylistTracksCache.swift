@@ -24,7 +24,7 @@ actor PlaylistTracksCache {
     private var persistTask: Task<Void, Never>?
 
     init() {
-        loadPersisted()
+        entries = Self.loadPersisted()
     }
 
     /// Returns cached track IDs only when both sides have a non-nil
@@ -68,14 +68,15 @@ actor PlaylistTracksCache {
         return cachesDir.appendingPathComponent(filename)
     }
 
-    private func loadPersisted() {
-        guard let url = Self.fileURL,
-              FileManager.default.fileExists(atPath: url.path) else { return }
+    nonisolated private static func loadPersisted() -> [String: Entry] {
+        guard let url = fileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return [:] }
         do {
             let data = try Data(contentsOf: url)
-            entries = try JSONDecoder().decode([String: Entry].self, from: data)
+            return try JSONDecoder().decode([String: Entry].self, from: data)
         } catch {
             print("PlaylistTracksCache.loadPersisted failed: \(error)")
+            return [:]
         }
     }
 

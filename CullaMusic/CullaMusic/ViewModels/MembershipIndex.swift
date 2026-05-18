@@ -173,7 +173,7 @@ final class MembershipIndex {
 
     // MARK: - Persistence
 
-    private static let persistenceFilename = "membership_index.json"
+    nonisolated private static let persistenceFilename = "membership_index.json"
 
     // `nonisolated` so the detached persist task can resolve the URL without
     // hopping back to the main actor. The body only touches FileManager, which

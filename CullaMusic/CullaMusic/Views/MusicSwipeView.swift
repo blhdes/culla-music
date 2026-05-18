@@ -31,6 +31,12 @@ struct MusicSwipeView: View {
     // Sheet
     @State private var showManageSheet = false
 
+    /// Artist hub sheet — non-nil identifies the song whose artist we want to
+    /// inspect. `.sheet(item:)` re-keys on the song's id, so opening the hub
+    /// on a different card after dismissal cleanly re-resolves instead of
+    /// flashing stale state from the prior song.
+    @State private var artistSheetSong: Song?
+
     // Destructive long-press menu in Dismissed mode
     @State private var showRemovalSheet = false
 
@@ -78,6 +84,9 @@ struct MusicSwipeView: View {
         .environment(\.appAccentSecondary, effectiveAccent.secondary)
         .sheet(isPresented: $showManageSheet) {
             ManagePlaylistsSheet(viewModel: viewModel)
+        }
+        .sheet(item: $artistSheetSong) { song in
+            ArtistDetailSheet(song: song)
         }
         .task(id: viewModel.currentSong?.id.rawValue) {
             await refreshDynamicAccent()
@@ -396,7 +405,8 @@ struct MusicSwipeView: View {
                     isLoadingMemberships: viewModel.membershipIndex.showsLoadingPlaceholder,
                     dismissedAt: viewModel.dismissedDate(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
-                    onSeek: { service.seek(to: $0) }
+                    onSeek: { service.seek(to: $0) },
+                    onShowArtist: { artistSheetSong = current }
                 )
                 .id(current.id.rawValue)
                 .transition(.asymmetric(

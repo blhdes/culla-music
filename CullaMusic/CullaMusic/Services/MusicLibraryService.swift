@@ -431,6 +431,41 @@ final class MusicLibraryService {
         }
     }
 
+    // MARK: - Artist Hub
+
+    /// Resolves the catalog `Artist` for a song so we can present a rich detail
+    /// sheet. Tries the song's `.artists` relationship first (works for catalog
+    /// songs), then falls back to a catalog search by `artistName` for
+    /// library-only or uploaded tracks. Returns nil only when both paths miss —
+    /// the caller degrades to a name-only view in that case.
+    func resolveArtist(for song: Song) async throws -> Artist? {
+        let populated = try await song.with([.artists])
+        if let direct = populated.artists?.first {
+            return direct
+        }
+
+        let term = song.artistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return nil }
+
+        var request = MusicCatalogSearchRequest(term: term, types: [Artist.self])
+        request.limit = 5
+        let response = try await request.response()
+
+        // Prefer an exact (case-insensitive) name match so common-name
+        // collisions don't surface the wrong artist; fall back to the first
+        // result when no exact hit exists.
+        let lower = term.lowercased()
+        return response.artists.first(where: { $0.name.lowercased() == lower })
+            ?? response.artists.first
+    }
+
+    /// Hydrates an `Artist` with the relationships the hub renders.
+    /// `topSongs` and `similarArtists` are nil until fetched; we always need
+    /// both for the sheet, so pull them in one round-trip.
+    func loadArtistDetail(_ artist: Artist) async throws -> Artist {
+        try await artist.with([.topSongs, .similarArtists])
+    }
+
     // MARK: - Dismissed Mode
 
     /// Resolves a list of song IDs to Song objects by paging through the library.

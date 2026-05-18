@@ -12,6 +12,10 @@ struct SongCardView: View {
     var dismissedAt: Date? = nil
     let onTogglePlay: () -> Void
     let onSeek: (TimeInterval) -> Void
+    /// Optional — when set and the card is settled (no active drag), shows a
+    /// small info button next to the artist name. Not wired on the next-card
+    /// (underneath) instance so the button never appears on the obscured card.
+    var onShowArtist: (() -> Void)? = nil
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
@@ -49,11 +53,7 @@ struct SongCardView: View {
                                 .multilineTextAlignment(.center)
                                 .lineLimit(2)
 
-                            Text(song.artistName)
-                                .font(.headline.weight(.regular))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(1)
+                            artistRow(for: song)
 
                             PlaylistMembershipChips(
                                 playlists: memberships,
@@ -75,6 +75,37 @@ struct SongCardView: View {
             .clipped()
         }
         .ignoresSafeArea()
+    }
+
+    /// Artist name + an optional info button to open the artist hub. The info
+    /// button only appears on the top, settled card (no active drag) so it
+    /// can't fight the swipe gesture and never shows on the obscured next card.
+    @ViewBuilder
+    private func artistRow(for song: Song) -> some View {
+        let canShowInfo = (onShowArtist != nil) && offset == .zero
+
+        HStack(spacing: 6) {
+            Text(song.artistName)
+                .font(.headline.weight(.regular))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if canShowInfo {
+                Button {
+                    onShowArtist?()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Artist info")
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: canShowInfo)
     }
 
     @ViewBuilder

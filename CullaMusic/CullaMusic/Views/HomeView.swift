@@ -6,7 +6,7 @@ import MusicKit
 
 @Observable
 final class HomeViewModel {
-    var dismissedCount: Int = 0
+    var dismissedCount: Int? = nil  // nil = computing
     var unsortedCount: Int? = nil   // nil = computing
     var libraryCount: Int? = nil    // nil = computing
     var playlists: [Playlist] = []
@@ -18,9 +18,11 @@ final class HomeViewModel {
     }
 
     func loadCounts() async {
-        await syncPlaylistsFromAppleMusic()
+        // Local SwiftData fetch — paint the dismissed card immediately
+        // instead of waiting on the Apple Music playlist sync round-trip.
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
+        await syncPlaylistsFromAppleMusic()
         await recomputeCounts()
     }
 
@@ -34,6 +36,7 @@ final class HomeViewModel {
     func recomputeCounts() async {
         let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
+        dismissedCount = dismissedSnapshot
         let today = todayString()
         let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
 
@@ -74,7 +77,11 @@ final class HomeViewModel {
             }
             let sortedIDs = Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
             let dismissedIDs = Set((try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? [])
-            let unsortedExclusion = playlistIDs.union(sortedIDs)
+            // Unsorted = "still needs a decision": not in any playlist, not
+            // already sorted, and not dismissed. Dismissed must be excluded
+            // here — otherwise the unsorted cache fingerprint (which includes
+            // dismissedSnapshot) invalidates without the count ever changing.
+            let unsortedExclusion = playlistIDs.union(sortedIDs).union(dismissedIDs)
             let libraryExclusion = sortedIDs.union(dismissedIDs)
 
             var libCount = 0
@@ -442,7 +449,7 @@ struct HomeView: View {
         switch mode {
         case .library:   return homeVM?.libraryCount == nil
         case .unsorted:  return homeVM?.unsortedCount == nil
-        case .dismissed: return false
+        case .dismissed: return homeVM?.dismissedCount == nil
         }
     }
 }

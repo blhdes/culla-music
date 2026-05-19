@@ -237,14 +237,7 @@ struct SourceScopePickerSheet: View {
                     if let artwork = artist.artwork {
                         ArtworkImage(artwork, width: 44, height: 44)
                     } else {
-                        Rectangle()
-                            .fill(.quaternary)
-                            .overlay(
-                                Image(systemName: "person.fill")
-                                    .font(.body)
-                                    .foregroundStyle(.secondary)
-                            )
-                            .frame(width: 44, height: 44)
+                        ArtistPlaceholder(name: artist.name, size: 44)
                     }
                 }
                 .clipShape(Circle())
@@ -264,5 +257,45 @@ struct SourceScopePickerSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - ArtistPlaceholder
+
+/// Fallback artwork for library artists whose `.artwork` is nil — Apple only
+/// attaches artist images to library entries matched against the catalog, so
+/// upload-only or obscure artists land here. Renders a colored circle with the
+/// artist's initial; the hue is hashed from the name so the same artist gets
+/// the same color across launches.
+struct ArtistPlaceholder: View {
+    let name: String
+    let size: CGFloat
+
+    var body: some View {
+        Circle()
+            .fill(color.gradient)
+            .frame(width: size, height: size)
+            .overlay(
+                Text(initial)
+                    .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            )
+    }
+
+    private var initial: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return "?" }
+        return String(first).uppercased()
+    }
+
+    private var color: Color {
+        // djb2 hash → hue. Saturation/brightness fixed for a coherent palette
+        // across the artist list.
+        var hash: UInt64 = 5381
+        for scalar in name.unicodeScalars {
+            hash = hash &* 33 &+ UInt64(scalar.value)
+        }
+        let hue = Double(hash % 360) / 360.0
+        return Color(hue: hue, saturation: 0.5, brightness: 0.72)
     }
 }

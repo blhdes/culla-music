@@ -485,8 +485,8 @@ struct HomeView: View {
                 size: 28,
                 cornerRadius: 6
             )
-        case .artist(let id, _):
-            ArtistThumbnail(artistID: id, size: 28)
+        case .artist(let id, let name):
+            ArtistThumbnail(artistID: id, artistName: name, size: 28)
         }
     }
 
@@ -566,8 +566,11 @@ struct HomeView: View {
 /// Renders an artist's library artwork as a small circular thumbnail for the
 /// source button. Reads the cached `Artist` from `MusicLibraryService` rather
 /// than refetching — the picker sheet primes the cache when it lists artists.
+/// Falls back to an initials placeholder when the library artist has no
+/// catalog-matched artwork.
 private struct ArtistThumbnail: View {
     let artistID: String
+    let artistName: String
     let size: CGFloat
 
     var body: some View {
@@ -575,14 +578,7 @@ private struct ArtistThumbnail: View {
             if let artwork = MusicLibraryService.shared.artwork(forArtistID: artistID) {
                 ArtworkImage(artwork, width: size, height: size)
             } else {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay(
-                        Image(systemName: "person.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    )
-                    .frame(width: size, height: size)
+                ArtistPlaceholder(name: artistName, size: size)
             }
         }
         .clipShape(Circle())

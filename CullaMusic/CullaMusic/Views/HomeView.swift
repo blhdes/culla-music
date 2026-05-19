@@ -359,7 +359,20 @@ struct HomeView: View {
                 MembershipIndex.diskCountsSnapshot()
             }.value
             await vm.loadCounts()
-            sourceTrackCounts = await counts
+            let initialSnapshot = await counts
+            sourceTrackCounts = initialSnapshot
+
+            // Cold-launch backstop: the persisted snapshot is written by the
+            // swipe screen's membership index. On a fresh install the user
+            // might pick a source before ever opening the swipe screen — in
+            // that case there's no snapshot yet and the Library count would
+            // render empty. Build the index here so both the Library card
+            // and the source picker have data on first launch.
+            if initialSnapshot.isEmpty, !vm.playlists.isEmpty {
+                let index = MembershipIndex(service: MusicLibraryService.shared)
+                await index.rebuild()
+                sourceTrackCounts = index.countsSnapshot()
+            }
         }
         .onChange(of: selectedMode) { _, newValue in
             if newValue != .library {

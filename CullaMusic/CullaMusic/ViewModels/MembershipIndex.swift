@@ -216,6 +216,20 @@ final class MembershipIndex {
         return cachesDir.appendingPathComponent(persistenceFilename)
     }
 
+    /// Per-playlist track count snapshot derived from the live in-memory
+    /// `index`. Same shape as `diskCountsSnapshot()` but doesn't depend on
+    /// the debounced disk write having flushed — useful immediately after
+    /// a `rebuild()` when callers need fresh counts right away.
+    func countsSnapshot() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for amIDs in index.values {
+            for itemID in amIDs {
+                counts[itemID.rawValue, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
     /// Reads the persisted index file directly and returns a per-playlist track
     /// count snapshot. Used by surfaces that don't have a live `MembershipIndex`
     /// instance (e.g. `HomeView`'s source picker). One rebuild stale at worst —

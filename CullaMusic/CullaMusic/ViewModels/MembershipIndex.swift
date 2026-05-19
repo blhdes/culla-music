@@ -253,6 +253,45 @@ final class MembershipIndex {
         }
     }
 
+    // MARK: - Artist counts persistence
+
+    nonisolated private static let artistCountsFilename = "artist_track_counts.json"
+
+    nonisolated private static var artistCountsURL: URL? {
+        guard let cachesDir = try? FileManager.default.url(
+            for: .cachesDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return cachesDir.appendingPathComponent(artistCountsFilename)
+    }
+
+    /// Per-artist library track count snapshot read from disk. Empty when no
+    /// snapshot has been written yet — caller decides whether to trigger a
+    /// fresh fetch via `MusicLibraryService.fetchAllArtistTrackCounts()`.
+    nonisolated static func diskArtistCountsSnapshot() -> [String: Int] {
+        guard let url = artistCountsURL,
+              FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        do {
+            let data = try Data(contentsOf: url)
+            return try JSONDecoder().decode([String: Int].self, from: data)
+        } catch {
+            print("MembershipIndex.diskArtistCountsSnapshot failed: \(error)")
+            return [:]
+        }
+    }
+
+    nonisolated static func writeArtistCounts(_ counts: [String: Int]) {
+        guard let url = artistCountsURL else { return }
+        do {
+            let data = try JSONEncoder().encode(counts)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("MembershipIndex.writeArtistCounts failed: \(error)")
+        }
+    }
+
     private func loadPersisted() {
         guard let url = Self.persistenceURL,
               FileManager.default.fileExists(atPath: url.path) else { return }

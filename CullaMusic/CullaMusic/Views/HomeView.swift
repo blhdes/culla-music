@@ -367,14 +367,18 @@ struct HomeView: View {
             let vm = HomeViewModel(modelContext: modelContext)
             homeVM = vm
             // Load source counts off the main actor in parallel with loadCounts.
-            // diskCountsSnapshot does file IO + JSON decode, so we don't want
-            // it on the main thread blocking the first frame.
+            // Both snapshots do file IO + JSON decode, so we don't want them
+            // on the main thread blocking the first frame.
             async let counts = Task.detached(priority: .userInitiated) {
                 MembershipIndex.diskCountsSnapshot()
+            }.value
+            async let artistCounts = Task.detached(priority: .userInitiated) {
+                MembershipIndex.diskArtistCountsSnapshot()
             }.value
             await vm.loadCounts()
             let initialSnapshot = await counts
             sourceTrackCounts = initialSnapshot
+            artistTrackCounts = await artistCounts
 
             // Cold-launch backstop: the persisted snapshot is written by the
             // swipe screen's membership index. On a fresh install the user

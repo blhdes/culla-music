@@ -286,6 +286,68 @@ final class MusicLibraryService {
         return artist
     }
 
+    /// Computes per-artist library track counts in one batch. One filtered
+    /// request per artist (`.artists, contains:`), running 8 at a time so a
+    /// power user with 500+ artists doesn't fire 500 simultaneous requests at
+    /// MusicKit. Individual artist failures are logged and skipped — partial
+    /// results are more useful than a wholesale failure.
+    func fetchAllArtistTrackCounts() async throws -> [String: Int] {
+        let artists = try await refreshLibraryArtists()
+        guard !artists.isEmpty else { return [:] }
+        let maxConcurrent = 8
+
+        return await withTaskGroup(of: (String, Int)?.self) { group in
+            var counts: [String: Int] = [:]
+            counts.reserveCapacity(artists.count)
+            var nextIndex = 0
+
+            let seed = min(maxConcurrent, artists.count)
+            while nextIndex < seed {
+                let artist = artists[nextIndex]
+                nextIndex += 1
+                group.addTask { await Self.safeCountLibrarySongs(for: artist) }
+            }
+
+            while let result = await group.next() {
+                if let (id, count) = result {
+                    counts[id] = count
+                }
+                if nextIndex < artists.count {
+                    let artist = artists[nextIndex]
+                    nextIndex += 1
+                    group.addTask { await Self.safeCountLibrarySongs(for: artist) }
+                }
+            }
+            return counts
+        }
+    }
+
+    // `nonisolated` so the task-group children don't all serialize on the
+    // main actor — we want real parallelism for the batch fetch.
+    nonisolated private static func safeCountLibrarySongs(
+        for artist: Artist
+    ) async -> (String, Int)? {
+        do {
+            var request = MusicLibraryRequest<Song>()
+            request.filter(matching: \.artists, contains: artist)
+            request.limit = 100
+            var total = 0
+            var offset = 0
+            while true {
+                request.offset = offset
+                let response = try await request.response()
+                let page = response.items
+                total += page.count
+                if page.count < 100 { break }
+                offset += page.count
+            }
+            return (artist.id.rawValue, total)
+        } catch {
+            print("Artist count failed for \(artist.name): \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Playlists
 
     @discardableResult

@@ -17,6 +17,11 @@ struct SourceScopePickerSheet: View {
     @State private var trackCounts: [String: Int] = [:]
     @State private var libraryArtists: [Artist] = []
     @State private var isLoadingArtists: Bool = false
+    /// Per-artist library track counts. Loaded from disk on open (instant if
+    /// previously persisted), then refreshed via a parallel batch when the
+    /// disk snapshot is empty.
+    @State private var artistTrackCounts: [String: Int] = [:]
+    @State private var isLoadingCounts: Bool = false
     @State private var pickerMode: PickerMode = .playlists
 
     enum PickerMode: String, CaseIterable, Identifiable {
@@ -109,15 +114,25 @@ struct SourceScopePickerSheet: View {
                     .listRowBackground(Color.clear)
                 }
             } else if !libraryArtists.isEmpty {
-                Section("Artists") {
+                Section {
                     ForEach(libraryArtists, id: \.id) { artist in
                         artistRow(artist)
+                    }
+                } header: {
+                    HStack {
+                        Text("Artists")
+                        Spacer()
+                        if isLoadingCounts && artistTrackCounts.isEmpty {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
             }
         }
         .task {
             await loadArtistsIfNeeded()
+            await loadArtistCountsIfNeeded()
         }
     }
 
@@ -132,6 +147,34 @@ struct SourceScopePickerSheet: View {
             }
         } catch {
             print("SourceScopePickerSheet.loadArtists failed: \(error)")
+        }
+    }
+
+    /// Hydrates `artistTrackCounts` from disk first (instant render of any
+    /// prior snapshot), then fires a fresh parallel batch if disk was empty.
+    /// On success, persists the snapshot so subsequent opens skip the fetch.
+    private func loadArtistCountsIfNeeded() async {
+        if artistTrackCounts.isEmpty {
+            let disk = await Task.detached(priority: .userInitiated) {
+                MembershipIndex.diskArtistCountsSnapshot()
+            }.value
+            if !disk.isEmpty {
+                artistTrackCounts = disk
+                return
+            }
+        } else {
+            return
+        }
+
+        guard !isLoadingCounts else { return }
+        isLoadingCounts = true
+        defer { isLoadingCounts = false }
+        do {
+            let fresh = try await MusicLibraryService.shared.fetchAllArtistTrackCounts()
+            artistTrackCounts = fresh
+            MembershipIndex.writeArtistCounts(fresh)
+        } catch {
+            print("SourceScopePickerSheet.loadArtistCounts failed: \(error)")
         }
     }
 
@@ -247,6 +290,13 @@ struct SourceScopePickerSheet: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                if let count = artistTrackCounts[artist.id.rawValue] {
+                    Text(count, format: .number)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
 
                 if isSelected {
                     Image(systemName: "checkmark")

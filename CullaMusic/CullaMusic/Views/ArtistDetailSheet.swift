@@ -202,23 +202,9 @@ private struct ArtistDetailView: View {
     }
 
     private var googleButton: some View {
-        Button {
-            showGoogle = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                Text("Search on Google")
-                    .fontWeight(.medium)
-                Spacer()
-                Image(systemName: "arrow.up.right.square")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 16)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
-        .disabled(googleURL == nil)
+        GoogleSearchButton { showGoogle = true }
+            .disabled(googleURL == nil)
+            .frame(maxWidth: .infinity)
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -310,6 +296,35 @@ private struct SimilarArtistTile: View {
     }
 }
 
+private struct GoogleSearchButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image("google-g")
+                    .resizable()
+                    .renderingMode(.original)
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                Text("Search on Google")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .background(
+                Capsule().fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                Capsule().strokeBorder(.quaternary, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct FallbackArtistView: View {
     let name: String
     @State private var showGoogle = false
@@ -337,16 +352,8 @@ private struct FallbackArtistView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button {
-                showGoogle = true
-            } label: {
-                Label("Search on Google", systemImage: "magnifyingglass")
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 18)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-            }
-            .buttonStyle(.plain)
-            .disabled(googleURL == nil)
+            GoogleSearchButton { showGoogle = true }
+                .disabled(googleURL == nil)
         }
         .padding()
         .sheet(isPresented: $showGoogle) {

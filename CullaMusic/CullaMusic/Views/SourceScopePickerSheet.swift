@@ -23,6 +23,15 @@ struct SourceScopePickerSheet: View {
     @State private var artistTrackCounts: [String: Int] = [:]
     @State private var isLoadingCounts: Bool = false
     @State private var pickerMode: PickerMode = .playlists
+    @State private var searchQuery: String = ""
+
+    // Sort preferences persist across sheet opens AND app launches. Each tab
+    // has its own field + direction pair so sorting playlists by "Most tracks"
+    // doesn't reshuffle artists.
+    @AppStorage("picker.playlistSortField") private var playlistSortFieldRaw: String = PlaylistSortField.alphabetical.rawValue
+    @AppStorage("picker.playlistSortDescending") private var playlistSortDescending: Bool = false
+    @AppStorage("picker.artistSortField") private var artistSortFieldRaw: String = ArtistSortField.alphabetical.rawValue
+    @AppStorage("picker.artistSortDescending") private var artistSortDescending: Bool = false
 
     enum PickerMode: String, CaseIterable, Identifiable {
         case playlists
@@ -48,7 +57,11 @@ struct SourceScopePickerSheet: View {
             }
             .navigationTitle("Sort From")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic))
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    sortMenu
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
@@ -68,6 +81,155 @@ struct SourceScopePickerSheet: View {
         }
     }
 
+    // MARK: - Sort menu
+
+    private var sortMenu: some View {
+        Menu {
+            switch pickerMode {
+            case .playlists:
+                Picker("Sort By", selection: playlistSortFieldBinding) {
+                    ForEach(PlaylistSortField.allCases, id: \.rawValue) { field in
+                        Text(field.label).tag(field)
+                    }
+                }
+                Picker("Sort Order", selection: $playlistSortDescending) {
+                    Text(playlistDirectionLabel(descending: false)).tag(false)
+                    Text(playlistDirectionLabel(descending: true)).tag(true)
+                }
+            case .artists:
+                Picker("Sort By", selection: artistSortFieldBinding) {
+                    ForEach(ArtistSortField.allCases, id: \.rawValue) { field in
+                        Text(field.label).tag(field)
+                    }
+                }
+                Picker("Sort Order", selection: $artistSortDescending) {
+                    Text(artistDirectionLabel(descending: false)).tag(false)
+                    Text(artistDirectionLabel(descending: true)).tag(true)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+    }
+
+    /// Direction labels are field-aware: "Ascending / Descending" feels wrong
+    /// for "Number of Songs" — users think "Most / Fewest" there. Same trick
+    /// for dates ("Recent / Oldest").
+    private func playlistDirectionLabel(descending: Bool) -> String {
+        let field = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
+        switch field {
+        case .alphabetical: return descending ? "Z to A" : "A to Z"
+        case .modifiedDate: return descending ? "Recent First" : "Oldest First"
+        case .trackCount:   return descending ? "Most First" : "Fewest First"
+        }
+    }
+
+    private func artistDirectionLabel(descending: Bool) -> String {
+        let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
+        switch field {
+        case .alphabetical: return descending ? "Z to A" : "A to Z"
+        case .trackCount:   return descending ? "Most First" : "Fewest First"
+        }
+    }
+
+    /// Custom binding so switching sort fields auto-resets direction to that
+    /// field's "natural" default (A-Z; Most/Recent first). Users can flip from
+    /// there independently and the choice sticks via AppStorage.
+    private var playlistSortFieldBinding: Binding<PlaylistSortField> {
+        Binding(
+            get: { PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical },
+            set: { newField in
+                let oldField = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
+                playlistSortFieldRaw = newField.rawValue
+                if oldField != newField {
+                    playlistSortDescending = newField.defaultDescending
+                }
+            }
+        )
+    }
+
+    private var artistSortFieldBinding: Binding<ArtistSortField> {
+        Binding(
+            get: { ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical },
+            set: { newField in
+                let oldField = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
+                artistSortFieldRaw = newField.rawValue
+                if oldField != newField {
+                    artistSortDescending = newField.defaultDescending
+                }
+            }
+        )
+    }
+
+    // MARK: - Filtering + sorting
+
+    private var trimmedQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// "All Library" disappears during search unless its name itself matches —
+    /// we don't want it taking the top slot when the user is hunting a name.
+    private var showsAllLibraryRow: Bool {
+        guard !trimmedQuery.isEmpty else { return true }
+        return "All Library".localizedStandardContains(trimmedQuery)
+    }
+
+    private var filteredSortedPlaylists: [Playlist] {
+        let field = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
+        var rows = playlists
+        if !trimmedQuery.isEmpty {
+            rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
+        }
+        rows.sort { lhs, rhs in
+            switch field {
+            case .alphabetical:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .modifiedDate:
+                // Missing-date rows sort last in ascending, first in descending —
+                // keeping them out of the way regardless of direction.
+                let l = lhs.appleMusicPlaylistID.flatMap {
+                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
+                }
+                let r = rhs.appleMusicPlaylistID.flatMap {
+                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
+                }
+                switch (l, r) {
+                case let (l?, r?): return l < r
+                case (nil, _?):    return false
+                case (_?, nil):    return true
+                case (nil, nil):
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+            case .trackCount:
+                let l = (lhs.appleMusicPlaylistID.flatMap { trackCounts[$0] }) ?? 0
+                let r = (rhs.appleMusicPlaylistID.flatMap { trackCounts[$0] }) ?? 0
+                return l < r
+            }
+        }
+        if playlistSortDescending { rows.reverse() }
+        return rows
+    }
+
+    private var filteredSortedArtists: [Artist] {
+        let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
+        var rows = libraryArtists
+        if !trimmedQuery.isEmpty {
+            rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
+        }
+        rows.sort { lhs, rhs in
+            switch field {
+            case .alphabetical:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .trackCount:
+                let l = artistTrackCounts[lhs.id.rawValue] ?? 0
+                let r = artistTrackCounts[rhs.id.rawValue] ?? 0
+                return l < r
+            }
+        }
+        if artistSortDescending { rows.reverse() }
+        return rows
+    }
+
     // MARK: - Lists
 
     @ViewBuilder
@@ -79,29 +241,41 @@ struct SourceScopePickerSheet: View {
     }
 
     private var playlistsList: some View {
-        List {
-            Section {
-                libraryRow
-            } footer: {
-                Text("Pick a playlist to sort songs from, or use your full library.")
+        let rows = filteredSortedPlaylists
+        return List {
+            if showsAllLibraryRow {
+                Section {
+                    libraryRow
+                } footer: {
+                    if trimmedQuery.isEmpty {
+                        Text("Pick a playlist to sort songs from, or use your full library.")
+                    }
+                }
             }
 
-            if !playlists.isEmpty {
+            if !rows.isEmpty {
                 Section("Playlists") {
-                    ForEach(playlists, id: \.id) { playlist in
+                    ForEach(rows, id: \.id) { playlist in
                         playlistRow(playlist)
                     }
                 }
+            } else if !trimmedQuery.isEmpty {
+                noMatchesRow
             }
         }
     }
 
     private var artistsList: some View {
-        List {
-            Section {
-                libraryRow
-            } footer: {
-                Text("Pick an artist to swipe through their tracks in your library.")
+        let rows = filteredSortedArtists
+        return List {
+            if showsAllLibraryRow {
+                Section {
+                    libraryRow
+                } footer: {
+                    if trimmedQuery.isEmpty {
+                        Text("Pick an artist to swipe through their tracks in your library.")
+                    }
+                }
             }
 
             if isLoadingArtists && libraryArtists.isEmpty {
@@ -113,9 +287,9 @@ struct SourceScopePickerSheet: View {
                     }
                     .listRowBackground(Color.clear)
                 }
-            } else if !libraryArtists.isEmpty {
+            } else if !rows.isEmpty {
                 Section {
-                    ForEach(libraryArtists, id: \.id) { artist in
+                    ForEach(rows, id: \.id) { artist in
                         artistRow(artist)
                     }
                 } header: {
@@ -128,6 +302,8 @@ struct SourceScopePickerSheet: View {
                         }
                     }
                 }
+            } else if !trimmedQuery.isEmpty {
+                noMatchesRow
             }
         }
         .task {
@@ -136,15 +312,21 @@ struct SourceScopePickerSheet: View {
         }
     }
 
+    private var noMatchesRow: some View {
+        Section {
+            ContentUnavailableView.search(text: trimmedQuery)
+                .listRowBackground(Color.clear)
+        }
+    }
+
     private func loadArtistsIfNeeded() async {
         guard libraryArtists.isEmpty, !isLoadingArtists else { return }
         isLoadingArtists = true
         defer { isLoadingArtists = false }
         do {
-            let artists = try await MusicLibraryService.shared.refreshLibraryArtists()
-            libraryArtists = artists.sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+            // Sort happens in `filteredSortedArtists` based on user prefs —
+            // just hold the unordered list here.
+            libraryArtists = try await MusicLibraryService.shared.refreshLibraryArtists()
         } catch {
             print("SourceScopePickerSheet.loadArtists failed: \(error)")
         }
@@ -307,6 +489,52 @@ struct SourceScopePickerSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sort fields
+
+enum PlaylistSortField: String, CaseIterable {
+    case alphabetical
+    case modifiedDate
+    case trackCount
+
+    var label: String {
+        switch self {
+        case .alphabetical: "Name"
+        case .modifiedDate: "Recently Modified"
+        case .trackCount:   "Number of Songs"
+        }
+    }
+
+    /// Direction picked automatically when the user switches to this field.
+    /// Alphabetical wants A→Z; date/count fields read more naturally biggest-
+    /// first ("Recent / Most"), so they default descending.
+    var defaultDescending: Bool {
+        switch self {
+        case .alphabetical: false
+        case .modifiedDate: true
+        case .trackCount:   true
+        }
+    }
+}
+
+enum ArtistSortField: String, CaseIterable {
+    case alphabetical
+    case trackCount
+
+    var label: String {
+        switch self {
+        case .alphabetical: "Name"
+        case .trackCount:   "Number of Songs"
+        }
+    }
+
+    var defaultDescending: Bool {
+        switch self {
+        case .alphabetical: false
+        case .trackCount:   true
+        }
     }
 }
 

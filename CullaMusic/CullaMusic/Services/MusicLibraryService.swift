@@ -369,6 +369,10 @@ final class MusicLibraryService {
         playlistCache[MusicItemID(id)]?.artwork
     }
 
+    func lastModifiedDate(forPlaylistID id: String) -> Date? {
+        playlistCache[MusicItemID(id)]?.lastModifiedDate
+    }
+
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
         let stored = (UserDefaults.standard.string(forKey: "authorDisplayName") ?? "")
             .trimmingCharacters(in: .whitespaces)

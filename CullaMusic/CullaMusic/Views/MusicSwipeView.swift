@@ -5,6 +5,10 @@ import MusicKit
 struct MusicSwipeView: View {
     @Bindable var viewModel: MusicSwipeViewModel
     var onBack: (() -> Void)?
+    /// Shared namespace for the Home → Swipe hero morph. Only the *current*
+    /// card receives it — the preloaded next card never participates, so
+    /// SwiftUI never sees two simultaneous sources for `heroStart`.
+    var heroNamespace: Namespace.ID?
 
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
@@ -406,7 +410,8 @@ struct MusicSwipeView: View {
                     dismissedAt: viewModel.dismissedDate(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) },
-                    onShowArtist: { artistSheetSong = current }
+                    onShowArtist: { artistSheetSong = current },
+                    heroNamespace: heroNamespace
                 )
                 .id(current.id.rawValue)
                 .transition(.asymmetric(

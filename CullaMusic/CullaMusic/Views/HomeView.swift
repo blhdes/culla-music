@@ -222,6 +222,10 @@ final class HomeViewModel {
 
 struct HomeView: View {
     let onStart: (SwipeConfig) -> Void
+    /// Namespace for the Home → Swipe hero morph. The "Start Cullaing" button
+    /// tags itself with `heroStart`; the current SongCard's artwork shares
+    /// the same id so SwiftUI interpolates between them.
+    var heroNamespace: Namespace.ID?
 
     @Environment(\.modelContext) private var modelContext
     @State private var homeVM: HomeViewModel?
@@ -331,6 +335,7 @@ struct HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .matchedHero(id: "heroStart", in: heroNamespace)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 40)
             }

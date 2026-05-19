@@ -16,6 +16,10 @@ struct SongCardView: View {
     /// small info button next to the artist name. Not wired on the next-card
     /// (underneath) instance so the button never appears on the obscured card.
     var onShowArtist: (() -> Void)? = nil
+    /// Hero-morph namespace shared with Home's "Start Cullaing" button. Only
+    /// the front (current) card receives it; the preloaded next card omits it
+    /// so SwiftUI never sees two simultaneous sources for `heroStart`.
+    var heroNamespace: Namespace.ID? = nil
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
@@ -39,6 +43,7 @@ struct SongCardView: View {
                     VStack(spacing: 18) {
                         artwork(for: song, size: artworkSize)
                             .clipShape(RoundedRectangle(cornerRadius: 24))
+                            .matchedHero(id: "heroStart", in: heroNamespace)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
                             .overlay(alignment: .center) { playButton }
                             .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }

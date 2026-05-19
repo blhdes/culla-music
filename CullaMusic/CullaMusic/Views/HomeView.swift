@@ -13,6 +13,11 @@ final class HomeViewModel {
 
     private let modelContext: ModelContext
 
+    /// Tracks the in-flight recompute kicked off by `triggerRecompute()`.
+    /// Cancelling it before starting a new one prevents two full library
+    /// walks from racing when the user flips the toggle in rapid succession.
+    private var pendingRecompute: Task<Void, Never>?
+
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -59,10 +64,10 @@ final class HomeViewModel {
 
         guard !libraryFresh || !unsortedFresh else { return }
 
-        // Cache miss — show the loader for whichever slot is stale so the user
-        // sees the count update isn't stuck on a stale value.
-        if !libraryFresh { libraryCount = nil }
-        if !unsortedFresh { unsortedCount = nil }
+        // Cache miss — only show the loader if we have nothing to show yet.
+        // If we already have a stale value, keep it visible during recompute
+        // to avoid a count → loader → same-count flicker on toggle/invalidate.
+        // The fresh value overwrites it when the walk completes.
 
         do {
             // Only fetch playlist memberships when unsorted needs them — saves
@@ -90,6 +95,7 @@ final class HomeViewModel {
             var offset = 0
 
             while true {
+                try Task.checkCancellation()
                 var request = MusicLibraryRequest<Song>()
                 request.limit = pageSize
                 request.offset = offset
@@ -122,14 +128,33 @@ final class HomeViewModel {
                 UserDefaults.standard.set(today, forKey: "music.unsortedCountDate")
                 UserDefaults.standard.set(unsortedFingerprint, forKey: "music.unsortedCountFingerprint")
             }
+        } catch is CancellationError {
+            // A newer recompute superseded this one — leave the counts as
+            // they are. The replacement task will write the up-to-date values.
+            return
         } catch {
             print("Recompute counts failed: \(error)")
+        }
+    }
+
+    /// Kick off a recompute that cancels any prior in-flight one. Use this
+    /// from event handlers (e.g. toggle changes) where rapid re-entry is
+    /// possible. Internal callers that need to await completion should call
+    /// `recomputeCounts()` directly.
+    func triggerRecompute() {
+        pendingRecompute?.cancel()
+        pendingRecompute = Task { @MainActor [weak self] in
+            await self?.recomputeCounts()
         }
     }
 
     private func todayString() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        // Fixed locale + calendar so the cache key is stable across users
+        // with Persian/Hebrew/Buddhist calendars or non-Arabic numerals.
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         return f.string(from: .now)
     }
 
@@ -204,6 +229,13 @@ struct HomeView: View {
     @State private var sourcePlaylistID: String = ""
     @State private var showSourcePicker = false
     @State private var showSettings = false
+    /// Per-playlist track counts read from the persisted membership index.
+    /// Used to display a meaningful count on the Library card when the user
+    /// picks a source playlist — otherwise the card would show the total
+    /// library count, which doesn't match what the swipe session will walk.
+    /// `nil` while the snapshot is still loading so the card can show a
+    /// loader instead of briefly rendering empty.
+    @State private var sourceTrackCounts: [String: Int]?
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     // Observed so the unsorted count recomputes instantly when the toggle
@@ -320,7 +352,14 @@ struct HomeView: View {
         .task {
             let vm = HomeViewModel(modelContext: modelContext)
             homeVM = vm
+            // Load source counts off the main actor in parallel with loadCounts.
+            // diskCountsSnapshot does file IO + JSON decode, so we don't want
+            // it on the main thread blocking the first frame.
+            async let counts = Task.detached(priority: .userInitiated) {
+                MembershipIndex.diskCountsSnapshot()
+            }.value
             await vm.loadCounts()
+            sourceTrackCounts = await counts
         }
         .onChange(of: selectedMode) { _, newValue in
             if newValue != .library {
@@ -328,7 +367,7 @@ struct HomeView: View {
             }
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
-            Task { await homeVM?.recomputeCounts() }
+            homeVM?.triggerRecompute()
         }
         .sheet(isPresented: $showSourcePicker) {
             SourcePlaylistPickerSheet(
@@ -438,18 +477,33 @@ struct HomeView: View {
     private func count(for mode: ReviewMode) -> Int? {
         guard let vm = homeVM else { return nil }
         switch mode {
-        case .library:   return vm.libraryCount
+        case .library:
+            // When a source playlist is picked, the swipe walks that playlist
+            // — not the whole library. Show its track count instead so the
+            // number on the card matches what the user is about to review.
+            if !sourcePlaylistID.isEmpty {
+                return sourceTrackCounts?[sourcePlaylistID]
+            }
+            return vm.libraryCount
         case .unsorted:  return vm.unsortedCount
         case .dismissed: return vm.dismissedCount
         }
     }
 
     private func isLoadingCount(for mode: ReviewMode) -> Bool {
-        guard homeVM != nil else { return false }
+        // Before `.task` runs, homeVM is nil — treat that as loading so the
+        // count slot doesn't briefly render empty before the loader appears.
+        guard let vm = homeVM else { return true }
         switch mode {
-        case .library:   return homeVM?.libraryCount == nil
-        case .unsorted:  return homeVM?.unsortedCount == nil
-        case .dismissed: return homeVM?.dismissedCount == nil
+        case .library:
+            // While a source is picked, loading state tracks the source
+            // snapshot rather than the (currently-unused) library walk.
+            if !sourcePlaylistID.isEmpty {
+                return sourceTrackCounts == nil
+            }
+            return vm.libraryCount == nil
+        case .unsorted:  return vm.unsortedCount == nil
+        case .dismissed: return vm.dismissedCount == nil
         }
     }
 }

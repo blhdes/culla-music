@@ -78,6 +78,7 @@ private struct ArtistDetailView: View {
     @State private var detail: Artist?
     @State private var isLoadingDetail = true
     @State private var showGoogle = false
+    @Environment(\.openURL) private var openURL
 
     /// Falls back to the seed `artist` until `detail` (with relationships)
     /// arrives; that way the hero / genres render instantly while top songs
@@ -97,7 +98,12 @@ private struct ArtistDetailView: View {
                 if !(current.genreNames ?? []).isEmpty { genreChips }
                 topSongsSection
                 similarArtistsSection
-                googleButton
+                VStack(spacing: 12) {
+                    googleButton
+                    if let appleMusicURL = current.url {
+                        appleMusicButton(url: appleMusicURL)
+                    }
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 20)
@@ -158,6 +164,7 @@ private struct ArtistDetailView: View {
     @ViewBuilder
     private var topSongsSection: some View {
         let songs = Array((current.topSongs ?? []).prefix(5))
+        let service = MusicLibraryService.shared
         if isLoadingDetail && songs.isEmpty {
             sectionHeader("Top Songs")
             ProgressView()
@@ -167,10 +174,16 @@ private struct ArtistDetailView: View {
             sectionHeader("Top Songs")
             VStack(spacing: 0) {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
+                    let isPlayingThis = service.isPlayingPreview &&
+                                        service.nowPlayingSongID == song.id.rawValue
                     Button {
-                        MusicLibraryService.shared.playPreview(for: song)
+                        if isPlayingThis {
+                            service.stopPreview()
+                        } else {
+                            service.playPreview(for: song)
+                        }
                     } label: {
-                        TopSongRow(song: song)
+                        TopSongRow(song: song, isPlaying: isPlayingThis)
                     }
                     .buttonStyle(.plain)
                     if index < songs.count - 1 {
@@ -207,6 +220,11 @@ private struct ArtistDetailView: View {
             .frame(maxWidth: .infinity)
     }
 
+    private func appleMusicButton(url: URL) -> some View {
+        AppleMusicLinkButton { openURL(url) }
+            .frame(maxWidth: .infinity)
+    }
+
     private func sectionHeader(_ title: String) -> some View {
         HStack {
             Text(title).font(.headline)
@@ -230,6 +248,7 @@ private struct ArtistDetailView: View {
 
 private struct TopSongRow: View {
     let song: Song
+    let isPlaying: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -245,7 +264,7 @@ private struct TopSongRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isPlaying ? .pink : .primary)
                     .lineLimit(1)
                 if let album = song.albumTitle {
                     Text(album)
@@ -257,9 +276,10 @@ private struct TopSongRow: View {
 
             Spacer(minLength: 8)
 
-            Image(systemName: "play.fill")
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isPlaying ? Color.pink : .secondary)
+                .contentTransition(.symbolEffect(.replace))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -293,6 +313,40 @@ private struct SimilarArtistTile: View {
                 .lineLimit(2)
                 .frame(width: 104)
         }
+    }
+}
+
+private struct AppleMusicLinkButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "music.note")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 1.0, green: 0.18, blue: 0.43),
+                                     Color(red: 0.98, green: 0.36, blue: 0.62)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                Text("Open in Apple Music")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .background(
+                Capsule().fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                Capsule().strokeBorder(.quaternary, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -316,37 +316,26 @@ private struct SimilarArtistTile: View {
     }
 }
 
+/// Apple's official "Listen on Apple Music" lockup. Per identity guidelines
+/// the artwork must not be modified, recolored, or combined with custom text,
+/// so we render it as a single tappable image — no surrounding pill, no extra
+/// label. Height ~40pt keeps it above the 30px digital minimum and gives a
+/// comfortable tap target.
 private struct AppleMusicLinkButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: "music.note")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color(red: 1.0, green: 0.18, blue: 0.43),
-                                     Color(red: 0.98, green: 0.36, blue: 0.62)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                Text("Open in Apple Music")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 20)
-            .background(
-                Capsule().fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                Capsule().strokeBorder(.quaternary, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            Image("apple-music-badge")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(height: 40)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 4)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Listen on Apple Music")
     }
 }
 

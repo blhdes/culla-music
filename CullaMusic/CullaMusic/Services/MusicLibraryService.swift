@@ -65,8 +65,16 @@ final class MusicLibraryService {
     private var playlistPageOffsets: [MusicItemID: Int] = [:]
     private var playlistExhausted: Set<MusicItemID> = []
 
+    // Artist swipe-walk cursors (parallel to the playlist set above).
+    // `artistSongCache` is the source of truth — `artistSongIDs` is a
+    // derived view used by callers that only need IDs (e.g. counts).
+    private var artistSongCache: [MusicItemID: [Song]] = [:]
+    private var artistPageOffsets: [MusicItemID: Int] = [:]
+    private var artistExhausted: Set<MusicItemID> = []
+
     // Cached MusicKit.Playlist refs
     private var playlistCache: [MusicItemID: MusicKit.Playlist] = [:]
+    private var artistCache: [MusicItemID: Artist] = [:]
     private var playlistMutationTasks: [MusicItemID: PlaylistMutationTask] = [:]
 
     /// Per-playlist track-IDs cache. Survives launches; checked before each
@@ -98,6 +106,10 @@ final class MusicLibraryService {
         playlistSongIDs.removeAll(keepingCapacity: true)
         playlistPageOffsets.removeAll(keepingCapacity: true)
         playlistExhausted.removeAll(keepingCapacity: true)
+        artistPageOffsets.removeAll(keepingCapacity: true)
+        artistExhausted.removeAll(keepingCapacity: true)
+        // Keep `artistSongCache` — the list of an artist's tracks doesn't
+        // change mid-session, so a re-enter shouldn't pay another round-trip.
     }
 
     /// Pages through the user's library, returning up to `desired` songs not in `excluding`.
@@ -176,6 +188,102 @@ final class MusicLibraryService {
         }
 
         return try await resolveSongs(ids: selectedIDs)
+    }
+
+    // MARK: - Library Artists
+
+    /// Returns every artist with at least one track in the user's library.
+    /// Sorted alphabetically by the caller; this just hydrates the cache.
+    @discardableResult
+    func refreshLibraryArtists() async throws -> [Artist] {
+        var request = MusicLibraryRequest<Artist>()
+        request.limit = 100
+        let response = try await request.response()
+        let artists = Array(response.items)
+        artistCache.removeAll(keepingCapacity: true)
+        for a in artists { artistCache[a.id] = a }
+        return artists
+    }
+
+    func artwork(forArtistID id: String) -> Artwork? {
+        artistCache[MusicItemID(id)]?.artwork
+    }
+
+    /// Resolves the library Songs by a given artist and caches them. Shared
+    /// between the Home count preview ("you're about to swipe N songs by X")
+    /// and the swipe walk — picking an artist on Home warms the cache for the
+    /// session that follows.
+    ///
+    /// Implementation note: `Artist` has no `.tracks` property in MusicKit,
+    /// so we can't go `artist.with([.tracks])` like we do for playlists.
+    /// Instead, we filter the library's Songs by the `.artists` relationship.
+    func artistLibrarySongs(artistID id: MusicItemID) async throws -> [Song] {
+        if let cached = artistSongCache[id] { return cached }
+        let artist = try await freshArtist(id: id)
+        var request = MusicLibraryRequest<Song>()
+        request.filter(matching: \.artists, contains: artist)
+        request.limit = 100
+
+        var collected: [Song] = []
+        var offset = 0
+        while true {
+            request.offset = offset
+            let response = try await request.response()
+            let page = response.items
+            if page.isEmpty { break }
+            collected.append(contentsOf: page)
+            offset += page.count
+            if page.count < 100 { break }
+        }
+        artistSongCache[id] = collected
+        return collected
+    }
+
+    func artistLibrarySongIDs(artistID id: MusicItemID) async throws -> [String] {
+        try await artistLibrarySongs(artistID: id).map { $0.id.rawValue }
+    }
+
+    func fetchNextArtistSongs(
+        artistID id: MusicItemID,
+        excluding: Set<String>,
+        desired: Int,
+        ascending: Bool = false
+    ) async throws -> [Song] {
+        if artistExhausted.contains(id) { return [] }
+
+        let raw = try await artistLibrarySongs(artistID: id)
+        // The library filter returns songs roughly oldest-added first.
+        // Reverse for "newest first" so freshly-added entries surface up top,
+        // mirroring the playlist walk's ordering choice.
+        let ordered = ascending ? raw : Array(raw.reversed())
+        var offset = artistPageOffsets[id] ?? 0
+        var selected: [Song] = []
+
+        while offset < ordered.count && selected.count < desired {
+            let song = ordered[offset]
+            offset += 1
+            if !excluding.contains(song.id.rawValue) {
+                selected.append(song)
+            }
+        }
+
+        artistPageOffsets[id] = offset
+        if offset >= ordered.count {
+            artistExhausted.insert(id)
+        }
+
+        return selected
+    }
+
+    private func freshArtist(id: MusicItemID) async throws -> Artist {
+        if let cached = artistCache[id] { return cached }
+        var request = MusicLibraryRequest<Artist>()
+        request.filter(matching: \.id, equalTo: id)
+        guard let artist = try await request.response().items.first else {
+            throw MusicLibraryError.artistNotFound
+        }
+        artistCache[id] = artist
+        return artist
     }
 
     // MARK: - Playlists
@@ -738,4 +846,5 @@ final class MusicLibraryService {
 
 enum MusicLibraryError: Error {
     case playlistNotFound
+    case artistNotFound
 }

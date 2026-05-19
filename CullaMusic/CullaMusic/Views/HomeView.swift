@@ -230,7 +230,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var homeVM: HomeViewModel?
     @State private var selectedMode: ReviewMode = .library
-    @State private var sourcePlaylistID: String = ""
+    @State private var source: SourceScope?
     @State private var showSourcePicker = false
     @State private var showSettings = false
     /// Per-playlist track counts read from the persisted membership index.
@@ -240,6 +240,10 @@ struct HomeView: View {
     /// `nil` while the snapshot is still loading so the card can show a
     /// loader instead of briefly rendering empty.
     @State private var sourceTrackCounts: [String: Int]?
+    /// Per-artist library track counts, lazily resolved when the user picks
+    /// an artist source. Keyed by Apple Music artist ID. Absent → still
+    /// loading (card shows loader); present → render the count badge.
+    @State private var artistTrackCounts: [String: Int] = [:]
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     // Observed so the unsorted count recomputes instantly when the toggle
@@ -264,7 +268,7 @@ struct HomeView: View {
                         ModeCard(
                             mode: mode,
                             isSelected: selectedMode == mode,
-                            isDisabled: !sourcePlaylistID.isEmpty,
+                            isDisabled: source != nil,
                             count: count(for: mode),
                             isLoadingCount: isLoadingCount(for: mode)
                         ) {
@@ -286,7 +290,7 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
 
-                if selectedMode == .library, !sourcePlaylistID.isEmpty {
+                if selectedMode == .library, case .playlist = source {
                     sourceTransferPicker
                         .padding(.bottom, 16)
                         .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
@@ -316,16 +320,21 @@ struct HomeView: View {
                 Button {
                     let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
                     let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
-                    let source = selectedMode == .library ? selectedSourcePlaylist : nil
-                    // Force `.copy` for read-only sources — we can't remove
-                    // from Apple-curated, smart Favorites, or shared playlists.
-                    let transferMode: SourceTransferMode =
-                        (source?.isEditable ?? true) ? storedMode : .copy
+                    let activeScope: SourceScope? = selectedMode == .library ? source : nil
+                    // Force `.copy` whenever the source can't accept removals:
+                    // read-only playlists (Apple-curated / smart Favorites /
+                    // shared), or artist scope (no "remove from artist" exists).
+                    let transferMode: SourceTransferMode = {
+                        switch activeScope {
+                        case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
+                        case .artist:                          return .copy
+                        case .none:                            return storedMode
+                        }
+                    }()
                     onStart(SwipeConfig(
                         mode: selectedMode,
                         order: order,
-                        sourcePlaylistID: source?.appleMusicPlaylistID,
-                        sourcePlaylistName: source?.name,
+                        source: activeScope,
                         sourceTransferMode: transferMode
                     ))
                 } label: {
@@ -381,25 +390,42 @@ struct HomeView: View {
         }
         .onChange(of: selectedMode) { _, newValue in
             if newValue != .library {
-                sourcePlaylistID = ""
+                source = nil
+            }
+        }
+        .onChange(of: source) { _, newValue in
+            if case .artist(let id, _) = newValue {
+                Task { await fetchArtistTrackCountIfNeeded(id: id) }
             }
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
             homeVM?.triggerRecompute()
         }
         .sheet(isPresented: $showSourcePicker) {
-            SourcePlaylistPickerSheet(
+            SourceScopePickerSheet(
                 playlists: sourcePlaylists,
-                selectedID: sourcePlaylistID
+                selectedScope: source
             ) { picked in
-                sourcePlaylistID = picked?.appleMusicPlaylistID ?? ""
+                source = picked
             }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
         .animation(.easeInOut(duration: 0.18), value: selectedMode)
-        .animation(.easeInOut(duration: 0.18), value: sourcePlaylistID)
+        .animation(.easeInOut(duration: 0.18), value: source)
+    }
+
+    private func fetchArtistTrackCountIfNeeded(id: String) async {
+        if artistTrackCounts[id] != nil { return }
+        do {
+            let ids = try await MusicLibraryService.shared.artistLibrarySongIDs(
+                artistID: MusicItemID(id)
+            )
+            artistTrackCounts[id] = ids.count
+        } catch {
+            print("HomeView.fetchArtistTrackCount failed: \(error)")
+        }
     }
 
     private var sourcePlaylists: [Playlist] {
@@ -408,16 +434,12 @@ struct HomeView: View {
             .sorted { $0.displayOrder < $1.displayOrder }
     }
 
-    private var selectedSourcePlaylist: Playlist? {
-        sourcePlaylists.first { $0.appleMusicPlaylistID == sourcePlaylistID }
-    }
-
     /// True when the user has picked a Sort From source that we can't remove
     /// songs from (Apple-curated, smart Favorites, shared-by-others, etc.).
     /// Forces the transfer mode to `.copy` so we never attempt a doomed write.
     private var selectedSourceIsReadOnly: Bool {
-        guard let p = selectedSourcePlaylist else { return false }
-        return !p.isEditable
+        if case .playlist(_, _, let isEditable) = source { return !isEditable }
+        return false
     }
 
     private var sourceFilterButton: some View {
@@ -425,16 +447,13 @@ struct HomeView: View {
             showSourcePicker = true
         } label: {
             HStack(spacing: 10) {
-                if let playlist = selectedSourcePlaylist {
-                    PlaylistCoverView(
-                        appleMusicPlaylistID: playlist.appleMusicPlaylistID,
-                        size: 28,
-                        cornerRadius: 6
-                    )
-                    Text(playlist.name)
+                if let source {
+                    sourceThumbnail(for: source)
+                    Text(source.displayName)
+                        .lineLimit(1)
                     Spacer()
                     Button {
-                        sourcePlaylistID = ""
+                        self.source = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
@@ -455,6 +474,20 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 24)
+    }
+
+    @ViewBuilder
+    private func sourceThumbnail(for source: SourceScope) -> some View {
+        switch source {
+        case .playlist(let id, _, _):
+            PlaylistCoverView(
+                appleMusicPlaylistID: id,
+                size: 28,
+                cornerRadius: 6
+            )
+        case .artist(let id, _):
+            ArtistThumbnail(artistID: id, size: 28)
+        }
     }
 
     private var sourceTransferPicker: some View {
@@ -496,13 +529,14 @@ struct HomeView: View {
         guard let vm = homeVM else { return nil }
         switch mode {
         case .library:
-            // When a source playlist is picked, the swipe walks that playlist
-            // — not the whole library. Show its track count instead so the
-            // number on the card matches what the user is about to review.
-            if !sourcePlaylistID.isEmpty {
-                return sourceTrackCounts?[sourcePlaylistID]
+            // When a source is picked, the swipe walks that scope — not the
+            // whole library. Show its count instead so the number on the card
+            // matches what the user is about to review.
+            switch source {
+            case .playlist(let id, _, _): return sourceTrackCounts?[id]
+            case .artist(let id, _):      return artistTrackCounts[id]
+            case .none:                   return vm.libraryCount
             }
-            return vm.libraryCount
         case .unsorted:  return vm.unsortedCount
         case .dismissed: return vm.dismissedCount
         }
@@ -514,15 +548,44 @@ struct HomeView: View {
         guard let vm = homeVM else { return true }
         switch mode {
         case .library:
-            // While a source is picked, loading state tracks the source
-            // snapshot rather than the (currently-unused) library walk.
-            if !sourcePlaylistID.isEmpty {
-                return sourceTrackCounts == nil
+            // While a source is picked, loading state tracks the matching
+            // count cache rather than the (currently-unused) library walk.
+            switch source {
+            case .playlist:          return sourceTrackCounts == nil
+            case .artist(let id, _): return artistTrackCounts[id] == nil
+            case .none:              return vm.libraryCount == nil
             }
-            return vm.libraryCount == nil
         case .unsorted:  return vm.unsortedCount == nil
         case .dismissed: return vm.dismissedCount == nil
         }
+    }
+}
+
+// MARK: - ArtistThumbnail
+
+/// Renders an artist's library artwork as a small circular thumbnail for the
+/// source button. Reads the cached `Artist` from `MusicLibraryService` rather
+/// than refetching — the picker sheet primes the cache when it lists artists.
+private struct ArtistThumbnail: View {
+    let artistID: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let artwork = MusicLibraryService.shared.artwork(forArtistID: artistID) {
+                ArtworkImage(artwork, width: size, height: size)
+            } else {
+                Rectangle()
+                    .fill(.quaternary)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    )
+                    .frame(width: size, height: size)
+            }
+        }
+        .clipShape(Circle())
     }
 }
 

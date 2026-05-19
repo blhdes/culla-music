@@ -914,12 +914,12 @@ final class MusicSwipeViewModel {
 
     private func fetchExcludedIdentifiers() -> Set<String> {
         var excluded = Set<String>()
-        // Source-playlist mode is "revisit this collection with purity" — we
-        // show everything in the playlist regardless of prior sorts so the
-        // user can freely re-categorize, with chips revealing existing
-        // memberships. Only dismissals (a strong "don't show me again" signal)
-        // still filter the deck.
-        if config.sourcePlaylistID == nil,
+        // Scoped sources (playlist or artist) are "revisit this collection
+        // with purity" — we show everything in scope regardless of prior
+        // sorts so the user can freely re-categorize, with chips revealing
+        // existing memberships. Only dismissals (a strong "don't show me
+        // again" signal) still filter the deck.
+        if config.source == nil,
            let sorted = try? modelContext.fetch(FetchDescriptor<SortedSong>()) {
             excluded.formUnion(sorted.map(\.songID))
         }
@@ -936,14 +936,23 @@ final class MusicSwipeViewModel {
     }
 
     private func fetchNextSessionSongs() async throws -> [Song] {
-        if config.mode == .library,
-           let sourcePlaylistID = config.sourcePlaylistID {
-            return try await service.fetchNextPlaylistSongs(
-                playlistID: MusicItemID(sourcePlaylistID),
-                excluding: sessionExclusionSet,
-                desired: batchSize,
-                ascending: config.order.ascending
-            )
+        if config.mode == .library, let source = config.source {
+            switch source {
+            case .playlist(let id, _, _):
+                return try await service.fetchNextPlaylistSongs(
+                    playlistID: MusicItemID(id),
+                    excluding: sessionExclusionSet,
+                    desired: batchSize,
+                    ascending: config.order.ascending
+                )
+            case .artist(let id, _):
+                return try await service.fetchNextArtistSongs(
+                    artistID: MusicItemID(id),
+                    excluding: sessionExclusionSet,
+                    desired: batchSize,
+                    ascending: config.order.ascending
+                )
+            }
         }
 
         return try await service.fetchNextLibrarySongs(

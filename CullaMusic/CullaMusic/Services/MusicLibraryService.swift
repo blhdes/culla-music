@@ -202,7 +202,12 @@ final class MusicLibraryService {
         let pageSize = 100
         var collected: [Artist] = []
         var offset = 0
-        artistCache.removeAll(keepingCapacity: true)
+        // Build a fresh cache in a temp dict and atomically replace at the
+        // end. Previously we cleared `artistCache` upfront, so any concurrent
+        // `artwork(forArtistID:)` reader (e.g. Home's ArtistThumbnail) saw
+        // nil mid-fetch and briefly flickered to the initials placeholder.
+        // On error the old cache stays put — staler beats empty.
+        var newCache: [MusicItemID: Artist] = [:]
         while true {
             var request = MusicLibraryRequest<Artist>()
             request.limit = pageSize
@@ -211,10 +216,11 @@ final class MusicLibraryService {
             let page = Array(response.items)
             if page.isEmpty { break }
             collected.append(contentsOf: page)
-            for a in page { artistCache[a.id] = a }
+            for a in page { newCache[a.id] = a }
             if page.count < pageSize { break }
             offset += page.count
         }
+        artistCache = newCache
         return collected
     }
 

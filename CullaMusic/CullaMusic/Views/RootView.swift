@@ -5,7 +5,6 @@ import MusicKit
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var authStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
-    @State private var activeConfig: SwipeConfig?
     @State private var activeViewModel: MusicSwipeViewModel?
 
     /// Shared namespace for the Home → Swipe hero morph. The "Start Cullaing"
@@ -86,7 +85,6 @@ struct RootView: View {
     private func endSession() {
         withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
             activeViewModel = nil
-            activeConfig = nil
         }
     }
 

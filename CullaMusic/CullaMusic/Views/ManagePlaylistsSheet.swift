@@ -51,8 +51,15 @@ struct ManagePlaylistsSheet: View {
                         Text("Sidebar")
                         Spacer()
                         Text("\(viewModel.sidebarCount) / \(maxSidebar)")
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
                             .monospacedDigit()
+                            .foregroundStyle(.primary)
+                            .contentTransition(.numericText(countsDown: false))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .glassSurface(in: Capsule())
                     }
+                    .animation(.snappy, value: viewModel.sidebarCount)
                 } footer: {
                     Text("Tap a playlist to toggle it in the right-swipe sidebar. Up to \(maxSidebar) at a time.")
                 }
@@ -109,14 +116,19 @@ struct ManagePlaylistsSheet: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
-                if isOn {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                // SF symbol swap (`checkmark` ↔ "" via Image.empty) animated
+                // through contentTransition so the toggle reads as a single
+                // motion rather than a hard cut. Keeping the slot always-present
+                // means the row layout doesn't jump when toggling.
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isOn ? Color.accentColor : Color.secondary.opacity(0.4))
+                    .font(.title3)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: isOn)
             }
             .contentShape(Rectangle())
             .opacity(isTappable ? 1.0 : 0.35)
+            .animation(.snappy(duration: 0.22), value: isOn)
         }
         .buttonStyle(.plain)
         .disabled(!isTappable)

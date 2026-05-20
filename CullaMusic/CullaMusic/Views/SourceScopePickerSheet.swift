@@ -155,17 +155,19 @@ struct SourceScopePickerSheet: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "arrow.up.arrow.down")
-                    .font(.caption2)
+                    .font(.caption2.weight(.bold))
                 Text(currentSortLabel)
-                    .font(.caption)
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .contentTransition(.opacity)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .foregroundStyle(.secondary)
-            .background(.quaternary, in: Capsule())
+            .glassSurface(in: Capsule(), interactive: true)
         }
+        .animation(.snappy(duration: 0.2), value: currentSortLabel)
     }
 
     private var currentSortLabel: String {
@@ -445,11 +447,12 @@ struct SourceScopePickerSheet: View {
 
                 Spacer()
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .font(.body.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.4)
+                    .animation(.snappy(duration: 0.22), value: isSelected)
             }
             .contentShape(Rectangle())
         }
@@ -498,11 +501,12 @@ struct SourceScopePickerSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .font(.body.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.4)
+                    .animation(.snappy(duration: 0.22), value: isSelected)
             }
             .contentShape(Rectangle())
         }
@@ -541,11 +545,12 @@ struct SourceScopePickerSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .font(.body.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.4)
+                    .animation(.snappy(duration: 0.22), value: isSelected)
             }
             .contentShape(Rectangle())
         }

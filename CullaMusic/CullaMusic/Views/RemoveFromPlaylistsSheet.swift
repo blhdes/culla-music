@@ -66,14 +66,19 @@ struct RemoveFromPlaylistsSheet: View {
 
     @ViewBuilder
     private var songHeader: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             if let artwork = song.artwork {
                 ArtworkImage(artwork, width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
             }
             VStack(spacing: 2) {
                 Text(song.title)
-                    .font(.headline)
+                    .font(.system(.headline, design: .rounded).weight(.bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                 Text(song.artistName)
@@ -93,9 +98,15 @@ struct RemoveFromPlaylistsSheet: View {
             toggle(playlist)
         } label: {
             HStack(spacing: 12) {
+                // `contentTransition(.symbolEffect(.replace))` morphs the
+                // circle <-> checkmark.circle.fill swap; `.bounce(value:)`
+                // adds a discrete pop on each toggle so the destructive
+                // decision feels deliberate rather than incidental.
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selected ? Color.red : Color.secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: selected)
                 Text(playlist.name)
                     .foregroundStyle(.primary)
                 Spacer()
@@ -103,6 +114,7 @@ struct RemoveFromPlaylistsSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.22), value: selected)
     }
 
     private func isSelected(_ playlist: Playlist) -> Bool {

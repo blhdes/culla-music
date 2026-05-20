@@ -67,11 +67,12 @@ struct LovedPlaylistPickerSheet: View {
 
                 Spacer()
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .font(.body.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.4)
+                    .animation(.snappy(duration: 0.22), value: isSelected)
             }
             .contentShape(Rectangle())
         }
@@ -92,11 +93,12 @@ struct LovedPlaylistPickerSheet: View {
 
                 Spacer()
 
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(.tint)
-                        .font(.body.weight(.semibold))
-                }
+                Image(systemName: "checkmark")
+                    .foregroundStyle(.tint)
+                    .font(.body.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .scaleEffect(isSelected ? 1 : 0.4)
+                    .animation(.snappy(duration: 0.22), value: isSelected)
             }
             .contentShape(Rectangle())
         }

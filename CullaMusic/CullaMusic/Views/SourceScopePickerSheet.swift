@@ -30,6 +30,12 @@ struct SourceScopePickerSheet: View {
     @State private var isLoadingCounts: Bool = false
     @State private var pickerMode: PickerMode = .playlists
     @State private var searchQuery: String = ""
+    /// Memoized filter+sort results. Recomputed only when an input changes
+    /// (search text, sort field/direction, source data) rather than on every
+    /// body render — typing in the search field was re-sorting the whole
+    /// list per keystroke for users with 500+ artists.
+    @State private var visiblePlaylists: [Playlist] = []
+    @State private var visibleArtists: [Artist] = []
 
     // Sort preferences persist across sheet opens AND app launches. Each tab
     // has its own field + direction pair so sorting playlists by "Most tracks"
@@ -87,6 +93,37 @@ struct SourceScopePickerSheet: View {
                 // Seed the segmented control to the user's existing pick so
                 // re-opening the sheet doesn't snap them back to Playlists.
                 if case .artist = selectedScope { pickerMode = .artists }
+                // Initial fill — body would otherwise paint an empty list
+                // before the first onChange fires.
+                visiblePlaylists = computeFilteredSortedPlaylists()
+                visibleArtists = computeFilteredSortedArtists()
+            }
+            // Recompute triggers — explicit so we only re-filter+sort when
+            // an actual input changed, not on every body render.
+            .onChange(of: searchQuery) { _, _ in
+                visiblePlaylists = computeFilteredSortedPlaylists()
+                visibleArtists = computeFilteredSortedArtists()
+            }
+            .onChange(of: playlistSortFieldRaw) { _, _ in
+                visiblePlaylists = computeFilteredSortedPlaylists()
+            }
+            .onChange(of: playlistSortDescending) { _, _ in
+                visiblePlaylists = computeFilteredSortedPlaylists()
+            }
+            .onChange(of: trackCounts) { _, _ in
+                visiblePlaylists = computeFilteredSortedPlaylists()
+            }
+            .onChange(of: artistSortFieldRaw) { _, _ in
+                visibleArtists = computeFilteredSortedArtists()
+            }
+            .onChange(of: artistSortDescending) { _, _ in
+                visibleArtists = computeFilteredSortedArtists()
+            }
+            .onChange(of: libraryArtists) { _, _ in
+                visibleArtists = computeFilteredSortedArtists()
+            }
+            .onChange(of: artistTrackCounts) { _, _ in
+                visibleArtists = computeFilteredSortedArtists()
             }
         }
     }
@@ -185,7 +222,7 @@ struct SourceScopePickerSheet: View {
         return "All Library".localizedStandardContains(trimmedQuery)
     }
 
-    private var filteredSortedPlaylists: [Playlist] {
+    private func computeFilteredSortedPlaylists() -> [Playlist] {
         let field = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
         var rows = playlists
         if !trimmedQuery.isEmpty {
@@ -221,7 +258,7 @@ struct SourceScopePickerSheet: View {
         return rows
     }
 
-    private var filteredSortedArtists: [Artist] {
+    private func computeFilteredSortedArtists() -> [Artist] {
         let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
         var rows = libraryArtists
         if !trimmedQuery.isEmpty {
@@ -252,7 +289,7 @@ struct SourceScopePickerSheet: View {
     }
 
     private var playlistsList: some View {
-        let rows = filteredSortedPlaylists
+        let rows = visiblePlaylists
         return List {
             if showsAllLibraryRow {
                 Section {
@@ -277,7 +314,7 @@ struct SourceScopePickerSheet: View {
     }
 
     private var artistsList: some View {
-        let rows = filteredSortedArtists
+        let rows = visibleArtists
         return List {
             if showsAllLibraryRow {
                 Section {

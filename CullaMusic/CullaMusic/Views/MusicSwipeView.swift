@@ -78,12 +78,23 @@ struct MusicSwipeView: View {
                         .font(.title3.weight(.medium))
                         .frame(width: 24, height: 24)
                         .padding(10)
+                        // Explicit hit shape BEFORE the glass effect — without
+                        // it, iOS 26's `.glassEffect(in: Circle())` was
+                        // shrinking the tappable area to the inscribed circle,
+                        // so taps near the corners of the visible button
+                        // missed. Matches the settings-gear pattern.
+                        .contentShape(Rectangle())
                         .glassSurface(in: Circle(), interactive: true)
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 16)
                 .padding(.top, 8)
                 .opacity(chromeOpacity)
+                // Stay hittable even when chromeOpacity drives the visual to
+                // zero during a right-swipe — opacity 0 still receives taps
+                // in SwiftUI, but layering this above the card stack removes
+                // any chance the drag gesture claims an edge-case tap first.
+                .zIndex(10)
             }
         }
         .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)

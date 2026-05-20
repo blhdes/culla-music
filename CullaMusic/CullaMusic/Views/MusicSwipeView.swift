@@ -78,7 +78,7 @@ struct MusicSwipeView: View {
                         .font(.title3.weight(.medium))
                         .frame(width: 24, height: 24)
                         .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .glassSurface(in: Circle(), interactive: true)
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 16)
@@ -226,7 +226,7 @@ struct MusicSwipeView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .glassSurface(in: Capsule())
     }
 
     /// Card stack with the right gesture set for the current mode. Dismissed
@@ -635,7 +635,8 @@ struct MusicSwipeView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(.ultraThinMaterial.opacity(0.5), in: Capsule())
+                .glassSurface(in: Capsule(), interactive: true)
+                .opacity(0.85)
         }
         .buttonStyle(.plain)
     }
@@ -663,7 +664,7 @@ struct MusicSwipeView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .glassSurface(in: Capsule(), interactive: true)
     }
 
     @ViewBuilder
@@ -684,7 +685,7 @@ struct MusicSwipeView: View {
                 .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: Capsule())
+                .glassSurface(in: Capsule(), interactive: true)
             }
             .buttonStyle(.plain)
             .transition(.move(edge: .bottom).combined(with: .opacity))

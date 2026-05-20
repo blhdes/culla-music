@@ -93,8 +93,14 @@ private struct ArtistDetailView: View {
 
     var body: some View {
         ScrollView {
+            // Horizontal padding is applied per-section instead of on this
+            // outer VStack so the genre chips and similar-artists carousels
+            // can bleed to the screen edges via `.contentMargins(.horizontal:)`.
+            // The previous outer 20pt inset clipped both scrolls and made the
+            // top-songs card float instead of feeling like a full surface.
             VStack(spacing: 28) {
                 hero
+                    .padding(.horizontal, 20)
                 if !(current.genreNames ?? []).isEmpty { genreChips }
                 topSongsSection
                 similarArtistsSection
@@ -104,8 +110,8 @@ private struct ArtistDetailView: View {
                         appleMusicButton(url: appleMusicURL)
                     }
                 }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
             .padding(.vertical, 20)
         }
         .navigationTitle(artist.name)
@@ -122,43 +128,59 @@ private struct ArtistDetailView: View {
     // MARK: Sections
 
     private var hero: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             Group {
                 if let artwork = current.artwork {
                     ArtworkImage(artwork, width: 220, height: 220)
                 } else {
-                    Circle()
-                        .fill(.quaternary)
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(.thinMaterial)
                         .overlay(
                             Image(systemName: "music.mic")
-                                .font(.largeTitle)
+                                .font(.system(size: 56, weight: .light))
                                 .foregroundStyle(.secondary)
                         )
                 }
             }
             .frame(width: 220, height: 220)
-            .clipShape(Circle())
-            .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+            )
+            .shadow(color: heroShadow, radius: 24, y: 12)
 
             Text(current.name)
-                .font(.title2.weight(.semibold))
+                .font(.system(.title2, design: .rounded).weight(.bold))
                 .multilineTextAlignment(.center)
         }
     }
 
+    /// Subtle accent-tinted shadow when we have artwork (gives the hero a halo
+    /// that ties it to the rest of the accent vocabulary), neutral when we
+    /// don't (the placeholder reads more cleanly without a colored halo).
+    private var heroShadow: Color {
+        current.artwork == nil ? .black.opacity(0.18) : .black.opacity(0.28)
+    }
+
     private var genreChips: some View {
+        // `.contentMargins(.horizontal: 20)` insets the *content* without
+        // insetting the scroll bounds — that way chips scroll out to the
+        // screen edge as the user pages through them, instead of getting
+        // clipped at a 20pt inset. This was the root cause of the "white
+        // margins breaking continuity" feedback.
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(current.genreNames ?? [], id: \.self) { genre in
                     Text(genre)
-                        .font(.caption.weight(.medium))
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.quaternary, in: Capsule())
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 14)
+                        .glassSurface(in: Capsule())
                 }
             }
-            .padding(.horizontal, 4)
         }
+        .contentMargins(.horizontal, 20, for: .scrollContent)
     }
 
     @ViewBuilder
@@ -166,32 +188,42 @@ private struct ArtistDetailView: View {
         let songs = Array((current.topSongs ?? []).prefix(5))
         let service = MusicLibraryService.shared
         if isLoadingDetail && songs.isEmpty {
-            sectionHeader("Top Songs")
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+            VStack(spacing: 12) {
+                sectionHeader("Top Songs")
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .padding(.horizontal, 20)
         } else if !songs.isEmpty {
-            sectionHeader("Top Songs")
-            VStack(spacing: 0) {
-                ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-                    let isPlayingThis = service.isPlayingPreview &&
-                                        service.nowPlayingSongID == song.id.rawValue
-                    Button {
-                        if isPlayingThis {
-                            service.stopPreview()
-                        } else {
-                            service.playPreview(for: song)
+            VStack(spacing: 12) {
+                sectionHeader("Top Songs")
+                VStack(spacing: 0) {
+                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
+                        let isPlayingThis = service.isPlayingPreview &&
+                                            service.nowPlayingSongID == song.id.rawValue
+                        Button {
+                            if isPlayingThis {
+                                service.stopPreview()
+                            } else {
+                                service.playPreview(for: song)
+                            }
+                        } label: {
+                            TopSongRow(song: song, isPlaying: isPlayingThis)
                         }
-                    } label: {
-                        TopSongRow(song: song, isPlaying: isPlayingThis)
-                    }
-                    .buttonStyle(.plain)
-                    if index < songs.count - 1 {
-                        Divider().padding(.leading, 68)
+                        .buttonStyle(.plain)
+                        if index < songs.count - 1 {
+                            Divider().padding(.leading, 68)
+                        }
                     }
                 }
+                .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+                )
             }
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 20)
         }
     }
 
@@ -199,17 +231,24 @@ private struct ArtistDetailView: View {
     private var similarArtistsSection: some View {
         let similar = Array((current.similarArtists ?? []).prefix(10))
         if !similar.isEmpty {
-            sectionHeader("Similar Artists")
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(similar, id: \.id) { other in
-                        NavigationLink(value: other) {
-                            SimilarArtistTile(artist: other)
+            VStack(spacing: 12) {
+                sectionHeader("Similar Artists")
+                    .padding(.horizontal, 20)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(similar, id: \.id) { other in
+                            NavigationLink(value: other) {
+                                SimilarArtistTile(artist: other)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 4)
+                // contentMargins (not outer padding) so the carousel scrolls
+                // tiles out to the screen edge — the previous outer inset
+                // clipped them and the row looked truncated on both sides.
+                .contentMargins(.horizontal, 20, for: .scrollContent)
             }
         }
     }
@@ -227,7 +266,8 @@ private struct ArtistDetailView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         HStack {
-            Text(title).font(.headline)
+            Text(title)
+                .font(.system(.headline, design: .rounded).weight(.bold))
             Spacer()
         }
     }
@@ -380,16 +420,13 @@ private struct FallbackArtistView: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            Circle()
-                .fill(.quaternary)
-                .frame(width: 180, height: 180)
-                .overlay(
-                    Image(systemName: "music.mic")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                )
+            HeroIconTile(
+                systemName: "music.mic",
+                size: 168,
+                foreground: .secondary
+            )
             Text(name)
-                .font(.title2.weight(.semibold))
+                .font(.system(.title2, design: .rounded).weight(.bold))
                 .multilineTextAlignment(.center)
             Text("No detailed info from Apple Music for this artist.")
                 .font(.subheadline)

@@ -1,6 +1,10 @@
 import SwiftUI
 import MusicKit
 
+/// First-launch screen requesting Apple Music access. Sets the visual tone for
+/// the rest of the app — uses the same Living-Glass vocabulary as HomeView
+/// (mesh background + glass hero tile + gradient CTA) so this is recognizably
+/// "Culla" before the user has even seen their library.
 struct AuthGateView: View {
     let status: MusicAuthorization.Status
     let onRequest: () -> Void
@@ -8,32 +12,59 @@ struct AuthGateView: View {
     @Environment(\.appAccent) private var appAccent
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 56))
-                .foregroundStyle(.secondary)
+        ZStack {
+            LivingMeshBackground()
 
-            Text("Apple Music access")
-                .font(.title2.weight(.semibold))
+            VStack(spacing: 28) {
+                HeroIconTile(
+                    systemName: heroSymbol,
+                    foreground: heroColor,
+                    pulse: status == .notDetermined
+                )
 
-            Text(message)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                VStack(spacing: 12) {
+                    Text("Apple Music access")
+                        .font(.system(.title2, design: .rounded).weight(.bold))
 
-            Button(action: action) {
-                Text(buttonTitle)
-                    .font(.headline)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(appAccent, in: Capsule())
-                    .foregroundStyle(.white)
+                    Text(message)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                }
+
+                if !buttonTitle.isEmpty {
+                    GradientCapsuleButton(
+                        title: buttonTitle,
+                        icon: buttonIcon,
+                        iconEffect: status == .notDetermined ? .pulse : .none,
+                        action: action
+                    )
+                    .padding(.horizontal, 32)
+                    .padding(.top, 8)
+                }
             }
-            .buttonStyle(.plain)
+            .padding(.vertical, 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// SF symbol shown in the hero tile. Swaps to a lock when access has been
+    /// denied so the user understands why we can't proceed — the music.note
+    /// icon would read as "we're loading something" instead of "we need you
+    /// to flip a setting."
+    private var heroSymbol: String {
+        switch status {
+        case .denied, .restricted: return "lock.shield"
+        default:                   return "music.note.list"
+        }
+    }
+
+    private var heroColor: Color {
+        switch status {
+        case .denied, .restricted: return .orange
+        default:                   return appAccent
+        }
     }
 
     private var message: String {
@@ -51,10 +82,18 @@ struct AuthGateView: View {
 
     private var buttonTitle: String {
         switch status {
-        case .notDetermined: return "Continue"
-        case .denied, .restricted: return "Open Settings"
-        case .authorized: return ""
-        @unknown default: return ""
+        case .notDetermined:        return "Continue"
+        case .denied, .restricted:  return "Open Settings"
+        case .authorized:           return ""
+        @unknown default:           return ""
+        }
+    }
+
+    private var buttonIcon: String? {
+        switch status {
+        case .notDetermined:        return "arrow.right"
+        case .denied, .restricted:  return "gearshape.fill"
+        default:                    return nil
         }
     }
 

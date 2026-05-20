@@ -263,20 +263,24 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LivingMeshBackground()
 
             VStack(spacing: 0) {
-                Text("culla music")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .tracking(3)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 28)
+                wordmark
+                    .padding(.top, 22)
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                VStack(spacing: 10) {
+                HomeHeroArtStack(
+                    mode: selectedMode,
+                    source: source,
+                    modelContext: modelContext
+                )
+                .padding(.bottom, 22)
+
+                GlassStack(spacing: 10) {
                     ForEach(ReviewMode.allCases) { mode in
-                        ModeCard(
+                        ModeTile(
                             mode: mode,
                             isSelected: selectedMode == mode,
                             isDisabled: source != nil,
@@ -287,78 +291,30 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
 
-                Spacer()
-
-                Divider()
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
+                Spacer(minLength: 12)
 
                 if selectedMode == .library {
                     sourceFilterButton
-                        .padding(.bottom, 12)
-                        .transition(.opacity)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 if selectedMode == .library, case .playlist = source {
                     sourceTransferPicker
-                        .padding(.bottom, 16)
-                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 10)
+                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
                 }
 
-                // Shared order picker — binds directly to sortOrderRaw to avoid
-                // a computed-property setter that Swift treats as mutating in closures.
-                HStack {
-                    Text("Order")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Picker("Order", selection: Binding(
-                        get: { SortOrder(rawValue: sortOrderRaw) ?? .newestFirst },
-                        set: { sortOrderRaw = $0.rawValue }
-                    )) {
-                        ForEach(SortOrder.allCases, id: \.self) { order in
-                            Text(order.label).tag(order)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 20)
+                orderRow
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
 
-                Button {
-                    let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
-                    let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
-                    let activeScope: SourceScope? = selectedMode == .library ? source : nil
-                    // Force `.copy` whenever the source can't accept removals:
-                    // read-only playlists (Apple-curated / smart Favorites /
-                    // shared), or artist scope (no "remove from artist" exists).
-                    let transferMode: SourceTransferMode = {
-                        switch activeScope {
-                        case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
-                        case .artist:                          return .copy
-                        case .none:                            return storedMode
-                        }
-                    }()
-                    onStart(SwipeConfig(
-                        mode: selectedMode,
-                        order: order,
-                        source: activeScope,
-                        sourceTransferMode: transferMode
-                    ))
-                } label: {
-                    Text("Start Cullaing")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(appAccent)
-                .matchedHero(id: "heroStart", in: heroNamespace)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 40)
+                startButton
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -368,12 +324,13 @@ struct HomeView: View {
                 Image(systemName: "gearshape")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 38, height: 38)
                     .contentShape(Rectangle())
+                    .glassSurface(in: Circle(), interactive: true)
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 12)
-            .padding(.top, 18)
+            .padding(.trailing, 14)
+            .padding(.top, 16)
         }
         .task {
             let vm = HomeViewModel(modelContext: modelContext)
@@ -469,38 +426,79 @@ struct HomeView: View {
         return false
     }
 
+    // MARK: - Wordmark
+
+    /// Identity strip at the top: small accent dot + the app name. The dot
+    /// breathes (iOS 18+ symbol effect) so the screen never feels frozen even
+    /// when the mesh is paused for reduce-motion users.
+    private var wordmark: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(appAccent)
+                .symbolEffect(.pulse.byLayer, options: .repeating)
+            HStack(spacing: 4) {
+                Text("culla")
+                    .foregroundStyle(.primary)
+                Text("music")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .tracking(0.5)
+        }
+    }
+
+    // MARK: - Source pill (promoted to full-width glass card)
+
     private var sourceFilterButton: some View {
         Button {
             showSourcePicker = true
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if let source {
                     sourceThumbnail(for: source)
-                    Text(source.displayName)
-                        .lineLimit(1)
-                    Spacer()
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("SORT FROM")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .tracking(1.2)
+                            .foregroundStyle(.secondary)
+                        Text(source.displayName)
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
                     Button {
                         self.source = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 } else {
                     Image(systemName: "music.note.list")
-                    Text("All Library")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                    Text("All library — pick a scope")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .modifier(GlassOrQuaternaryRounded())
+            .contentShape(Rectangle())
+            .glassSurface(
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                interactive: true
+            )
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 24)
     }
 
     @ViewBuilder
@@ -509,12 +507,85 @@ struct HomeView: View {
         case .playlist(let id, _, _):
             PlaylistCoverView(
                 appleMusicPlaylistID: id,
-                size: 28,
-                cornerRadius: 6
+                size: 36,
+                cornerRadius: 8
             )
         case .artist(let id, let name):
-            ArtistThumbnail(artistID: id, artistName: name, size: 28)
+            ArtistThumbnail(artistID: id, artistName: name, size: 36)
         }
+    }
+
+    // MARK: - Order toggle
+
+    /// Compact pill that flips between newest-first and oldest-first on tap.
+    /// Replaces the old segmented control — order is a 2-state choice, the
+    /// segmented control was overkill and ate a full row of vertical space.
+    private var orderRow: some View {
+        HStack(spacing: 8) {
+            Text("Order")
+                .font(.system(.footnote, design: .rounded).weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                let current = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
+                let next: SortOrder = current == .newestFirst ? .oldestFirst : .newestFirst
+                withAnimation(.snappy(duration: 0.22)) {
+                    sortOrderRaw = next.rawValue
+                }
+            } label: {
+                let current = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
+                HStack(spacing: 6) {
+                    Image(systemName: current == .newestFirst ? "arrow.down" : "arrow.up")
+                        .font(.caption.weight(.bold))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(current.label)
+                        .font(.system(.footnote, design: .rounded).weight(.semibold))
+                        .contentTransition(.opacity)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Capsule())
+                .glassSurface(in: Capsule(), interactive: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Start CTA
+
+    /// Uses the shared `GradientCapsuleButton` so HomeView's CTA, AuthGate's
+    /// "Continue", and EmptyState's "Refresh" all share one implementation —
+    /// changes to the CTA vocabulary propagate to every screen at once.
+    /// Holds the `heroStart` matchedGeometry tag for the Home→Swipe morph
+    /// (see RootView.swift:14).
+    private var startButton: some View {
+        GradientCapsuleButton(
+            title: "Start Cullaing",
+            icon: "play.fill",
+            iconEffect: .pulse
+        ) {
+            let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
+            let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
+            let activeScope: SourceScope? = selectedMode == .library ? source : nil
+            // Force `.copy` whenever the source can't accept removals:
+            // read-only playlists (Apple-curated / smart Favorites / shared),
+            // or artist scope (no "remove from artist" exists).
+            let transferMode: SourceTransferMode = {
+                switch activeScope {
+                case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
+                case .artist:                          return .copy
+                case .none:                            return storedMode
+                }
+            }()
+            onStart(SwipeConfig(
+                mode: selectedMode,
+                order: order,
+                source: activeScope,
+                sourceTransferMode: transferMode
+            ))
+        }
+        .matchedHero(id: "heroStart", in: heroNamespace)
     }
 
     private var sourceTransferPicker: some View {
@@ -612,9 +683,12 @@ private struct ArtistThumbnail: View {
     }
 }
 
-// MARK: - ModeCard
+// MARK: - ModeTile
 
-private struct ModeCard: View {
+/// One row in the mode selector. Glass surface on iOS 26 (via `glassSurface`),
+/// `.thinMaterial` fallback elsewhere. Selected tile picks up an accent tint,
+/// halo shadow, and trailing chevron to telegraph "this is the deck you open".
+private struct ModeTile: View {
     let mode: ReviewMode
     let isSelected: Bool
     let isDisabled: Bool
@@ -627,69 +701,83 @@ private struct ModeCard: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 14) {
-                // Use Color types so both branches of the ternary share the same type.
-                Image(systemName: isSelected ? "record.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSelected ? appAccent : Color.secondary)
-                    .animation(.spring(response: 0.3), value: isSelected)
+                iconBadge
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.title)
-                        .font(.body.weight(.semibold))
+                        .font(.system(.body, design: .rounded).weight(.semibold))
                         .foregroundStyle(.primary)
                     Text(mode.description)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
-                Group {
-                    if isLoadingCount {
-                        LinearLoader()
-                    } else if let count {
-                        Text(count.formatted())
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
+                countSlot
+
+                if isSelected {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(appAccent)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
-                .frame(width: 48, alignment: .trailing)
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(isSelected
-                        ? appAccent.opacity(0.08)
-                        : Color(.secondarySystemBackground))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .glassSurface(
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+                tint: isSelected ? appAccent : nil,
+                interactive: true
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(
-                        isSelected ? appAccent.opacity(0.35) : .clear,
-                        lineWidth: 1.5
+                        isSelected ? appAccent.opacity(0.45) : .white.opacity(0.06),
+                        lineWidth: isSelected ? 1.4 : 1
                     )
+            )
+            .shadow(
+                color: isSelected ? appAccent.opacity(0.28) : .clear,
+                radius: 16,
+                y: 8
             )
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1.0)
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .animation(.spring(response: 0.4, dampingFraction: 0.78), value: isSelected)
         .animation(.easeInOut(duration: 0.2), value: isDisabled)
     }
-}
 
-// MARK: - Glass / Quaternary background modifier
-
-/// Pill-style background: liquid glass on iOS 26+, falls back to a soft
-/// quaternary fill on older OS versions. Mirrors the photo Culla helper
-/// so the source button looks identical across both apps.
-private struct GlassOrQuaternaryRounded: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *) {
-            content.glassEffect(in: RoundedRectangle(cornerRadius: 10))
-        } else {
-            content.background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+    private var iconBadge: some View {
+        ZStack {
+            Circle()
+                .fill(isSelected ? appAccent.opacity(0.22) : Color.secondary.opacity(0.12))
+                .frame(width: 40, height: 40)
+            Image(systemName: mode.icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(isSelected ? appAccent : .secondary)
+                .symbolEffect(.bounce, value: isSelected)
         }
+    }
+
+    @ViewBuilder
+    private var countSlot: some View {
+        Group {
+            if isLoadingCount {
+                LinearLoader()
+            } else if let count {
+                Text(count.formatted())
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(isSelected ? appAccent : .secondary)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(countsDown: true))
+            }
+        }
+        .frame(width: 52, alignment: .trailing)
+        .animation(.snappy, value: count)
     }
 }

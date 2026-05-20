@@ -31,9 +31,18 @@ struct SettingsView: View {
             Form {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Theme")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            // Mirrors the current selection — swap animation
+                            // makes the picker feel responsive without changing
+                            // its semantics.
+                            Image(systemName: themeIcon)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.symbolEffect(.replace))
+                            Text("Theme")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         Picker("Theme", selection: $colorSchemeRaw) {
                             Text("System").tag("system")
                             Text("Light").tag("light")
@@ -42,6 +51,7 @@ struct SettingsView: View {
                         .pickerStyle(.segmented)
                     }
                     .padding(.vertical, 4)
+                    .animation(.snappy(duration: 0.2), value: colorSchemeRaw)
 
                     VStack(alignment: .leading, spacing: 12) {
                         Toggle("Match song artwork", isOn: $useDynamicAccent)
@@ -137,6 +147,14 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var themeIcon: String {
+        switch colorSchemeRaw {
+        case "light": return "sun.max.fill"
+        case "dark":  return "moon.fill"
+        default:      return "circle.lefthalf.filled"
+        }
     }
 
     @ViewBuilder

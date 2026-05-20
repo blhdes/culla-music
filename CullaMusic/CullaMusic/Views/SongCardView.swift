@@ -138,8 +138,15 @@ struct SongCardView: View {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
                 .frame(width: 72, height: 72)
-                .background(.black.opacity(0.55), in: Circle())
+                // Order matters: glassSurface applied first sits closer to the
+                // icon; the black scrim applied second lands further back.
+                // Net stack: black → frosted glass → icon, giving a darkened
+                // frosted disk that keeps the white icon readable on any
+                // artwork (bright or dark).
+                .glassSurface(in: Circle(), interactive: true)
+                .background(.black.opacity(0.45), in: Circle())
         }
         .buttonStyle(.plain)
     }
@@ -217,16 +224,26 @@ struct SongCardView: View {
 
         if horizontalDominant, offset.width < 0 {
             let progress = min(abs(offset.width) / swipeThreshold, 1.0)
-            Image(systemName: "trash.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.white.opacity(0.8 * progress))
-                .allowsHitTesting(false)
+            armingIcon(systemName: "trash.fill", progress: progress)
         } else if !horizontalDominant, offset.height < 0, offset.width < sidebarDeadzone {
             let progress = min(abs(offset.height) / swipeThreshold, 1.0)
-            Image(systemName: "heart.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.white.opacity(0.8 * progress))
-                .allowsHitTesting(false)
+            armingIcon(systemName: "heart.fill", progress: progress)
         }
+    }
+
+    /// Swipe-action overlay icon that scales up as the gesture approaches the
+    /// commit threshold and fires a one-shot bounce the instant it crosses.
+    /// The bounce is the moment the user feels the action "arm" — past this
+    /// point the gesture's release commits the swipe.
+    @ViewBuilder
+    private func armingIcon(systemName: String, progress: CGFloat) -> some View {
+        let isArmed = progress >= 1.0
+        Image(systemName: systemName)
+            .font(.system(size: 60))
+            .foregroundStyle(.white.opacity(0.85 * progress))
+            .scaleEffect(0.7 + 0.4 * progress)
+            .symbolEffect(.bounce, value: isArmed)
+            .allowsHitTesting(false)
+            .animation(.snappy(duration: 0.15), value: progress)
     }
 }

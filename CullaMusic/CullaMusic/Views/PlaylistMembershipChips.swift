@@ -90,7 +90,7 @@ struct PlaylistMembershipChips: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(.quaternary, in: Capsule())
+        .glassSurface(in: Capsule())
     }
 
     private func chip(text: String) -> some View {
@@ -100,7 +100,7 @@ struct PlaylistMembershipChips: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(.quaternary, in: Capsule())
+            .glassSurface(in: Capsule())
     }
 
     /// Width-matched to a typical playlist name so the layout doesn't jump

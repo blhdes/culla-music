@@ -57,23 +57,41 @@ struct PlaylistSidebarView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 14) {
             Spacer()
+
+            // 64pt glass tile around the icon — gives the empty state a focal
+            // anchor against the panelTint gradient. Modest size so it doesn't
+            // crowd the narrow ~80%-width sidebar panel.
             Image(systemName: "rectangle.stack.badge.plus")
                 .font(.title2)
                 .foregroundStyle(.secondary)
+                .frame(width: 64, height: 64)
+                .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                )
+
             Text("Add a playlist\nto sort songs")
-                .font(.subheadline)
-                .fontWeight(.medium)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
             HStack(spacing: 4) {
                 Text("Tap Manage")
                     .font(.caption)
+                // Pulse gated to `isDragging` so the arrow only animates while
+                // the panel is actually visible — pointing the eye at the
+                // Manage button at exactly the moment the user needs it.
+                // `accessibilityReduceMotion` is honored by symbolEffect at
+                // the system level, no manual gate needed.
                 Image(systemName: "arrow.down.right")
                     .font(.caption)
+                    .symbolEffect(.pulse, options: .repeating, isActive: isDragging)
             }
             .foregroundStyle(.tertiary)
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

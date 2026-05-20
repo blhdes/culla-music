@@ -319,12 +319,18 @@ final class MembershipIndex {
 
     /// Debounced disk write — coalesces rapid mutations so a burst of swipes
     /// produces one write, not ten. Encodes off the main actor.
+    ///
+    /// The snapshot is built *inside* the debounced task (after the sleep,
+    /// after the cancellation check) so a burst of N mutations allocates one
+    /// `mapValues` pass instead of N. Capturing `index` requires the closure
+    /// to hop back to the main actor for the read — cheap, and only happens
+    /// for the surviving task in each burst.
     private func schedulePersist() {
         persistTask?.cancel()
-        let snapshot: [String: [String]] = index.mapValues { $0.map(\.rawValue) }
-        persistTask = Task.detached(priority: .utility) {
+        persistTask = Task.detached(priority: .utility) { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
+            guard let snapshot = await self?.snapshotForDisk() else { return }
             guard let url = Self.persistenceURL else { return }
             do {
                 let data = try JSONEncoder().encode(snapshot)
@@ -333,5 +339,11 @@ final class MembershipIndex {
                 print("MembershipIndex.persist failed: \(error)")
             }
         }
+    }
+
+    /// Snapshots the in-memory index into the disk shape. Main-actor isolated
+    /// because it reads `index`; the persist task awaits it.
+    private func snapshotForDisk() -> [String: [String]] {
+        index.mapValues { $0.map(\.rawValue) }
     }
 }

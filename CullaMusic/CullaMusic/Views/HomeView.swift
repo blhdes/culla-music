@@ -241,9 +241,14 @@ struct HomeView: View {
     /// loader instead of briefly rendering empty.
     @State private var sourceTrackCounts: [String: Int]?
     /// Per-artist library track counts, lazily resolved when the user picks
-    /// an artist source. Keyed by Apple Music artist ID. Absent → still
-    /// loading (card shows loader); present → render the count badge.
+    /// an artist source. Keyed by Apple Music artist ID. Absent → either
+    /// loading (see `artistTrackCountsLoading`) or the fetch failed and we
+    /// have nothing to render.
     @State private var artistTrackCounts: [String: Int] = [:]
+    /// Artist IDs whose count is currently being fetched. Drives the loader
+    /// on the Library mode card so it stops spinning after a failure instead
+    /// of dangling forever because the count never landed.
+    @State private var artistTrackCountsLoading: Set<String> = []
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     // Observed so the unsorted count recomputes instantly when the toggle
@@ -422,12 +427,20 @@ struct HomeView: View {
 
     private func fetchArtistTrackCountIfNeeded(id: String) async {
         if artistTrackCounts[id] != nil { return }
+        if artistTrackCountsLoading.contains(id) { return }
+        artistTrackCountsLoading.insert(id)
+        defer { artistTrackCountsLoading.remove(id) }
         do {
             let ids = try await MusicLibraryService.shared.artistLibrarySongIDs(
                 artistID: MusicItemID(id)
             )
             artistTrackCounts[id] = ids.count
         } catch {
+            // Don't write a sentinel into artistTrackCounts — the loader stops
+            // when this function returns (artistTrackCountsLoading drops the id
+            // via defer), and the count slot stays empty. Re-picking the same
+            // artist retriggers the fetch, which is the right behavior for a
+            // transient network failure.
             print("HomeView.fetchArtistTrackCount failed: \(error)")
         }
     }
@@ -556,7 +569,7 @@ struct HomeView: View {
             // count cache rather than the (currently-unused) library walk.
             switch source {
             case .playlist:          return sourceTrackCounts == nil
-            case .artist(let id, _): return artistTrackCounts[id] == nil
+            case .artist(let id, _): return artistTrackCountsLoading.contains(id)
             case .none:              return vm.libraryCount == nil
             }
         case .unsorted:  return vm.unsortedCount == nil

@@ -54,12 +54,10 @@ struct HomeHeroArtStack: View {
             )
             frontCard
         }
-        // `maxWidth: .infinity` pins the ZStack to whatever width the parent
-        // proposes. Without it, the natural width is decided by the widest
-        // child — and `ArtworkImage(width:height:)` doesn't reliably clamp
-        // its layout size in iOS 26, so three stacked ArtworkImages were
-        // inflating the parent VStack and pushing the rest of HomeView past
-        // the screen edges (which is why the cards lost their margins).
+        // Pin to parent width so the surrounding VStack sizes itself to the
+        // screen instead of shrinking to the natural width of the small
+        // overlapping cards (which would push the horizontally-padded rows
+        // below off-center).
         .frame(maxWidth: .infinity)
         .frame(height: size + 24)
         .task(id: stackKey) {

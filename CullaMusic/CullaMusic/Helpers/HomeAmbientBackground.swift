@@ -39,40 +39,45 @@ struct HomeAmbientBackground: View {
     }
 
     var body: some View {
-        ZStack {
-            Color(.systemBackground)
-                .ignoresSafeArea()
-
-            // The glow. Big, soft, anchored high so it sits behind the hero
-            // stack rather than under the buttons. `.blur(radius: 160)`
-            // dissolves the circle's edge entirely — what you see is a wash,
-            // not a shape.
-            Circle()
-                .fill(clampedTint)
-                .frame(width: 540, height: 540)
-                .blur(radius: 160)
-                .opacity(0.30)
-                .offset(y: -250)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            if let grain {
-                grain
-                    .resizable(resizingMode: .tile)
-                    .opacity(0.13)
-                    .blendMode(.overlay)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
+        // Color as the layout root — it accepts any width the parent proposes
+        // and never demands more. The glow and grain ride as overlays so their
+        // own frame requests don't bubble out and inflate the parent ZStack
+        // (an earlier draft put a 540pt Circle as a ZStack sibling, which
+        // forced HomeView's outer ZStack to 540pt and pushed every row past
+        // the screen edges).
+        Color(.systemBackground)
+            .overlay {
+                // The glow. Big, soft, anchored high so it sits behind the
+                // hero stack rather than under the buttons. `.blur(radius: 160)`
+                // dissolves the circle's edge entirely — what you see is a
+                // wash, not a shape. The overlay can paint outside the Color's
+                // bounds since SwiftUI overlays don't clip by default, so the
+                // wash still bleeds to the safe-area extension below.
+                Circle()
+                    .fill(clampedTint)
+                    .frame(width: 540, height: 540)
+                    .blur(radius: 160)
+                    .opacity(0.30)
+                    .offset(y: -250)
             }
-        }
-        // Cross-fade the tint when the hero artwork swaps, so the background
-        // doesn't pop between albums.
-        .animation(.easeInOut(duration: 0.55), value: tint)
-        .onAppear {
-            if grain == nil {
-                grain = Self.makeGrain(size: CGSize(width: 128, height: 128))
+            .overlay {
+                if let grain {
+                    grain
+                        .resizable(resizingMode: .tile)
+                        .opacity(0.13)
+                        .blendMode(.overlay)
+                }
             }
-        }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            // Cross-fade the tint when the hero artwork swaps, so the
+            // background doesn't pop between albums.
+            .animation(.easeInOut(duration: 0.55), value: tint)
+            .onAppear {
+                if grain == nil {
+                    grain = Self.makeGrain(size: CGSize(width: 128, height: 128))
+                }
+            }
     }
 
     /// Generates a small noise tile by laying down a few thousand random

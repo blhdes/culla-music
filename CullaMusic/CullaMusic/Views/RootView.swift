@@ -37,6 +37,14 @@ struct RootView: View {
                 ZStack {
                     if let vm = activeViewModel {
                         MusicSwipeView(viewModel: vm, onBack: endSession, heroNamespace: heroNamespace)
+                            // Per-VM identity so the second swipe session starts
+                            // with fresh @State (cardOffset, flyOffTask, sheet
+                            // bindings…). Without this, SwiftUI was reusing the
+                            // first session's state slot because the conditional
+                            // resolves to the same view type at the same position,
+                            // which left the back button's chromeOpacity stuck at
+                            // zero from a half-finished prior gesture.
+                            .id(ObjectIdentifier(vm))
                             .transition(.opacity)
                             .zIndex(1)
                     } else {

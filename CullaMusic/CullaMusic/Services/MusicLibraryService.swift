@@ -308,8 +308,19 @@ final class MusicLibraryService {
     /// Returns both the counts AND the list of artist IDs we attempted, so
     /// callers can persist a snapshot that survives "this artist has uploaded-
     /// only tracks and reports 0" without forcing a refetch on the next open.
-    func fetchAllArtistTrackCounts() async throws -> MembershipIndex.ArtistCountsSnapshot {
-        let artists = try await refreshLibraryArtists()
+    ///
+    /// Callers that already hold a fresh artist list (e.g. the picker right
+    /// after `refreshLibraryArtists`) should pass it in via `artists:` to
+    /// skip the second full library walk this function would otherwise do.
+    func fetchAllArtistTrackCounts(
+        artists providedArtists: [Artist]? = nil
+    ) async throws -> MembershipIndex.ArtistCountsSnapshot {
+        let artists: [Artist]
+        if let providedArtists {
+            artists = providedArtists
+        } else {
+            artists = try await refreshLibraryArtists()
+        }
         guard !artists.isEmpty else {
             return MembershipIndex.ArtistCountsSnapshot(counts: [:], attemptedIDs: [])
         }

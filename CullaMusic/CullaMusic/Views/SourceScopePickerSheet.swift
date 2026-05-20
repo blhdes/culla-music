@@ -370,7 +370,12 @@ struct SourceScopePickerSheet: View {
         isLoadingCounts = true
         defer { isLoadingCounts = false }
         do {
-            let fresh = try await MusicLibraryService.shared.fetchAllArtistTrackCounts()
+            // Pass our already-loaded artist list so the service skips a second
+            // full library walk. loadArtistsIfNeeded ran first; libraryArtists
+            // is the fresh result of that fetch.
+            let fresh = try await MusicLibraryService.shared.fetchAllArtistTrackCounts(
+                artists: libraryArtists
+            )
             artistTrackCounts = fresh.counts
             attemptedArtistIDs = Set(fresh.attemptedIDs)
             MembershipIndex.writeArtistCounts(fresh)

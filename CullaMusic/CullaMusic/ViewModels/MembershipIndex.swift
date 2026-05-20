@@ -99,9 +99,16 @@ final class MembershipIndex {
     }
 
     /// Returns the number of indexed songs belonging to the given playlist, or
-    /// `nil` if `amID` is nil. Editable playlists are always walked, so a
-    /// missing key safely means "0 tracks indexed". Curated/read-only
-    /// playlists may be absent when the curated toggle is off.
+    /// `nil` when `amID` is nil **or** the playlist isn't in the index.
+    ///
+    /// "Not in the index" can mean two different things, and the function
+    /// can't tell them apart — that's why it returns nil instead of 0:
+    /// - An editable playlist that's truly empty (0 tracks), or
+    /// - A read-only playlist that wasn't walked because the curated toggle
+    ///   is off.
+    ///
+    /// Callers that know the playlist is editable should `?? 0` the result.
+    /// Callers that don't should render nothing rather than lie with a zero.
     func trackCount(forPlaylistAMID amID: String?) -> Int? {
         guard let amID else { return nil }
         if countsCache == nil {
@@ -113,7 +120,7 @@ final class MembershipIndex {
             }
             countsCache = counts
         }
-        return countsCache?[amID] ?? 0
+        return countsCache?[amID]
     }
 
     /// Replaces the raw index wholesale (e.g. after a fetch from Apple Music).

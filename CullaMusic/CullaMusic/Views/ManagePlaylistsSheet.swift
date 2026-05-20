@@ -98,14 +98,16 @@ struct ManagePlaylistsSheet: View {
 
                 Spacer()
 
-                if let count = viewModel.membershipIndex.trackCount(
+                // Only editable rows reach this sheet, so a nil from the
+                // index means "truly empty playlist" — render "0" rather
+                // than dropping the badge.
+                let count = viewModel.membershipIndex.trackCount(
                     forPlaylistAMID: playlist.appleMusicPlaylistID
-                ) {
-                    Text(count, format: .number)
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
+                ) ?? 0
+                Text(count, format: .number)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
 
                 if isOn {
                     Image(systemName: "checkmark")

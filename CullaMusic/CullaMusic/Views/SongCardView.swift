@@ -117,6 +117,7 @@ struct SongCardView: View {
     private func artwork(for song: Song, size: CGFloat) -> some View {
         if let artwork = song.artwork {
             ArtworkImage(artwork, width: size, height: size)
+                .frame(width: size, height: size)
         } else {
             artworkFallback
                 .frame(width: size, height: size)

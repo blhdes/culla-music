@@ -307,6 +307,7 @@ struct MusicSwipeView: View {
         VStack(spacing: 14) {
             if let artwork = song.artwork {
                 ArtworkImage(artwork, width: 140, height: 140)
+                    .frame(width: 140, height: 140)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             VStack(spacing: 4) {

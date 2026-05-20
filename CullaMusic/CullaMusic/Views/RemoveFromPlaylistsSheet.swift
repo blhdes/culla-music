@@ -69,6 +69,7 @@ struct RemoveFromPlaylistsSheet: View {
         VStack(spacing: 10) {
             if let artwork = song.artwork {
                 ArtworkImage(artwork, width: 80, height: 80)
+                    .frame(width: 80, height: 80)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)

@@ -246,6 +246,11 @@ struct HomeView: View {
     /// `nil` while the snapshot is still loading so the card can show a
     /// loader instead of briefly rendering empty.
     @State private var sourceTrackCounts: [String: Int]?
+    /// Current hero artwork — drives the ambient background's tint so the
+    /// page color shifts with whichever album is being previewed. `nil` until
+    /// the hero stack reports its first resolution, in which case the glow
+    /// falls back to the app accent.
+    @State private var heroArtwork: Artwork?
     /// Per-artist library track counts, lazily resolved when the user picks
     /// an artist source. Keyed by Apple Music artist ID. Absent → either
     /// loading (see `artistTrackCountsLoading`) or the fetch failed and we
@@ -263,7 +268,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            LivingMeshBackground()
+            HomeAmbientBackground(tint: ambientTint)
 
             VStack(spacing: 0) {
                 wordmark
@@ -275,7 +280,8 @@ struct HomeView: View {
                     mode: selectedMode,
                     source: source,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
-                    modelContext: modelContext
+                    modelContext: modelContext,
+                    onPrimaryArtworkResolved: { heroArtwork = $0 }
                 )
                 .padding(.bottom, 22)
 
@@ -425,6 +431,17 @@ struct HomeView: View {
     private var selectedSourceIsReadOnly: Bool {
         if case .playlist(_, _, let isEditable) = source { return !isEditable }
         return false
+    }
+
+    /// Color the ambient background glow is keyed to. Reads the hero artwork's
+    /// dominant background color when available so the page tone shifts per
+    /// album; falls back to the app accent before the first resolve lands or
+    /// when the artwork didn't expose a usable color.
+    private var ambientTint: Color {
+        if let cg = heroArtwork?.backgroundColor {
+            return Color(cgColor: cg)
+        }
+        return appAccent
     }
 
     // MARK: - Wordmark
@@ -680,6 +697,7 @@ private struct ArtistThumbnail: View {
                 ArtistPlaceholder(name: artistName, size: size)
             }
         }
+        .frame(width: size, height: size)
         .clipShape(Circle())
     }
 }

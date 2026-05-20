@@ -20,6 +20,11 @@ struct HomeHeroArtStack: View {
     let source: SourceScope?
     let sortOrder: SortOrder
     let modelContext: ModelContext
+    /// Fires when the hero card's primary artwork is known — for source-picked
+    /// modes that's the cached playlist/artist artwork, otherwise it's the
+    /// first item from the freshly-fetched library/dismissed list. Used by
+    /// HomeView to tint the ambient background to match the current preview.
+    var onPrimaryArtworkResolved: ((Artwork?) -> Void)? = nil
 
     @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,6 +54,13 @@ struct HomeHeroArtStack: View {
             )
             frontCard
         }
+        // `maxWidth: .infinity` pins the ZStack to whatever width the parent
+        // proposes. Without it, the natural width is decided by the widest
+        // child — and `ArtworkImage(width:height:)` doesn't reliably clamp
+        // its layout size in iOS 26, so three stacked ArtworkImages were
+        // inflating the parent VStack and pushing the rest of HomeView past
+        // the screen edges (which is why the cards lost their margins).
+        .frame(maxWidth: .infinity)
         .frame(height: size + 24)
         .task(id: stackKey) {
             await loadArtworks()
@@ -95,6 +107,7 @@ struct HomeHeroArtStack: View {
     private var songArtworkCard: some View {
         if let front = artworks.first {
             ArtworkImage(front, width: size, height: size)
+                .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -139,6 +152,7 @@ struct HomeHeroArtStack: View {
         return Group {
             if let artwork {
                 ArtworkImage(artwork, width: side, height: side)
+                    .frame(width: side, height: side)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -194,11 +208,13 @@ struct HomeHeroArtStack: View {
             // Hero is the playlist cover (rendered by PlaylistCoverView), so
             // we only need the next 2 track artworks for the back cards.
             artworks = await fetchPlaylistTrackArtworks(id: id, limit: 2)
+            onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forPlaylistID: id))
             return
         case .artist(let id, _):
             // Same idea — hero is the artist artwork; back cards preview the
             // first 2 songs by this artist in the user's sort order.
             artworks = await fetchArtistTrackArtworks(id: id, limit: 2)
+            onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forArtistID: id))
             return
         case .none:
             break
@@ -210,6 +226,7 @@ struct HomeHeroArtStack: View {
         case .dismissed:
             artworks = await fetchRecentlyDismissedArtworks(limit: 3)
         }
+        onPrimaryArtworkResolved?(artworks.first)
     }
 
     /// Fresh small library request — does not touch the swipe-session paging
@@ -340,6 +357,7 @@ private struct ArtistHeroSquare: View {
         Group {
             if let artwork = MusicLibraryService.shared.artwork(forArtistID: artistID) {
                 ArtworkImage(artwork, width: size, height: size)
+                    .frame(width: size, height: size)
             } else {
                 placeholder
             }

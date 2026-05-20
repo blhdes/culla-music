@@ -530,6 +530,7 @@ struct SourceScopePickerSheet: View {
                         ArtistPlaceholder(name: artist.name, size: 44)
                     }
                 }
+                .frame(width: 44, height: 44)
                 .clipShape(Circle())
 
                 Text(artist.name)

@@ -670,12 +670,14 @@ final class MusicLibraryService {
         request.limit = 5
         let response = try await request.response()
 
-        // Prefer an exact (case-insensitive) name match so common-name
-        // collisions don't surface the wrong artist; fall back to the first
-        // result when no exact hit exists.
+        // Only return an exact (case-insensitive) name match. Without this
+        // guard, the previous `?? response.artists.first` fallback would
+        // surface the wrong artist on common-name collisions (a library
+        // track by "Tyler" would resolve to whichever Tyler the catalog
+        // returned first). Nil → caller renders FallbackArtistView, which
+        // already handles "no rich data" with a Google search.
         let lower = term.lowercased()
         return response.artists.first(where: { $0.name.lowercased() == lower })
-            ?? response.artists.first
     }
 
     /// Hydrates an `Artist` with the relationships the hub renders.

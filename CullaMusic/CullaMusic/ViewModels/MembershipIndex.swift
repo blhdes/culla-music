@@ -267,25 +267,26 @@ final class MembershipIndex {
         return cachesDir.appendingPathComponent(artistCountsFilename)
     }
 
-    /// Per-artist library track count snapshot read from disk. Empty when no
-    /// snapshot has been written yet — caller decides whether to trigger a
-    /// fresh fetch via `MusicLibraryService.fetchAllArtistTrackCounts()`.
-    nonisolated static func diskArtistCountsSnapshot() -> [String: Int] {
+    /// Per-artist library track count snapshot read from disk. The
+    /// `attemptedIDs` list records every artist we *tried* to count — even
+    /// ones whose `\.artists, contains:` filter came back empty (and thus
+    /// were omitted from `counts`). Callers use it to decide whether the
+    /// snapshot covers the current library or a fresh fetch is needed.
+    nonisolated static func diskArtistCountsSnapshot() -> ArtistCountsSnapshot {
         guard let url = artistCountsURL,
-              FileManager.default.fileExists(atPath: url.path) else { return [:] }
-        do {
-            let data = try Data(contentsOf: url)
-            return try JSONDecoder().decode([String: Int].self, from: data)
-        } catch {
-            print("MembershipIndex.diskArtistCountsSnapshot failed: \(error)")
-            return [:]
+              FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(ArtistCountsSnapshot.self, from: data)
+        else {
+            return ArtistCountsSnapshot(counts: [:], attemptedIDs: [])
         }
+        return snapshot
     }
 
-    nonisolated static func writeArtistCounts(_ counts: [String: Int]) {
+    nonisolated static func writeArtistCounts(_ snapshot: ArtistCountsSnapshot) {
         guard let url = artistCountsURL else { return }
         do {
-            let data = try JSONEncoder().encode(counts)
+            let data = try JSONEncoder().encode(snapshot)
             try data.write(to: url, options: .atomic)
         } catch {
             print("MembershipIndex.writeArtistCounts failed: \(error)")
@@ -304,6 +305,16 @@ final class MembershipIndex {
         } catch {
             print("MembershipIndex.loadPersisted failed: \(error)")
         }
+    }
+
+    // MARK: - Disk shapes
+
+    /// Persisted shape for the artist-counts snapshot. Carries both the counts
+    /// AND the list of artist IDs we attempted — so callers can tell "we
+    /// haven't seen this artist" apart from "we tried and got nothing back."
+    struct ArtistCountsSnapshot: Codable {
+        var counts: [String: Int]
+        var attemptedIDs: [String]
     }
 
     /// Debounced disk write — coalesces rapid mutations so a burst of swipes

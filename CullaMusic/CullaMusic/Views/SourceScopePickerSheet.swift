@@ -19,8 +19,14 @@ struct SourceScopePickerSheet: View {
     @State private var isLoadingArtists: Bool = false
     /// Per-artist library track counts. Loaded from disk on open (instant if
     /// previously persisted), then refreshed via a parallel batch when the
-    /// disk snapshot is empty.
+    /// disk snapshot doesn't cover the current library.
     @State private var artistTrackCounts: [String: Int] = [:]
+    /// Artist IDs we've attempted to count this session (or in a prior session
+    /// loaded from disk). Used so we don't re-fetch artists whose count came
+    /// back as "0" — `MusicLibraryService.safeCountLibrarySongs` deliberately
+    /// returns nil for those, but we still know we tried. Refetch only fires
+    /// when the current library has artists not in this set.
+    @State private var attemptedArtistIDs: Set<String> = []
     @State private var isLoadingCounts: Bool = false
     @State private var pickerMode: PickerMode = .playlists
     @State private var searchQuery: String = ""
@@ -338,34 +344,35 @@ struct SourceScopePickerSheet: View {
     }
 
     /// Hydrates `artistTrackCounts` from disk first (instant render of any
-    /// prior snapshot), then fires a fresh parallel batch if the snapshot is
-    /// missing or stale. On success, persists the snapshot so subsequent opens
-    /// skip the fetch.
+    /// prior snapshot), then fires a fresh parallel batch only when the
+    /// current library contains artists we haven't attempted yet. On success,
+    /// persists both the counts AND the attempted-IDs list so subsequent opens
+    /// skip the fetch entirely.
     private func loadArtistCountsIfNeeded() async {
-        if artistTrackCounts.isEmpty {
+        if artistTrackCounts.isEmpty && attemptedArtistIDs.isEmpty {
             let disk = await Task.detached(priority: .userInitiated) {
                 MembershipIndex.diskArtistCountsSnapshot()
             }.value
-            if !disk.isEmpty {
-                artistTrackCounts = disk
-            }
+            artistTrackCounts = disk.counts
+            attemptedArtistIDs = Set(disk.attemptedIDs)
         }
 
-        // Re-fetch when the snapshot looks stale: smaller than the current
-        // artist list (older builds capped this at 100 before pagination
-        // landed), or carrying 0-valued entries from before we started
-        // dropping unknown counts. After one clean fetch neither condition
-        // holds, so steady-state picker opens stay fast.
-        let needsRefresh = artistTrackCounts.isEmpty
-            || artistTrackCounts.count < libraryArtists.count
-            || artistTrackCounts.values.contains(0)
+        // Refetch only when the disk snapshot doesn't cover every current
+        // library artist. "Covered" = we tried to count them, even if the
+        // attempt came back as nil (uploaded tracks, fuzzy metadata, etc.).
+        // Previously this used `counts.count < libraryArtists.count`, which
+        // ALWAYS fired because nil-result artists are omitted from `counts` —
+        // defeating the cache and re-walking the library every picker open.
+        let currentIDs = Set(libraryArtists.map { $0.id.rawValue })
+        let needsRefresh = !currentIDs.isSubset(of: attemptedArtistIDs)
 
         guard needsRefresh, !isLoadingCounts else { return }
         isLoadingCounts = true
         defer { isLoadingCounts = false }
         do {
             let fresh = try await MusicLibraryService.shared.fetchAllArtistTrackCounts()
-            artistTrackCounts = fresh
+            artistTrackCounts = fresh.counts
+            attemptedArtistIDs = Set(fresh.attemptedIDs)
             MembershipIndex.writeArtistCounts(fresh)
         } catch {
             print("SourceScopePickerSheet.loadArtistCounts failed: \(error)")

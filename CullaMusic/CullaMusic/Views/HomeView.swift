@@ -378,7 +378,7 @@ struct HomeView: View {
             await vm.loadCounts()
             let initialSnapshot = await counts
             sourceTrackCounts = initialSnapshot
-            artistTrackCounts = await artistCounts
+            artistTrackCounts = await artistCounts.counts
 
             // Cold-launch backstop: the persisted snapshot is written by the
             // swipe screen's membership index. On a fresh install the user

@@ -304,10 +304,17 @@ final class MusicLibraryService {
     /// power user with 500+ artists doesn't fire 500 simultaneous requests at
     /// MusicKit. Individual artist failures are logged and skipped — partial
     /// results are more useful than a wholesale failure.
-    func fetchAllArtistTrackCounts() async throws -> [String: Int] {
+    ///
+    /// Returns both the counts AND the list of artist IDs we attempted, so
+    /// callers can persist a snapshot that survives "this artist has uploaded-
+    /// only tracks and reports 0" without forcing a refetch on the next open.
+    func fetchAllArtistTrackCounts() async throws -> MembershipIndex.ArtistCountsSnapshot {
         let artists = try await refreshLibraryArtists()
-        guard !artists.isEmpty else { return [:] }
+        guard !artists.isEmpty else {
+            return MembershipIndex.ArtistCountsSnapshot(counts: [:], attemptedIDs: [])
+        }
         let maxConcurrent = 8
+        let attemptedIDs = artists.map { $0.id.rawValue }
 
         return await withTaskGroup(of: (String, Int)?.self) { group in
             var counts: [String: Int] = [:]
@@ -331,7 +338,10 @@ final class MusicLibraryService {
                     group.addTask { await Self.safeCountLibrarySongs(for: artist) }
                 }
             }
-            return counts
+            return MembershipIndex.ArtistCountsSnapshot(
+                counts: counts,
+                attemptedIDs: attemptedIDs
+            )
         }
     }
 

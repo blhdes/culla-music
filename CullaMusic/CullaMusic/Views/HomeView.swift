@@ -394,12 +394,15 @@ struct HomeView: View {
             // swipe screen's membership index. On a fresh install the user
             // might pick a source before ever opening the swipe screen — in
             // that case there's no snapshot yet and the Library count would
-            // render empty. Build the index here so both the Library card
-            // and the source picker have data on first launch.
+            // render empty. Build the index in the background so the rest of
+            // Home's task can complete; sourceTrackCounts updates when the
+            // rebuild lands (the source picker shows a loader in the meantime).
             if initialSnapshot.isEmpty, !vm.playlists.isEmpty {
-                let index = MembershipIndex(service: MusicLibraryService.shared)
-                await index.rebuild()
-                sourceTrackCounts = index.countsSnapshot()
+                Task { @MainActor in
+                    let index = MembershipIndex(service: MusicLibraryService.shared)
+                    await index.rebuild()
+                    sourceTrackCounts = index.countsSnapshot()
+                }
             }
         }
         .onChange(of: selectedMode) { _, newValue in

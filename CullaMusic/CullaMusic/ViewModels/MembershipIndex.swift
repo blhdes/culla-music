@@ -319,7 +319,7 @@ final class MembershipIndex {
     /// Persisted shape for the artist-counts snapshot. Carries both the counts
     /// AND the list of artist IDs we attempted — so callers can tell "we
     /// haven't seen this artist" apart from "we tried and got nothing back."
-    struct ArtistCountsSnapshot: Codable {
+    nonisolated struct ArtistCountsSnapshot: Codable {
         var counts: [String: Int]
         var attemptedIDs: [String]
     }

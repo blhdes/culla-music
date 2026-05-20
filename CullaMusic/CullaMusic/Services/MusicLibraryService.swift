@@ -194,15 +194,28 @@ final class MusicLibraryService {
 
     /// Returns every artist with at least one track in the user's library.
     /// Sorted alphabetically by the caller; this just hydrates the cache.
+    /// Pages through the library because `MusicLibraryRequest` caps each
+    /// response at ~100 — without the loop a power user only ever sees the
+    /// first alphabetical page.
     @discardableResult
     func refreshLibraryArtists() async throws -> [Artist] {
-        var request = MusicLibraryRequest<Artist>()
-        request.limit = 100
-        let response = try await request.response()
-        let artists = Array(response.items)
+        let pageSize = 100
+        var collected: [Artist] = []
+        var offset = 0
         artistCache.removeAll(keepingCapacity: true)
-        for a in artists { artistCache[a.id] = a }
-        return artists
+        while true {
+            var request = MusicLibraryRequest<Artist>()
+            request.limit = pageSize
+            request.offset = offset
+            let response = try await request.response()
+            let page = Array(response.items)
+            if page.isEmpty { break }
+            collected.append(contentsOf: page)
+            for a in page { artistCache[a.id] = a }
+            if page.count < pageSize { break }
+            offset += page.count
+        }
+        return collected
     }
 
     func artwork(forArtistID id: String) -> Artwork? {
@@ -341,6 +354,11 @@ final class MusicLibraryService {
                 if page.count < 100 { break }
                 offset += page.count
             }
+            // MusicKit's `\.artists, contains:` filter returns empty for some
+            // library artists (uploaded tracks, fuzzy metadata, featured-only
+            // credits). Reporting "0" would lie — return nil so the picker row
+            // drops the badge instead of showing a misleading zero.
+            guard total > 0 else { return nil }
             return (artist.id.rawValue, total)
         } catch {
             print("Artist count failed for \(artist.name): \(error)")

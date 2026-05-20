@@ -333,8 +333,9 @@ struct SourceScopePickerSheet: View {
     }
 
     /// Hydrates `artistTrackCounts` from disk first (instant render of any
-    /// prior snapshot), then fires a fresh parallel batch if disk was empty.
-    /// On success, persists the snapshot so subsequent opens skip the fetch.
+    /// prior snapshot), then fires a fresh parallel batch if the snapshot is
+    /// missing or stale. On success, persists the snapshot so subsequent opens
+    /// skip the fetch.
     private func loadArtistCountsIfNeeded() async {
         if artistTrackCounts.isEmpty {
             let disk = await Task.detached(priority: .userInitiated) {
@@ -342,13 +343,19 @@ struct SourceScopePickerSheet: View {
             }.value
             if !disk.isEmpty {
                 artistTrackCounts = disk
-                return
             }
-        } else {
-            return
         }
 
-        guard !isLoadingCounts else { return }
+        // Re-fetch when the snapshot looks stale: smaller than the current
+        // artist list (older builds capped this at 100 before pagination
+        // landed), or carrying 0-valued entries from before we started
+        // dropping unknown counts. After one clean fetch neither condition
+        // holds, so steady-state picker opens stay fast.
+        let needsRefresh = artistTrackCounts.isEmpty
+            || artistTrackCounts.count < libraryArtists.count
+            || artistTrackCounts.values.contains(0)
+
+        guard needsRefresh, !isLoadingCounts else { return }
         isLoadingCounts = true
         defer { isLoadingCounts = false }
         do {

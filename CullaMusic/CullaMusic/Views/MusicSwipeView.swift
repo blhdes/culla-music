@@ -50,6 +50,10 @@ struct MusicSwipeView: View {
     @State private var toastTimer: Task<Void, Never>?
     @State private var showUndo = false
     @State private var undoHideTask: Task<Void, Never>?
+    /// Cancellation handle for the in-flight fly-off hand-off. A second
+    /// flyOff (e.g. rapid double-tap-to-skip) cancels the prior so its
+    /// scheduled slide-back doesn't fire after the new card is in place.
+    @State private var flyOffTask: Task<Void, Never>?
 
     private let swipeThreshold: CGFloat = 100
 
@@ -555,7 +559,13 @@ struct MusicSwipeView: View {
         withAnimation(.easeOut(duration: flyDuration)) {
             cardOffset = CGSize(width: x, height: targetY)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + flyDuration) {
+        // Cancellable hand-off: a fresh flyOff (rapid double-tap, gesture
+        // collision) cancels the prior, so its slide-back doesn't snap the
+        // new card's offset back to zero a beat after it's already in place.
+        flyOffTask?.cancel()
+        flyOffTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(flyDuration))
+            guard !Task.isCancelled else { return }
             highlightedID = nil
             withAnimation(.easeOut(duration: slideInDuration)) {
                 cardOffset = .zero

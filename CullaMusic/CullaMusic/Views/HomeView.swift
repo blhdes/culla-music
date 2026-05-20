@@ -28,7 +28,12 @@ final class HomeViewModel {
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
         await syncPlaylistsFromAppleMusic()
-        await recomputeCounts()
+        // Route through the cancellable slot so a toggle-flip arriving
+        // mid-cold-start cancels this walk instead of racing it for the
+        // cache. Previously the initial walk wasn't cancellable, so its
+        // late write could clobber the toggled fingerprint's fresh value.
+        triggerRecompute()
+        await pendingRecompute?.value
     }
 
     /// Recomputes (or reads from cache) the library and unsorted counts. Both

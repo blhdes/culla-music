@@ -274,6 +274,7 @@ struct HomeView: View {
                 HomeHeroArtStack(
                     mode: selectedMode,
                     source: source,
+                    sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
                     modelContext: modelContext
                 )
                 .padding(.bottom, 22)

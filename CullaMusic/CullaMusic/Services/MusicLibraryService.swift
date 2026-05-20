@@ -418,6 +418,25 @@ final class MusicLibraryService {
         playlistCache[MusicItemID(id)]?.lastModifiedDate
     }
 
+    /// Peek at the first track artworks of a playlist *without* advancing the
+    /// swipe-session cursor — `fetchNextPlaylistSongs` mutates
+    /// `playlistPageOffsets`, so calling it from a hero preview would silently
+    /// skip songs in the real swipe. This path resolves the playlist fresh and
+    /// reads its `.tracks` relationship directly. `ascending` mirrors
+    /// `fetchNextPlaylistSongs`: when false, walk in reverse so newly-added
+    /// tracks lead the preview.
+    func peekPlaylistTrackArtworks(
+        playlistID id: MusicItemID,
+        limit: Int,
+        ascending: Bool
+    ) async throws -> [Artwork] {
+        guard let playlist = try await freshPlaylist(id: id) else { return [] }
+        let populated: MusicKit.Playlist = try await playlist.with([.tracks])
+        let tracks = Array(populated.tracks ?? [])
+        let ordered = ascending ? tracks : tracks.reversed()
+        return ordered.prefix(limit).compactMap(\.artwork)
+    }
+
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
         let stored = (UserDefaults.standard.string(forKey: "authorDisplayName") ?? "")
             .trimmingCharacters(in: .whitespaces)

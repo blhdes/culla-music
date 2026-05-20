@@ -18,12 +18,16 @@ import MusicKit
 struct HomeHeroArtStack: View {
     let mode: ReviewMode
     let source: SourceScope?
+    let sortOrder: SortOrder
     let modelContext: ModelContext
 
     @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var frontArtwork: Artwork?
+    /// Up to three artworks for the stack — [0] front, [1] left back, [2] right
+    /// back. Empty for source-picked modes (the front uses PlaylistCoverView /
+    /// ArtistHeroSquare instead) or while a fetch is in flight.
+    @State private var artworks: [Artwork] = []
     @State private var frontFallbackKind: FallbackKind = .library
     @State private var pulse: Bool = false
 
@@ -31,16 +35,36 @@ struct HomeHeroArtStack: View {
 
     var body: some View {
         ZStack {
-            backCard(rotation: -8, offset: CGSize(width: -34, height: 8), opacity: 0.55)
-            backCard(rotation: 6, offset: CGSize(width: 32, height: 10), opacity: 0.7)
+            backCard(
+                artwork: backArtwork(at: 0),
+                rotation: -8,
+                offset: CGSize(width: -34, height: 8),
+                opacity: 0.72
+            )
+            backCard(
+                artwork: backArtwork(at: 1),
+                rotation: 6,
+                offset: CGSize(width: 32, height: 10),
+                opacity: 0.85
+            )
             frontCard
         }
         .frame(height: size + 24)
         .task(id: stackKey) {
-            await loadFront()
+            await loadArtworks()
         }
         .onAppear { triggerPulse() }
         .onChange(of: stackKey) { _, _ in triggerPulse() }
+    }
+
+    /// Maps an index in `[0, 1]` (the two back-card slots) to an artwork from
+    /// `artworks`. The pool starts at index 1 in song-mode (artworks[0] is the
+    /// hero) and at index 0 in source-picked modes (the hero is rendered by
+    /// PlaylistCoverView / ArtistHeroSquare, so artworks[0..1] feed the back).
+    private func backArtwork(at slot: Int) -> Artwork? {
+        let offset = (source == nil) ? 1 : 0
+        let idx = offset + slot
+        return idx < artworks.count ? artworks[idx] : nil
     }
 
     // MARK: - Subviews
@@ -69,8 +93,8 @@ struct HomeHeroArtStack: View {
 
     @ViewBuilder
     private var songArtworkCard: some View {
-        if let frontArtwork {
-            ArtworkImage(frontArtwork, width: size, height: size)
+        if let front = artworks.first {
+            ArtworkImage(front, width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -100,31 +124,53 @@ struct HomeHeroArtStack: View {
             )
     }
 
-    /// Decorative card behind the hero — pure glass, no artwork. Two of these
-    /// give the front card a sense of depth without paying for more fetches.
-    private func backCard(rotation: Double, offset: CGSize, opacity: Double) -> some View {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(.thinMaterial)
-            .frame(width: size - 18, height: size - 18)
-            .overlay(
+    /// Decorative card behind the hero. Shows the next sibling artwork when we
+    /// have one (so the stack previews three songs in the user's sort order);
+    /// falls back to pure glass when there's nothing to render — e.g. fewer
+    /// than three dismissed songs, or a source-picked mode where the back
+    /// cards are intentionally empty.
+    private func backCard(
+        artwork: Artwork?,
+        rotation: Double,
+        offset: CGSize,
+        opacity: Double
+    ) -> some View {
+        let side = size - 18
+        return Group {
+            if let artwork {
+                ArtworkImage(artwork, width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                    )
+            } else {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-            )
-            .opacity(opacity)
-            .rotationEffect(.degrees(rotation))
-            .offset(offset)
-            .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
+                    .fill(.thinMaterial)
+                    .frame(width: side, height: side)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                    )
+            }
+        }
+        .opacity(opacity)
+        .rotationEffect(.degrees(rotation))
+        .offset(offset)
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
     }
 
     // MARK: - State helpers
 
     /// A stable identity for the current selection. Drives `.task(id:)` so the
-    /// loader restarts when *anything* about what we're previewing changes.
+    /// loader restarts when *anything* about what we're previewing changes —
+    /// including the user flipping the order toggle, which shuffles which
+    /// three songs win the slots.
     private var stackKey: String {
         switch source {
-        case .playlist(let id, _, _): return "\(mode.rawValue):playlist:\(id)"
-        case .artist(let id, _):      return "\(mode.rawValue):artist:\(id)"
-        case .none:                   return "\(mode.rawValue):none"
+        case .playlist(let id, _, _): return "\(mode.rawValue):\(sortOrder.rawValue):playlist:\(id)"
+        case .artist(let id, _):      return "\(mode.rawValue):\(sortOrder.rawValue):artist:\(id)"
+        case .none:                   return "\(mode.rawValue):\(sortOrder.rawValue):none"
         }
     }
 
@@ -140,60 +186,115 @@ struct HomeHeroArtStack: View {
 
     // MARK: - Fetch
 
-    private func loadFront() async {
+    private func loadArtworks() async {
         frontFallbackKind = fallbackKind(for: mode, source: source)
 
         switch source {
-        case .playlist, .artist:
-            // Per-source views render directly from cached artwork — no async
-            // fetch needed. Clear `frontArtwork` so a previous song's artwork
-            // doesn't briefly bleed through.
-            frontArtwork = nil
+        case .playlist(let id, _, _):
+            // Hero is the playlist cover (rendered by PlaylistCoverView), so
+            // we only need the next 2 track artworks for the back cards.
+            artworks = await fetchPlaylistTrackArtworks(id: id, limit: 2)
             return
-
+        case .artist(let id, _):
+            // Same idea — hero is the artist artwork; back cards preview the
+            // first 2 songs by this artist in the user's sort order.
+            artworks = await fetchArtistTrackArtworks(id: id, limit: 2)
+            return
         case .none:
             break
         }
 
         switch mode {
         case .library, .unsorted:
-            frontArtwork = await fetchNewestLibraryArtwork()
+            artworks = await fetchLibraryArtworks(limit: 3)
         case .dismissed:
-            frontArtwork = await fetchMostRecentlyDismissedArtwork()
+            artworks = await fetchRecentlyDismissedArtworks(limit: 3)
         }
     }
 
-    /// Fresh single-item library request — does not touch the swipe-session
-    /// paging cursor. Cheap (one item) and gracefully returns nil on failure
-    /// so the placeholder card takes over.
-    private func fetchNewestLibraryArtwork() async -> Artwork? {
+    /// Fresh small library request — does not touch the swipe-session paging
+    /// cursor. We ask for up to 3 items so the stack can show the next two
+    /// covers behind the hero. Sort order matches the user's selected order
+    /// so the preview is "the next songs you're about to see".
+    private func fetchLibraryArtworks(limit: Int) async -> [Artwork] {
         do {
             var request = MusicLibraryRequest<Song>()
-            request.limit = 1
-            request.sort(by: \.libraryAddedDate, ascending: false)
+            request.limit = limit
+            request.sort(by: \.libraryAddedDate, ascending: sortOrder.ascending)
             let response = try await request.response()
-            return response.items.first?.artwork
+            return response.items.compactMap(\.artwork)
         } catch {
-            return nil
+            return []
         }
     }
 
-    /// Reads SwiftData for the most-recently dismissed song, then fetches its
-    /// Song directly by ID. Direct filter (not `resolveSongs`) so we don't
-    /// page through the whole library looking for one match.
-    private func fetchMostRecentlyDismissedArtwork() async -> Artwork? {
+    /// Reads SwiftData for the most-recently dismissed songs, then fetches
+    /// each artwork by ID in parallel. Direct filter (not `resolveSongs`) so
+    /// we don't page through the whole library looking for matches.
+    private func fetchRecentlyDismissedArtworks(limit: Int) async -> [Artwork] {
         var descriptor = FetchDescriptor<DismissedSong>(
             sortBy: [SortDescriptor(\.dismissedAt, order: .reverse)]
         )
-        descriptor.fetchLimit = 1
-        guard let dismissed = try? modelContext.fetch(descriptor).first else { return nil }
+        descriptor.fetchLimit = limit
+        guard
+            let dismissed = try? modelContext.fetch(descriptor),
+            !dismissed.isEmpty
+        else { return [] }
+
+        // Parallel fetch keyed by index so we can put the results back in
+        // dismissed-order — TaskGroup yields completions in any order.
+        return await withTaskGroup(of: (Int, Artwork?).self) { group in
+            for (idx, song) in dismissed.enumerated() {
+                group.addTask {
+                    do {
+                        var request = MusicLibraryRequest<Song>()
+                        request.filter(matching: \.id, equalTo: MusicItemID(song.songID))
+                        let response = try await request.response()
+                        return (idx, response.items.first?.artwork)
+                    } catch {
+                        return (idx, nil)
+                    }
+                }
+            }
+            var slots: [(Int, Artwork?)] = []
+            for await pair in group { slots.append(pair) }
+            return slots.sorted { $0.0 < $1.0 }.compactMap(\.1)
+        }
+    }
+
+    /// Reads the first N tracks of a playlist without disturbing the swipe-
+    /// session cursor (see MusicLibraryService.peekPlaylistTrackArtworks).
+    /// Returns empty on failure so the back cards fall through to glass.
+    private func fetchPlaylistTrackArtworks(id: String, limit: Int) async -> [Artwork] {
         do {
-            var request = MusicLibraryRequest<Song>()
-            request.filter(matching: \.id, equalTo: MusicItemID(dismissed.songID))
-            let response = try await request.response()
-            return response.items.first?.artwork
+            return try await MusicLibraryService.shared.peekPlaylistTrackArtworks(
+                playlistID: MusicItemID(id),
+                limit: limit,
+                ascending: sortOrder.ascending
+            )
         } catch {
-            return nil
+            return []
+        }
+    }
+
+    /// Pulls the artist's library songs (already cached by the picker / by
+    /// HomeView's count fetch) and returns the first N artworks in the user's
+    /// sort order. Sort key is `libraryAddedDate` to match what the swipe
+    /// walks — songs without a date sink to the end so dated ones lead.
+    private func fetchArtistTrackArtworks(id: String, limit: Int) async -> [Artwork] {
+        do {
+            let songs = try await MusicLibraryService.shared.artistLibrarySongs(
+                artistID: MusicItemID(id)
+            )
+            let ascending = sortOrder.ascending
+            let sorted = songs.sorted { lhs, rhs in
+                let l = lhs.libraryAddedDate ?? .distantPast
+                let r = rhs.libraryAddedDate ?? .distantPast
+                return ascending ? l < r : l > r
+            }
+            return sorted.prefix(limit).compactMap(\.artwork)
+        } catch {
+            return []
         }
     }
 

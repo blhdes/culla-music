@@ -222,8 +222,8 @@ final class AccentExtractor {
         let avgL = lSum / Double(count)
 
         let hue = avgL < 0.5 ? 215.0 / 360.0 : 35.0 / 360.0
-        let s = 0.22
-        let l = min(max(avgL, 0.50), 0.65)
+        let s = 0.25
+        let l = min(max(avgL, 0.42), 0.55)
         let (r1, g1, b1) = hslToRGB(h: hue, s: s, l: l)
         let primary = Color(red: r1, green: g1, blue: b1)
 
@@ -234,7 +234,9 @@ final class AccentExtractor {
     }
 
     /// Reads the bucket's pre-aggregated centroid + clamps into the
-    /// comfortable HSL accent range.
+    /// comfortable HSL accent range. The 0.58 lightness ceiling keeps pale
+    /// artwork accents from bleaching out when painted against a white
+    /// (light-theme) background — anything brighter loses contrast.
     nonisolated private static func bucketColor(stats: BucketStats) -> Color? {
         guard stats.count > 0 else { return nil }
         let rAvg = Double(stats.rSum) / Double(stats.count) / 255
@@ -242,8 +244,8 @@ final class AccentExtractor {
         let bAvg = Double(stats.bSum) / Double(stats.count) / 255
 
         let (h, sRaw, lRaw) = rgbToHSL(r: rAvg, g: gAvg, b: bAvg)
-        let s = max(sRaw, 0.45)
-        let l = min(max(lRaw, 0.45), 0.70)
+        let s = max(sRaw, 0.50)
+        let l = min(max(lRaw, 0.40), 0.58)
         let (rOut, gOut, bOut) = hslToRGB(h: h, s: s, l: l)
         return Color(red: rOut, green: gOut, blue: bOut)
     }
@@ -257,8 +259,8 @@ final class AccentExtractor {
         var (h, s, l) = rgbToHSL(r: Double(r), g: Double(g), b: Double(b))
         h = (h + 50.0 / 360.0).truncatingRemainder(dividingBy: 1.0)
         if h < 0 { h += 1 }
-        l = min(max(l + 0.08, 0.45), 0.70)
-        s = max(s, 0.45)
+        l = min(max(l + 0.06, 0.40), 0.58)
+        s = max(s, 0.50)
         let (rOut, gOut, bOut) = hslToRGB(h: h, s: s, l: l)
         return Color(red: rOut, green: gOut, blue: bOut)
     }

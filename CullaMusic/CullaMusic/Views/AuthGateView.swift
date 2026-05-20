@@ -5,6 +5,8 @@ struct AuthGateView: View {
     let status: MusicAuthorization.Status
     let onRequest: () -> Void
 
+    @Environment(\.appAccent) private var appAccent
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "music.note.list")
@@ -25,7 +27,7 @@ struct AuthGateView: View {
                     .font(.headline)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(Color.accentColor, in: Capsule())
+                    .background(appAccent, in: Capsule())
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)

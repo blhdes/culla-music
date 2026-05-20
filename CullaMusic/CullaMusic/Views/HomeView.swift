@@ -233,6 +233,7 @@ struct HomeView: View {
     var heroNamespace: Namespace.ID?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appAccent) private var appAccent
     @State private var homeVM: HomeViewModel?
     @State private var selectedMode: ReviewMode = .library
     @State private var source: SourceScope?
@@ -354,6 +355,7 @@ struct HomeView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .tint(appAccent)
                 .matchedHero(id: "heroStart", in: heroNamespace)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 40)
@@ -620,13 +622,15 @@ private struct ModeCard: View {
     let isLoadingCount: Bool
     let onTap: () -> Void
 
+    @Environment(\.appAccent) private var appAccent
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 14) {
                 // Use Color types so both branches of the ternary share the same type.
                 Image(systemName: isSelected ? "record.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? appAccent : Color.secondary)
                     .animation(.spring(response: 0.3), value: isSelected)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -656,13 +660,13 @@ private struct ModeCard: View {
             .background(
                 RoundedRectangle(cornerRadius: 14)
                     .fill(isSelected
-                        ? Color.accentColor.opacity(0.08)
+                        ? appAccent.opacity(0.08)
                         : Color(.secondarySystemBackground))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
                     .strokeBorder(
-                        isSelected ? Color.accentColor.opacity(0.35) : .clear,
+                        isSelected ? appAccent.opacity(0.35) : .clear,
                         lineWidth: 1.5
                     )
             )

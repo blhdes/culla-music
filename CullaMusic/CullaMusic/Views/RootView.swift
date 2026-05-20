@@ -56,7 +56,11 @@ struct RootView: View {
             authStatus = MusicAuthorization.currentStatus
         }
         .preferredColorScheme(appColorScheme)
-        .tint(palette.color)
+        // Don't set a global .tint(palette.color) — that propagates the
+        // accent onto every toggle, picker, segmented control, and checkmark,
+        // which reads as visual noise and (on light theme) low-contrast for
+        // brighter palettes. Critical surfaces opt in to the palette accent
+        // explicitly by reading \.appAccent and applying .tint themselves.
         .environment(\.appAccent, palette.color)
     }
 

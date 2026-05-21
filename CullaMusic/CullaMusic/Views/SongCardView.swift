@@ -20,6 +20,12 @@ struct SongCardView: View {
     /// the front (current) card receives it; the preloaded next card omits it
     /// so SwiftUI never sees two simultaneous sources for `heroStart`.
     var heroNamespace: Namespace.ID? = nil
+    /// Gates the play-button overlay so it only appears once the artwork has
+    /// finished its hero morph from "Start Cullaing". `.overlay` aligns to the
+    /// view's *layout* frame, so without this the play button snaps to the
+    /// final center position immediately while the cover is still morphing
+    /// — making the button look unanchored from the cover during entry.
+    var chromeRevealed: Bool = true
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
@@ -45,7 +51,11 @@ struct SongCardView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 24))
                             .matchedHero(id: "heroStart", in: heroNamespace)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
-                            .overlay(alignment: .center) { playButton }
+                            .overlay(alignment: .center) {
+                                playButton
+                                    .opacity(chromeRevealed ? 1 : 0)
+                                    .scaleEffect(chromeRevealed ? 1 : 0.85)
+                            }
                             .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
 
                         timeLabels(width: artworkSize)

@@ -9,6 +9,11 @@ struct MusicSwipeView: View {
     /// card receives it — the preloaded next card never participates, so
     /// SwiftUI never sees two simultaneous sources for `heroStart`.
     var heroNamespace: Namespace.ID?
+    /// True once the Home → Swipe hero morph has finished. Driven from
+    /// `RootView` via `withAnimation(completion:)` so the play button's
+    /// reveal is a consequence of the spring actually landing, not a fixed
+    /// timer. Forwarded to the current `SongCardView` as `chromeRevealed`.
+    var chromeRevealed: Bool = true
 
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
@@ -427,7 +432,8 @@ struct MusicSwipeView: View {
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) },
                     onShowArtist: { artistSheetSong = current },
-                    heroNamespace: heroNamespace
+                    heroNamespace: heroNamespace,
+                    chromeRevealed: chromeRevealed
                 )
                 .id(current.id.rawValue)
                 .transition(.asymmetric(

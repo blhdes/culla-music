@@ -13,6 +13,12 @@ struct RootView: View {
     /// button visibly grows into the card (and shrinks back on dismiss).
     @Namespace private var heroNamespace
 
+    /// True once the entry spring has logically completed — i.e. the cover has
+    /// landed at the artwork frame. Drives the play-button reveal so it shows
+    /// as a *consequence* of the morph finishing, not on a fixed timer. Reset
+    /// inside the exit spring so the button leaves with the cover.
+    @State private var heroMorphComplete = false
+
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
 
@@ -36,7 +42,12 @@ struct RootView: View {
             case .authorized:
                 ZStack {
                     if let vm = activeViewModel {
-                        MusicSwipeView(viewModel: vm, onBack: endSession, heroNamespace: heroNamespace)
+                        MusicSwipeView(
+                            viewModel: vm,
+                            onBack: endSession,
+                            heroNamespace: heroNamespace,
+                            chromeRevealed: heroMorphComplete
+                        )
                             // Per-VM identity so the second swipe session starts
                             // with fresh @State (cardOffset, flyOffTask, sheet
                             // bindings…). Without this, SwiftUI was reusing the
@@ -84,10 +95,24 @@ struct RootView: View {
     @MainActor
     private func startSession(config: SwipeConfig) {
         let vm = MusicSwipeViewModel(config: config, modelContext: modelContext)
+        // ObjectIdentifier of the freshly minted VM — used to gate the
+        // completion handler so a rapid back-out → re-enter can't let a stale
+        // completion flash the play button on the new session prematurely.
+        let sessionID = ObjectIdentifier(vm)
+        heroMorphComplete = false
         // withAnimation here (not on the conditional) drives both the matched
-        // hero morph and HomeView's parallaxRecede transition off the same spring.
+        // hero morph and HomeView's parallaxRecede transition off the same
+        // spring. The completion handler fires when the spring logically
+        // lands, so the play button reveal is a consequence of the morph
+        // finishing — not a guessed timer.
         withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
             activeViewModel = vm
+        } completion: {
+            guard let active = activeViewModel,
+                  ObjectIdentifier(active) == sessionID else { return }
+            withAnimation(.easeOut(duration: 0.22)) {
+                heroMorphComplete = true
+            }
         }
         Task { @MainActor in
             await vm.loadInitial()
@@ -95,6 +120,12 @@ struct RootView: View {
     }
 
     private func endSession() {
+        // Pull the play button on a fast curve so it's gone before the cover
+        // has moved far on its way back to the "Start Cullaing" capsule —
+        // separate transaction so it doesn't ride the longer exit spring.
+        withAnimation(.easeOut(duration: 0.15)) {
+            heroMorphComplete = false
+        }
         withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
             activeViewModel = nil
         }

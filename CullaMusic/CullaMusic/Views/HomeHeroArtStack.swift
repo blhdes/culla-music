@@ -2,19 +2,27 @@ import SwiftUI
 import SwiftData
 import MusicKit
 
-/// Hero preview shown above the mode tiles on HomeView. Renders a single
-/// glass-framed artwork that previews what the user is about to swipe, with
-/// two smaller decorative cards peeking behind it for depth.
+/// Hero preview shown above the mode tiles on HomeView. Renders a glass-framed
+/// artwork that previews what the user is about to swipe.
 ///
-/// The front card refetches whenever `mode`, `source`, or the playlist context
-/// changes. Refetch is keyed via `.task(id:)` so SwiftUI cancels in-flight
-/// fetches when the user flips modes quickly — no race, no stale artwork.
+/// Two modes of presentation, depending on `source`:
+///
+/// - **source == nil** (library / unsorted / dismissed): the stack becomes a
+///   horizontal fan of the next few covers. The user can drag a single
+///   continuous gesture across the screen to scrub through them; letting go
+///   springs everything back to the first cover. It's a one-journey peek —
+///   no commit, no "swipe again to see the next one", just a finger across
+///   the screen to glance ahead.
+///
+/// - **source != nil** (playlist / artist picked): the hero is locked to the
+///   playlist or artist cover, with two static decorative cards behind it.
+///   No scrub gesture — the hero IS the source, there's nothing to cycle.
 ///
 /// Source resolution per mode:
 /// - `.library` + playlist source → the playlist's own cover
 /// - `.library` + artist source   → the artist's library artwork (or initials)
-/// - `.library` / `.unsorted`     → most-recently-added library song
-/// - `.dismissed`                  → most-recently-dismissed song
+/// - `.library` / `.unsorted`     → most-recently-added library songs
+/// - `.dismissed`                  → most-recently-dismissed songs
 struct HomeHeroArtStack: View {
     let mode: ReviewMode
     let source: SourceScope?
@@ -29,30 +37,38 @@ struct HomeHeroArtStack: View {
     @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Up to three artworks for the stack — [0] front, [1] left back, [2] right
-    /// back. Empty for source-picked modes (the front uses PlaylistCoverView /
-    /// ArtistHeroSquare instead) or while a fetch is in flight.
+    /// Pool of preview artworks. In source-picked modes this feeds the two
+    /// back cards (the hero is rendered by PlaylistCoverView /
+    /// ArtistHeroSquare). In source == nil modes this is the full scrubbable
+    /// fan — each artwork is one card in the deck.
     @State private var artworks: [Artwork] = []
     @State private var frontFallbackKind: FallbackKind = .library
     @State private var pulse: Bool = false
+    /// Live horizontal drag translation for the scrub gesture (source == nil
+    /// only). Negative values pull the deck leftwards to reveal later covers;
+    /// lifting the finger springs this back to 0 so the first cover returns
+    /// to the front. Always 0 in source-picked modes.
+    @State private var dragX: CGFloat = 0
 
     private let size: CGFloat = 168
+    /// Library/dismissed deck holds up to this many covers — the rest state
+    /// shows the first three balanced (centre + near-left + near-right);
+    /// the last two live off-screen and slide in when the user drags in
+    /// their direction. Anything past 5 is loaded but not rendered.
+    private let deckCapacity: Int = 5
+    /// Drag distance at which the far-side card is fully revealed. Past
+    /// this the gesture rubber-bands so the user feels the end of the deck
+    /// without an abrupt stop. Sized so a comfortable thumb sweep reveals
+    /// the full card without making the user reach across the screen.
+    private let revealDistance: CGFloat = 120
 
     var body: some View {
         ZStack {
-            backCard(
-                artwork: backArtwork(at: 0),
-                rotation: -8,
-                offset: CGSize(width: -34, height: 8),
-                opacity: 0.72
-            )
-            backCard(
-                artwork: backArtwork(at: 1),
-                rotation: 6,
-                offset: CGSize(width: 32, height: 10),
-                opacity: 0.85
-            )
-            frontCard
+            if source == nil {
+                scrubDeck
+            } else {
+                sourcedStack
+            }
         }
         // Pin to parent width so the surrounding VStack sizes itself to the
         // screen instead of shrinking to the natural width of the small
@@ -60,30 +76,235 @@ struct HomeHeroArtStack: View {
         // below off-center).
         .frame(maxWidth: .infinity)
         .frame(height: size + 24)
-        .task(id: stackKey) {
+        .task(id: fetchKey) {
+            dragX = 0
             await loadArtworks()
         }
         .onAppear { triggerPulse() }
-        .onChange(of: stackKey) { _, _ in triggerPulse() }
+        .onChange(of: fetchKey) { _, _ in triggerPulse() }
     }
 
-    /// Maps an index in `[0, 1]` (the two back-card slots) to an artwork from
-    /// `artworks`. The pool starts at index 1 in song-mode (artworks[0] is the
-    /// hero) and at index 0 in source-picked modes (the hero is rendered by
-    /// PlaylistCoverView / ArtistHeroSquare, so artworks[0..1] feed the back).
-    private func backArtwork(at slot: Int) -> Artwork? {
-        let offset = (source == nil) ? 1 : 0
-        let idx = offset + slot
-        return idx < artworks.count ? artworks[idx] : nil
+    // MARK: - Scrub deck (source == nil)
+
+    /// Bidirectional peek-deck.
+    ///
+    /// Rest state is the original balanced pile: card 0 centred, card 1
+    /// peeking on the right, card 2 peeking on the left. Cards 3 and 4 live
+    /// off-screen and only slide in when the user drags toward their side
+    /// (right drag reveals 3, left drag reveals 4). Lifting the finger
+    /// springs `dragX` back to zero so the rest state returns.
+    @ViewBuilder
+    private var scrubDeck: some View {
+        if artworks.isEmpty {
+            placeholderCard
+                .shadow(color: appAccent.opacity(0.35), radius: pulse ? 28 : 16, y: 12)
+                .scaleEffect(pulse ? 1.0 : 0.96)
+                .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
+                .id(fetchKey)
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
+        } else {
+            ZStack {
+                ForEach(0..<min(artworks.count, 5), id: \.self) { idx in
+                    let layout = scrubLayout(for: idx)
+                    scrubCard(artwork: artworks[idx], layout: layout)
+                        // Scale-based stacking: whichever card is currently
+                        // closest to the centre slot sits on top, and every
+                        // peeking card — whether a rest back (slot 1 / 2) or
+                        // a newcomer (slot 3 / 4) — sits behind it the same
+                        // way. Keeps the "centre on top, sides peeking from
+                        // behind" relationship consistent throughout the drag.
+                        .zIndex(Double(layout.scale))
+                }
+            }
+            .scaleEffect(pulse ? 1.0 : 0.96)
+            .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
+            .id(fetchKey)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+            .contentShape(Rectangle())
+            .gesture(scrubGesture)
+        }
     }
 
-    // MARK: - Subviews
+    /// Layout for one card in the bidirectional peek deck. Five named slots
+    /// that every card can be at — `centre`, `nearRight`, `nearLeft`,
+    /// `offRight` (hidden right), `offLeft` (hidden left). Each card has a
+    /// rest slot plus a destination for each drag direction, and we
+    /// linearly interpolate between rest and destination as the drag
+    /// progresses. The result: at full right-drag the deck has fully
+    /// rotated one position rightwards (card 1 is the new centre, card 3
+    /// has slid in as the new right peek, card 0 has moved to the left
+    /// peek). At full left-drag the mirror is true. Lifting the finger
+    /// springs `dragX` to zero, restoring the rest pile.
+    private func scrubLayout(for slot: Int) -> ScrubLayout {
+        // Each card sits at a fixed virtual position in a linear sequence,
+        // left to right: card 4 (-2), card 2 (-1), card 0 (0), card 1 (+1),
+        // card 3 (+2). Dragging shifts every card's virtual position by
+        // `dragX / revealDistance`, so each card scrubs through every
+        // visible slot in turn — passing through centre when the drag
+        // arrives at it. No per-slot special cases: every card runs the
+        // same layout function, so the newcomers behave identically to
+        // the initial three.
+        let restPositions: [CGFloat] = [0, 1, -1, 2, -2]
+        guard slot < restPositions.count else { return Self.centreSlot }
+        let virtualPos = restPositions[slot] - dragX / revealDistance
+        return layoutAtVirtualPosition(virtualPos)
+    }
 
-    /// The hero card. Uses the per-source view when we have one (PlaylistCover,
-    /// ArtistThumbnail) so we don't refetch artwork the rest of the app already
-    /// has cached. Falls back to `frontArtwork` (a Song's artwork loaded async)
-    /// otherwise.
-    private var frontCard: some View {
+    /// Maps a continuous virtual position to the rendered card layout.
+    /// Waypoints: 0 = centre, ±1 = near peek, ±1.5 = spread peek,
+    /// ±2+ = off-screen. The spread peek sits between near and off so
+    /// cards at rest virtual position ±2 (i.e. the newcomers) are
+    /// naturally off-screen — no opacity hack required to keep the rest
+    /// pile reading as three cards.
+    private func layoutAtVirtualPosition(_ v: CGFloat) -> ScrubLayout {
+        let absV = abs(v)
+        let rightSide = v >= 0
+        let nearSlot   = rightSide ? Self.nearRightSlot   : Self.nearLeftSlot
+        let spreadSlot = rightSide ? Self.spreadRightSlot : Self.spreadLeftSlot
+        let offSlot    = rightSide ? Self.offRightSlot    : Self.offLeftSlot
+
+        if absV >= 2.0 { return offSlot }
+        if absV >= 1.5 { return ScrubLayout.lerp(from: spreadSlot,  to: offSlot,    t: (absV - 1.5) * 2) }
+        if absV >= 1.0 { return ScrubLayout.lerp(from: nearSlot,    to: spreadSlot, t: (absV - 1.0) * 2) }
+        return            ScrubLayout.lerp(from: Self.centreSlot,   to: nearSlot,   t: absV)
+    }
+
+    // The named slots a card can occupy.
+    //
+    // - `centre` / `nearRight` / `nearLeft` define the rest pile (the
+    //   balanced 3-card look the user wanted preserved).
+    // - `spreadRight` / `spreadLeft` are the *during-drag* peek positions
+    //   — wider apart than the rest near-slots so the newly-revealed card
+    //   has space to actually be seen past the new centre's silhouette.
+    // - `offRight` / `offLeft` are the off-screen hiding positions for
+    //   cards 3 and 4 at rest, and for whichever side card is being
+    //   shoved off during a drag in the opposite direction.
+    private static let centreSlot      = ScrubLayout(offset: CGSize(width:    0, height:  0), scale: 1.00, rotation:   0, opacity: 1.0, zIndex: 0)
+    private static let nearRightSlot   = ScrubLayout(offset: CGSize(width:   32, height: 10), scale: 0.92, rotation:   6, opacity: 0.85, zIndex: 0)
+    private static let nearLeftSlot    = ScrubLayout(offset: CGSize(width:  -34, height:  8), scale: 0.92, rotation:  -8, opacity: 0.78, zIndex: 0)
+    private static let spreadRightSlot = ScrubLayout(offset: CGSize(width:   92, height: 14), scale: 0.83, rotation:  10, opacity: 0.88, zIndex: 0)
+    private static let spreadLeftSlot  = ScrubLayout(offset: CGSize(width:  -94, height: 12), scale: 0.83, rotation: -12, opacity: 0.88, zIndex: 0)
+    private static let offRightSlot    = ScrubLayout(offset: CGSize(width:  240, height: 18), scale: 0.78, rotation:  16, opacity: 0.0,  zIndex: 0)
+    private static let offLeftSlot     = ScrubLayout(offset: CGSize(width: -242, height: 16), scale: 0.78, rotation: -18, opacity: 0.0,  zIndex: 0)
+
+    /// Renders one card with the layout values resolved for the current
+    /// drag. All cards render at the same base size; scale is what makes a
+    /// card read as "front" or "back". Shadow strength tracks scale too, so
+    /// whichever card is currently closest to the centre carries the accent
+    /// halo and the bigger lift — that's how the focus visibly shifts to
+    /// whichever cover the user has dragged to the middle.
+    private func scrubCard(artwork: Artwork, layout: ScrubLayout) -> some View {
+        // Continuous "centre-ness": 1.0 at the centre slot's scale, fading
+        // to 0 as the card shrinks toward the side scales. Used to blend
+        // between the accent halo and the plain depth shadow as the user
+        // drags a new cover into focus.
+        let centreness = max(0, min(1, (layout.scale - 0.92) / (1.0 - 0.92)))
+
+        return ArtworkImage(artwork, width: size, height: size)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(.white.opacity(0.17), lineWidth: 1)
+            )
+            .scaleEffect(layout.scale)
+            .rotationEffect(.degrees(layout.rotation))
+            .offset(layout.offset)
+            .opacity(layout.opacity)
+            .shadow(
+                color: appAccent.opacity(0.35 * centreness),
+                radius: 16 + (pulse ? 12 : 0) * centreness,
+                y: 6 + 6 * centreness
+            )
+            .shadow(
+                color: .black.opacity(0.18 * (1 - centreness)),
+                radius: 10,
+                y: 6
+            )
+    }
+
+    /// Bidirectional scrub. The drag never commits — releasing always
+    /// springs back to the rest state. The drag range spans two stages
+    /// per direction: stage 1 (one `revealDistance`) brings the rest
+    /// peek (card 1 or 2) to centre with the newcomer arriving at the
+    /// spread slot; stage 2 (two `revealDistance`) brings the newcomer
+    /// (card 3 or 4) all the way to centre. Past the second stage the
+    /// gesture rubber-bands so the user feels the end of the deck.
+    private var scrubGesture: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                let raw = value.translation.width
+                let maxDrag = 2 * revealDistance
+                let absRaw = abs(raw)
+                if absRaw <= maxDrag {
+                    dragX = raw
+                } else {
+                    let overshoot = absRaw - maxDrag
+                    let damped = sqrt(overshoot) * 6
+                    let sign: CGFloat = raw < 0 ? -1 : 1
+                    dragX = sign * (maxDrag + min(50, damped))
+                }
+            }
+            .onEnded { _ in
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.78)) {
+                    dragX = 0
+                }
+            }
+    }
+
+    /// Resolved render values for one card in the scrub deck.
+    private struct ScrubLayout {
+        let offset: CGSize
+        let scale: CGFloat
+        let rotation: Double
+        let opacity: Double
+        /// Reserved for future use — currently we derive stacking order
+        /// from `scale` at the call site so it tracks the current focus.
+        let zIndex: Double
+
+        /// Linear interpolation between two slot layouts. `t` is the drag
+        /// progress in [0, 1] toward the destination.
+        static func lerp(from a: ScrubLayout, to b: ScrubLayout, t: CGFloat) -> ScrubLayout {
+            let tt = Double(t)
+            return ScrubLayout(
+                offset: CGSize(
+                    width: a.offset.width + (b.offset.width - a.offset.width) * t,
+                    height: a.offset.height + (b.offset.height - a.offset.height) * t
+                ),
+                scale: a.scale + (b.scale - a.scale) * t,
+                rotation: a.rotation + (b.rotation - a.rotation) * tt,
+                opacity: a.opacity + (b.opacity - a.opacity) * tt,
+                zIndex: a.zIndex + (b.zIndex - a.zIndex) * tt
+            )
+        }
+    }
+
+    // MARK: - Sourced stack (playlist / artist)
+
+    /// Static three-card layout shown when the user has picked a specific
+    /// playlist or artist as the source. The front card is the source's
+    /// cover; the two back cards preview the next two tracks within that
+    /// source. No scrub here — the hero IS the source, there's no deck.
+    private var sourcedStack: some View {
+        ZStack {
+            sourcedBackCard(
+                artwork: artworks.indices.contains(0) ? artworks[0] : nil,
+                rotation: -8,
+                offset: CGSize(width: -34, height: 8),
+                opacity: 0.72
+            )
+            sourcedBackCard(
+                artwork: artworks.indices.contains(1) ? artworks[1] : nil,
+                rotation: 6,
+                offset: CGSize(width: 32, height: 10),
+                opacity: 0.85
+            )
+            sourcedFrontCard
+        }
+    }
+
+    private var sourcedFrontCard: some View {
         Group {
             switch source {
             case .playlist(let id, _, _):
@@ -91,56 +312,20 @@ struct HomeHeroArtStack: View {
             case .artist(let id, let name):
                 ArtistHeroSquare(artistID: id, artistName: name, size: size)
             case .none:
-                songArtworkCard
+                EmptyView() // unreachable — `sourcedStack` only renders with a source
             }
         }
         .shadow(color: appAccent.opacity(0.35), radius: pulse ? 28 : 16, y: 12)
         .scaleEffect(pulse ? 1.0 : 0.96)
         .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
-        .id(stackKey) // forces a fade-swap when the key changes
+        .id(fetchKey)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }
 
-    @ViewBuilder
-    private var songArtworkCard: some View {
-        if let front = artworks.first {
-            ArtworkImage(front, width: size, height: size)
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-                )
-        } else {
-            placeholderCard
-        }
-    }
-
-    /// Empty/loading state — also covers the "no songs left" case for .dismissed
-    /// when the user has never dismissed anything. Uses the mode's SF symbol so
-    /// the surface still telegraphs what's coming.
-    private var placeholderCard: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(.thinMaterial)
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: frontFallbackKind.symbol)
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(.secondary)
-                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
-            )
-    }
-
-    /// Decorative card behind the hero. Shows the next sibling artwork when we
-    /// have one (so the stack previews three songs in the user's sort order);
-    /// falls back to pure glass when there's nothing to render — e.g. fewer
-    /// than three dismissed songs, or a source-picked mode where the back
-    /// cards are intentionally empty.
-    private func backCard(
+    /// Decorative back card used only in source-picked stacks. Falls back to
+    /// a glass placeholder when the source doesn't yield enough track
+    /// artworks to fill the slot.
+    private func sourcedBackCard(
         artwork: Artwork?,
         rotation: Double,
         offset: CGSize,
@@ -172,13 +357,31 @@ struct HomeHeroArtStack: View {
         .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
     }
 
+    /// Empty/loading state. Used by the scrub deck before artworks land,
+    /// and visually reused so the hero never goes blank during a swap.
+    private var placeholderCard: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(.thinMaterial)
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: frontFallbackKind.symbol)
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.secondary)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            )
+    }
+
     // MARK: - State helpers
 
-    /// A stable identity for the current selection. Drives `.task(id:)` so the
-    /// loader restarts when *anything* about what we're previewing changes —
-    /// including the user flipping the order toggle, which shuffles which
-    /// three songs win the slots.
-    private var stackKey: String {
+    /// Identity used by `.task(id:)` to refetch artworks — refetches only
+    /// when the deck *source* changes (mode, picked source, sort order).
+    /// The continuous scrub does not change this key, so dragging never
+    /// triggers a library re-hit.
+    private var fetchKey: String {
         switch source {
         case .playlist(let id, _, _): return "\(mode.rawValue):\(sortOrder.rawValue):playlist:\(id)"
         case .artist(let id, _):      return "\(mode.rawValue):\(sortOrder.rawValue):artist:\(id)"
@@ -220,17 +423,21 @@ struct HomeHeroArtStack: View {
 
         switch mode {
         case .library, .unsorted:
-            artworks = await fetchLibraryArtworks(limit: 3)
+            artworks = await fetchLibraryArtworks(limit: deckCapacity)
         case .dismissed:
-            artworks = await fetchRecentlyDismissedArtworks(limit: 3)
+            artworks = await fetchRecentlyDismissedArtworks(limit: deckCapacity)
         }
+        // Ambient tint always follows the first cover — the scrub is a peek
+        // that returns home, so the background colour shouldn't follow the
+        // finger (would feel busy and jittery during the gesture).
         onPrimaryArtworkResolved?(artworks.first)
     }
 
     /// Fresh small library request — does not touch the swipe-session paging
-    /// cursor. We ask for up to 3 items so the stack can show the next two
-    /// covers behind the hero. Sort order matches the user's selected order
-    /// so the preview is "the next songs you're about to see".
+    /// cursor. We ask for `deckCapacity` items so the user can peek through
+    /// a few covers by dragging the front card. Sort order matches the
+    /// user's selected order so the preview is "the next songs you're
+    /// about to see".
     private func fetchLibraryArtworks(limit: Int) async -> [Artwork] {
         do {
             var request = MusicLibraryRequest<Song>()

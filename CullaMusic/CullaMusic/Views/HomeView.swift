@@ -262,6 +262,10 @@ struct HomeView: View {
     @State private var artistTrackCountsLoading: Set<String> = []
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
+    /// Scoped-only opt-in: when on, dismissed tracks also surface inside
+    /// playlist/artist sessions. Default off preserves prior behavior; the
+    /// per-card "Dismissed Xmo ago" chip identifies them when they appear.
+    @AppStorage("music.includeDismissedInScope") private var includeDismissedInScope: Bool = false
     // Observed so the unsorted count recomputes instantly when the toggle
     // flips in Settings — without this, the change would only land on next launch.
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
@@ -285,20 +289,43 @@ struct HomeView: View {
                 )
                 .padding(.bottom, 22)
 
-                GlassStack(spacing: 10) {
-                    ForEach(ReviewMode.allCases) { mode in
-                        ModeTile(
-                            mode: mode,
-                            isSelected: selectedMode == mode,
-                            isDisabled: source != nil,
-                            count: count(for: mode),
-                            isLoadingCount: isLoadingCount(for: mode)
-                        ) {
-                            selectedMode = mode
+                // Mode tiles disappear once a scope is picked — at that point
+                // mode is implicitly Library (the picker only surfaces there),
+                // so the tiles are dead weight and would crowd the hero. The
+                // sourceFilterButton's X button is the user's path back to the
+                // unscoped state and the tiles.
+                //
+                // Asymmetric transition: on removal the stack scales down
+                // *toward* the source area (anchor: .bottom) so it visually
+                // hands focus to the picker; on insertion it drops in from
+                // the hero (anchor: .top). Shares the scale-down-with-opacity
+                // vocabulary used by sourceTransferPicker and
+                // includeDismissedRow so the whole source-driven sequence
+                // reads as one coordinated motion.
+                if source == nil {
+                    GlassStack(spacing: 10) {
+                        ForEach(ReviewMode.allCases) { mode in
+                            ModeTile(
+                                mode: mode,
+                                isSelected: selectedMode == mode,
+                                isDisabled: false,
+                                count: count(for: mode),
+                                isLoadingCount: isLoadingCount(for: mode)
+                            ) {
+                                selectedMode = mode
+                            }
                         }
                     }
+                    .padding(.horizontal, 20)
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.94, anchor: .top)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.92, anchor: .bottom)
+                                .combined(with: .opacity)
+                        )
+                    )
                 }
-                .padding(.horizontal, 20)
 
                 Spacer(minLength: 12)
 
@@ -311,6 +338,13 @@ struct HomeView: View {
 
                 if selectedMode == .library, case .playlist = source {
                     sourceTransferPicker
+                        .padding(.bottom, 10)
+                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                }
+
+                if selectedMode == .library, source != nil {
+                    includeDismissedRow
+                        .padding(.horizontal, 20)
                         .padding(.bottom, 10)
                         .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
                 }
@@ -396,7 +430,11 @@ struct HomeView: View {
             SettingsView()
         }
         .animation(.easeInOut(duration: 0.18), value: selectedMode)
-        .animation(.easeInOut(duration: 0.18), value: source)
+        // Source changes ripple across several children (mode tiles, source
+        // filter, transfer picker, include-dismissed). A soft spring lets the
+        // whole choreography breathe instead of snapping; tile selection
+        // stays on the snappier curve above so tap feedback isn't sluggish.
+        .animation(.smooth(duration: 0.38), value: source)
     }
 
     private func fetchArtistTrackCountIfNeeded(id: String) async {
@@ -596,14 +634,50 @@ struct HomeView: View {
                 case .none:                            return storedMode
                 }
             }()
+            // The flag is only meaningful in scoped sessions — gate it here
+            // so an unrelated stored value can't leak into an All-Library run.
+            let includeDismissed = activeScope != nil && includeDismissedInScope
             onStart(SwipeConfig(
                 mode: selectedMode,
                 order: order,
                 source: activeScope,
-                sourceTransferMode: transferMode
+                sourceTransferMode: transferMode,
+                includeDismissedInScope: includeDismissed
             ))
         }
         .matchedHero(id: "heroStart", in: heroNamespace)
+    }
+
+    /// Opt-in toggle for scoped sessions to also surface dismissed tracks.
+    /// Mirrors `orderRow`'s chip style so the two scope-time controls feel
+    /// like one family.
+    private var includeDismissedRow: some View {
+        HStack(spacing: 8) {
+            Text("Include dismissed")
+                .font(.system(.footnote, design: .rounded).weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    includeDismissedInScope.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: includeDismissedInScope ? "checkmark" : "xmark")
+                        .font(.caption.weight(.bold))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(includeDismissedInScope ? "On" : "Off")
+                        .font(.system(.footnote, design: .rounded).weight(.semibold))
+                        .contentTransition(.opacity)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contentShape(Capsule())
+                .glassSurface(in: Capsule(), interactive: true)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var sourceTransferPicker: some View {

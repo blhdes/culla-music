@@ -917,13 +917,17 @@ final class MusicSwipeViewModel {
         // Scoped sources (playlist or artist) are "revisit this collection
         // with purity" — we show everything in scope regardless of prior
         // sorts so the user can freely re-categorize, with chips revealing
-        // existing memberships. Only dismissals (a strong "don't show me
-        // again" signal) still filter the deck.
+        // existing memberships. Dismissals are filtered by default; the
+        // `includeDismissedInScope` opt-in flips that for "audit this
+        // collection" sessions, and the per-card "Dismissed Xmo ago" chip
+        // signals the song's history when it re-appears.
         if config.source == nil,
            let sorted = try? modelContext.fetch(FetchDescriptor<SortedSong>()) {
             excluded.formUnion(sorted.map(\.songID))
         }
-        if let dismissed = try? modelContext.fetch(FetchDescriptor<DismissedSong>()) {
+        let keepDismissedOut = config.source == nil || !config.includeDismissedInScope
+        if keepDismissedOut,
+           let dismissed = try? modelContext.fetch(FetchDescriptor<DismissedSong>()) {
             excluded.formUnion(dismissed.map(\.songID))
         }
         return excluded

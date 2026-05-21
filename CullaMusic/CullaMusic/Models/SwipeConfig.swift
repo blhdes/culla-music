@@ -5,6 +5,10 @@ struct SwipeConfig {
     var order: SortOrder = .newestFirst
     var source: SourceScope?
     var sourceTransferMode: SourceTransferMode = .copy
+    /// Opt-in for scoped (playlist/artist) sessions to also surface
+    /// previously-dismissed tracks — "audit this collection" intent. Ignored
+    /// when `source == nil`; All-Library walks always hide dismissals.
+    var includeDismissedInScope: Bool = false
 
     var isPlaylistSource: Bool {
         if case .playlist = source { return true }

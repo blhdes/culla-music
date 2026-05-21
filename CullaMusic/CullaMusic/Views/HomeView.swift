@@ -484,15 +484,15 @@ struct HomeView: View {
 
     // MARK: - Wordmark
 
-    /// Identity strip at the top: small accent dot + the app name. The dot
-    /// breathes (iOS 18+ symbol effect) so the screen never feels frozen even
-    /// when the mesh is paused for reduce-motion users.
+    /// Identity strip at the top: the Culla brand mark + the app name. Logo
+    /// size scales with Dynamic Type via `@ScaledMetric` so the relationship
+    /// to the 15pt wordmark text holds under accessibility text sizes. The
+    /// glyph follows `.primary`, so the central "C" auto-adapts between
+    /// light and dark while the five brand dots keep their fixed hues.
     private var wordmark: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 8))
-                .foregroundStyle(appAccent)
-                .symbolEffect(.pulse.byLayer, options: .repeating)
+        HStack(spacing: 7) {
+            CullaLogo()
+                .frame(width: wordmarkLogoSize, height: wordmarkLogoSize)
             HStack(spacing: 4) {
                 Text("culla")
                     .foregroundStyle(.primary)
@@ -503,6 +503,11 @@ struct HomeView: View {
             .tracking(0.5)
         }
     }
+
+    // Sized a touch larger than the 15pt cap height so the logo reads as the
+    // anchor of the strip — small enough to sit politely beside the wordmark,
+    // large enough that the five accent dots remain individually visible.
+    @ScaledMetric(relativeTo: .subheadline) private var wordmarkLogoSize: CGFloat = 22
 
     // MARK: - Source pill (promoted to full-width glass card)
 

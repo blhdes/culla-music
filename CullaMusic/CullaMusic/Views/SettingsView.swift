@@ -3,6 +3,7 @@ import SwiftData
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appAccent) private var appAccent
 
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
@@ -28,85 +29,21 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
-                            // Mirrors the current selection — swap animation
-                            // makes the picker feel responsive without changing
-                            // its semantics.
-                            Image(systemName: themeIcon)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .contentTransition(.symbolEffect(.replace))
-                            Text("Theme")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Picker("Theme", selection: $colorSchemeRaw) {
-                            Text("System").tag("system")
-                            Text("Light").tag("light")
-                            Text("Dark").tag("dark")
-                        }
-                        .pickerStyle(.segmented)
+            ZStack {
+                LivingMeshBackground()
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        appearanceCard
+                        behaviorCard
+                        playlistScopeCard
+                        upSwipeCard
+                        authorCard
                     }
-                    .padding(.vertical, 4)
-                    .animation(.snappy(duration: 0.2), value: colorSchemeRaw)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Match song artwork", isOn: $useDynamicAccent)
-                        Text("Sidebar accent")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 16) {
-                            ForEach(AccentPalette.allCases) { palette in
-                                paletteSwatch(palette)
-                            }
-                            Spacer()
-                        }
-                        .opacity(useDynamicAccent ? 0.5 : 1.0)
-                    }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("Appearance")
-                } footer: {
-                    Text("Pulls the sidebar accent from the current song's cover art. Falls back to the palette above when off.")
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 20)
                 }
-
-                Section {
-                    Toggle("Haptics", isOn: $hapticsEnabled)
-                    Toggle("Start at song highlight", isOn: $useHotPreview)
-                } header: {
-                    Text("Behavior")
-                } footer: {
-                    Text("Plays Apple Music's curated preview clip (~30s) instead of starting from the beginning. Falls back to the full song when no preview is available.")
-                }
-
-                Section {
-                    Toggle("Include read-only playlists", isOn: $membershipIncludeCurated)
-                } header: {
-                    Text("Playlist scope")
-                } footer: {
-                    Text("Show editorial, replay, auto-mix, and shared playlists in chips and Unsorted.")
-                }
-
-                Section {
-                    lovedTargetRow
-                } header: {
-                    Text("Up-swipe")
-                } footer: {
-                    Text("Up-swipe on a song adds it to this playlist. Leave on Auto to use a \"Culla Loves\" playlist Culla creates for you.")
-                }
-
-                Section {
-                    TextField("Your name", text: $authorDisplayName)
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled(true)
-                } header: {
-                    Text("Playlists")
-                } footer: {
-                    Text("Used as the author of new playlists Culla creates in Apple Music. Leave empty to use the default.")
-                }
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -127,19 +64,110 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Cards
+
+    private var appearanceCard: some View {
+        GlassPanel(icon: "paintbrush.fill", title: "Appearance") {
+            ThemeChipPicker(selection: $colorSchemeRaw)
+
+            Toggle(isOn: $useDynamicAccent) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.14))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Match song artwork")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .tint(appAccent)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 44), spacing: 14)],
+                alignment: .leading,
+                spacing: 14
+            ) {
+                ForEach(AccentPalette.allCases) { palette in
+                    paletteSwatch(palette)
+                }
+            }
+            .opacity(useDynamicAccent ? 0.5 : 1.0)
+            .animation(.snappy(duration: 0.2), value: useDynamicAccent)
+        }
+    }
+
+    private var behaviorCard: some View {
+        GlassPanel(icon: "waveform", title: "Behavior") {
+            VStack(spacing: 14) {
+                SettingsToggleRow(icon: "hand.tap.fill", title: "Haptics", isOn: $hapticsEnabled)
+                SettingsToggleRow(icon: "bolt.heart.fill", title: "Start at song highlight", isOn: $useHotPreview)
+                cardFooter("Starts at the curated 30s preview when available.")
+            }
+        }
+    }
+
+    private var playlistScopeCard: some View {
+        GlassPanel(icon: "music.note.list", title: "Playlist scope") {
+            VStack(spacing: 12) {
+                SettingsToggleRow(icon: "lock.fill", title: "Include read-only playlists", isOn: $membershipIncludeCurated)
+                cardFooter("Editorial, replay, auto-mix, and shared.")
+            }
+        }
+    }
+
+    private var upSwipeCard: some View {
+        GlassPanel(icon: "arrow.up.heart.fill", title: "Up-swipe") {
+            VStack(spacing: 12) {
+                lovedTargetRow
+                cardFooter("Auto uses a Culla Loves playlist.")
+            }
+        }
+    }
+
+    private var authorCard: some View {
+        GlassPanel(icon: "pencil.tip", title: "Playlists") {
+            VStack(spacing: 12) {
+                TextField("Your name", text: $authorDisplayName)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled(true)
+                    .font(.system(.body, design: .rounded))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .glassSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                cardFooter("Author shown on new Apple Music playlists.")
+            }
+        }
+    }
+
+    // MARK: - Subviews
+
     @ViewBuilder
     private var lovedTargetRow: some View {
         Button {
             showLovedPicker = true
         } label: {
-            HStack {
-                Image(systemName: "heart.fill")
-                    .foregroundStyle(.pink)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.pink.opacity(0.18))
+                        .frame(width: 30, height: 30)
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.pink)
+                }
                 Text("Loved playlist")
+                    .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)
                 Spacer()
                 Text(selectedLovedPlaylist?.name ?? "Auto")
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -149,28 +177,31 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private var themeIcon: String {
-        switch colorSchemeRaw {
-        case "light": return "sun.max.fill"
-        case "dark":  return "moon.fill"
-        default:      return "circle.lefthalf.filled"
-        }
+    private func cardFooter(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private func paletteSwatch(_ palette: AccentPalette) -> some View {
         let isSelected = accentPaletteRaw == palette.rawValue
         Button {
-            accentPaletteRaw = palette.rawValue
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                accentPaletteRaw = palette.rawValue
+            }
         } label: {
             Circle()
                 .fill(palette.color)
                 .frame(width: 32, height: 32)
+                .shadow(color: palette.color.opacity(isSelected ? 0.55 : 0.0), radius: 10, y: 4)
                 .overlay {
                     Circle()
                         .stroke(.primary, lineWidth: isSelected ? 2 : 0)
                         .padding(-3)
                 }
+                .scaleEffect(isSelected ? 1.08 : 1.0)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(palette.label)
@@ -179,4 +210,5 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView()
+        .environment(\.appAccent, .purple)
 }

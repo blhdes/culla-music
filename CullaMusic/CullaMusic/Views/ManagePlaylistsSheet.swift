@@ -2,10 +2,14 @@ import SwiftUI
 import MusicKit
 
 /// Lets the user pick which playlists appear in the swipe sidebar (capped to
-/// `MusicSwipeViewModel.maxSidebar`) and create new ones.
+/// `MusicSwipeViewModel.maxSidebar`) and create new ones. Redesigned around
+/// the GlassPanel vocabulary shared with Settings and LovedPlaylistPickerSheet
+/// — the New Playlist CTA is promoted to the top so it reads as the primary
+/// action instead of a list row.
 struct ManagePlaylistsSheet: View {
     @Bindable var viewModel: MusicSwipeViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appAccent) private var appAccent
     @State private var showCreate = false
 
     /// The up-swipe loved target. Hidden from the sidebar list below since the
@@ -28,47 +32,37 @@ struct ManagePlaylistsSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Button {
-                        showCreate = true
-                    } label: {
-                        Label("New playlist", systemImage: "plus.circle.fill")
-                    }
-                }
+            ZStack {
+                LivingMeshBackground()
 
-                Section {
-                    if editablePlaylists.isEmpty {
-                        Text("No playlists yet — create one above.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(editablePlaylists, id: \.id) { playlist in
-                            row(for: playlist)
+                ScrollView {
+                    VStack(spacing: 18) {
+                        GradientCapsuleButton(
+                            title: "New playlist",
+                            icon: "plus"
+                        ) {
+                            showCreate = true
+                        }
+
+                        GlassPanel(
+                            icon: "sidebar.right",
+                            title: "Sidebar",
+                            trailing: { sidebarCountChip }
+                        ) {
+                            sidebarContent
                         }
                     }
-                } header: {
-                    HStack {
-                        Text("Sidebar")
-                        Spacer()
-                        Text("\(viewModel.sidebarCount) / \(maxSidebar)")
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                            .contentTransition(.numericText(countsDown: false))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .glassSurface(in: Capsule())
-                    }
-                    .animation(.snappy, value: viewModel.sidebarCount)
-                } footer: {
-                    Text("Tap a playlist to toggle it in the right-swipe sidebar. Up to \(maxSidebar) at a time.")
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 20)
                 }
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Manage Playlists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
             .sheet(isPresented: $showCreate) {
@@ -78,6 +72,43 @@ struct ManagePlaylistsSheet: View {
                             name: name,
                             addToSidebar: viewModel.canAddToSidebar
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Sidebar card content
+
+    /// Live capacity badge rendered into the GlassPanel's trailing slot.
+    /// The numeric digits cross-fade via `.contentTransition(.numericText)` so
+    /// toggling a row reads as a single motion (row bounce + chip tick).
+    private var sidebarCountChip: some View {
+        Text("\(viewModel.sidebarCount) / \(maxSidebar)")
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(.primary)
+            .contentTransition(.numericText(countsDown: false))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .glassSurface(in: Capsule())
+            .animation(.snappy, value: viewModel.sidebarCount)
+    }
+
+    @ViewBuilder
+    private var sidebarContent: some View {
+        if editablePlaylists.isEmpty {
+            Text("No playlists yet — create one above.")
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+        } else {
+            VStack(spacing: 4) {
+                ForEach(Array(editablePlaylists.enumerated()), id: \.element.id) { index, playlist in
+                    row(for: playlist)
+                    if index < editablePlaylists.count - 1 {
+                        Divider().opacity(0.4)
                     }
                 }
             }
@@ -98,10 +129,16 @@ struct ManagePlaylistsSheet: View {
             }
         } label: {
             HStack(spacing: 12) {
-                PlaylistCoverView(appleMusicPlaylistID: playlist.appleMusicPlaylistID)
+                PlaylistCoverView(
+                    appleMusicPlaylistID: playlist.appleMusicPlaylistID,
+                    size: 40,
+                    cornerRadius: 8
+                )
 
                 Text(playlist.name)
+                    .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
 
                 Spacer()
 
@@ -112,21 +149,22 @@ struct ManagePlaylistsSheet: View {
                     forPlaylistAMID: playlist.appleMusicPlaylistID
                 ) ?? 0
                 Text(count, format: .number)
-                    .font(.caption)
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
-                // SF symbol swap (`checkmark` ↔ "" via Image.empty) animated
-                // through contentTransition so the toggle reads as a single
-                // motion rather than a hard cut. Keeping the slot always-present
-                // means the row layout doesn't jump when toggling.
+                // Multi-select toggle idiom: always-rendered `circle` ↔
+                // `checkmark.circle.fill` swap. Empty circle telegraphs
+                // "this can be toggled," the swap-with-bounce makes
+                // toggling feel landed.
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isOn ? Color.accentColor : Color.secondary.opacity(0.4))
+                    .foregroundStyle(isOn ? appAccent : Color.secondary.opacity(0.4))
                     .font(.title3)
                     .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.bounce, value: isOn)
             }
             .contentShape(Rectangle())
+            .padding(.vertical, 4)
             .opacity(isTappable ? 1.0 : 0.35)
             .animation(.snappy(duration: 0.22), value: isOn)
         }

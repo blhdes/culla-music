@@ -76,6 +76,12 @@ struct SettingsView: View {
                 isOn: $useDynamicAccent
             )
 
+            // The palette swatches stay live regardless of "Match song
+            // artwork". That toggle only affects the swipe screen — every
+            // other surface (Home, sidebar, sheets, gradient buttons, mesh
+            // background) reads the palette directly, so disabling the
+            // swatches when the toggle is on would mislead the user into
+            // thinking the chosen color stops mattering. It still does.
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 44), spacing: 14)],
                 alignment: .leading,
@@ -85,9 +91,8 @@ struct SettingsView: View {
                     paletteSwatch(palette)
                 }
             }
-            .opacity(useDynamicAccent ? 0.5 : 1.0)
-            .disabled(useDynamicAccent)
-            .animation(.snappy(duration: 0.2), value: useDynamicAccent)
+
+            cardFooter("Used across the app. Swipe overrides per-song when Match song artwork is on.")
         }
     }
 

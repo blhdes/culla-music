@@ -328,7 +328,7 @@ struct SourceScopePickerSheet: View {
                 }
             }
 
-            if isLoadingArtists && libraryArtists.isEmpty {
+            if (isLoadingArtists && libraryArtists.isEmpty) || isAwaitingFirstCounts {
                 Section {
                     HStack {
                         Spacer()
@@ -357,8 +357,14 @@ struct SourceScopePickerSheet: View {
             }
         }
         .task {
+            // Disk-cached counts MUST land before `libraryArtists`, otherwise
+            // the first list render sorts with every count treated as 0 (ties
+            // broken arbitrarily) and the user sees the deck snap into its
+            // real order a frame later. Disk read is a single small file —
+            // fast enough that the ProgressView still covers the wait.
+            await hydrateArtistCountsFromDisk()
             await loadArtistsIfNeeded()
-            await loadArtistCountsIfNeeded()
+            await refreshArtistCountsIfStale()
         }
     }
 
@@ -367,6 +373,16 @@ struct SourceScopePickerSheet: View {
             ContentUnavailableView.search(text: trimmedQuery)
                 .listRowBackground(Color.clear)
         }
+    }
+
+    /// True on the first-ever open of the picker, while the network walk that
+    /// produces the initial counts is still in flight. Holds the artist list
+    /// back so the user doesn't see a count-sorted list snap into its final
+    /// order. Once the walk finishes (success OR failure) `attemptedArtistIDs`
+    /// is populated and the gate drops; on failure the list renders without
+    /// real counts, which is stable even if not ideally sorted.
+    private var isAwaitingFirstCounts: Bool {
+        attemptedArtistIDs.isEmpty && isLoadingCounts
     }
 
     private func loadArtistsIfNeeded() async {
@@ -382,26 +398,28 @@ struct SourceScopePickerSheet: View {
         }
     }
 
-    /// Hydrates `artistTrackCounts` from disk first (instant render of any
-    /// prior snapshot), then fires a fresh parallel batch only when the
-    /// current library contains artists we haven't attempted yet. On success,
-    /// persists both the counts AND the attempted-IDs list so subsequent opens
-    /// skip the fetch entirely.
-    private func loadArtistCountsIfNeeded() async {
-        if artistTrackCounts.isEmpty && attemptedArtistIDs.isEmpty {
-            let disk = await Task.detached(priority: .userInitiated) {
-                MembershipIndex.diskArtistCountsSnapshot()
-            }.value
-            artistTrackCounts = disk.counts
-            attemptedArtistIDs = Set(disk.attemptedIDs)
-        }
+    /// Loads any prior count snapshot from disk before the artist list lands,
+    /// so the first sort pass already has real numbers to compare. Split off
+    /// from the network refresh so the `.task` can run it ahead of
+    /// `loadArtistsIfNeeded` — the order matters for visual stability.
+    private func hydrateArtistCountsFromDisk() async {
+        guard artistTrackCounts.isEmpty && attemptedArtistIDs.isEmpty else { return }
+        let disk = await Task.detached(priority: .userInitiated) {
+            MembershipIndex.diskArtistCountsSnapshot()
+        }.value
+        artistTrackCounts = disk.counts
+        attemptedArtistIDs = Set(disk.attemptedIDs)
+    }
 
-        // Refetch only when the disk snapshot doesn't cover every current
-        // library artist. "Covered" = we tried to count them, even if the
-        // attempt came back as nil (uploaded tracks, fuzzy metadata, etc.).
-        // Previously this used `counts.count < libraryArtists.count`, which
-        // ALWAYS fired because nil-result artists are omitted from `counts` —
-        // defeating the cache and re-walking the library every picker open.
+    /// Refetch only when the disk snapshot doesn't cover every current
+    /// library artist. "Covered" = we tried to count them, even if the
+    /// attempt came back as nil (uploaded tracks, fuzzy metadata, etc.).
+    /// Previously this used `counts.count < libraryArtists.count`, which
+    /// ALWAYS fired because nil-result artists are omitted from `counts` —
+    /// defeating the cache and re-walking the library every picker open.
+    /// On success, persists both the counts AND the attempted-IDs list so
+    /// subsequent opens skip the fetch entirely.
+    private func refreshArtistCountsIfStale() async {
         let currentIDs = Set(libraryArtists.map { $0.id.rawValue })
         let needsRefresh = !currentIDs.isSubset(of: attemptedArtistIDs)
 

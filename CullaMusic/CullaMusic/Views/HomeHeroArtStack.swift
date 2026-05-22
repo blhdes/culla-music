@@ -15,8 +15,10 @@ import MusicKit
 ///   the screen to glance ahead.
 ///
 /// - **source != nil** (playlist / artist picked): the hero is locked to the
-///   playlist or artist cover, with two static decorative cards behind it.
-///   No scrub gesture — the hero IS the source, there's nothing to cycle.
+///   source's cover. No scrub gesture — the hero IS the source, there's
+///   nothing to cycle. Playlists keep two static decorative cards behind the
+///   front cover; artists render as a single solo card because the artist
+///   profile reads as its own portrait without a deck behind it.
 ///
 /// Source resolution per mode:
 /// - `.library` + playlist source → the playlist's own cover
@@ -319,24 +321,27 @@ struct HomeHeroArtStack: View {
 
     // MARK: - Sourced stack (playlist / artist)
 
-    /// Static three-card layout shown when the user has picked a specific
-    /// playlist or artist as the source. The front card is the source's
-    /// cover; the two back cards preview the next two tracks within that
-    /// source. No scrub here — the hero IS the source, there's no deck.
+    /// Layout shown when the user has picked a specific playlist or artist as
+    /// the source. The front card is the source's cover. Playlists render two
+    /// static decorative back cards previewing the next two tracks; artists
+    /// render solo since the profile portrait reads better without a deck
+    /// behind it. No scrub here — the hero IS the source, there's no deck.
     private var sourcedStack: some View {
         ZStack {
-            sourcedBackCard(
-                artwork: artworks.indices.contains(0) ? artworks[0] : nil,
-                rotation: -8,
-                offset: CGSize(width: -34, height: 8),
-                opacity: 0.72
-            )
-            sourcedBackCard(
-                artwork: artworks.indices.contains(1) ? artworks[1] : nil,
-                rotation: 6,
-                offset: CGSize(width: 32, height: 10),
-                opacity: 0.85
-            )
+            if case .playlist = source {
+                sourcedBackCard(
+                    artwork: artworks.indices.contains(0) ? artworks[0] : nil,
+                    rotation: -8,
+                    offset: CGSize(width: -34, height: 8),
+                    opacity: 0.72
+                )
+                sourcedBackCard(
+                    artwork: artworks.indices.contains(1) ? artworks[1] : nil,
+                    rotation: 6,
+                    offset: CGSize(width: 32, height: 10),
+                    opacity: 0.85
+                )
+            }
             sourcedFrontCard
         }
     }
@@ -459,11 +464,11 @@ struct HomeHeroArtStack: View {
             onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forPlaylistID: id))
             return
         case .artist(let id, _):
-            // Same idea — hero is the artist artwork; back cards preview the
-            // first 2 songs by this artist in the user's sort order.
-            let result = await fetchArtistTrackArtworks(id: id, limit: 2)
+            // Artist hero is a solo card — no back cards to fill, so we skip
+            // the per-track artwork fetch entirely and just publish the
+            // artist's cached artwork for the ambient tint.
             if Task.isCancelled { return }
-            artworks = result
+            artworks = []
             onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forArtistID: id))
             return
         case .none:
@@ -546,27 +551,6 @@ struct HomeHeroArtStack: View {
                 limit: limit,
                 ascending: sortOrder.ascending
             )
-        } catch {
-            return []
-        }
-    }
-
-    /// Pulls the artist's library songs (already cached by the picker / by
-    /// HomeView's count fetch) and returns the first N artworks in the user's
-    /// sort order. Sort key is `libraryAddedDate` to match what the swipe
-    /// walks — songs without a date sink to the end so dated ones lead.
-    private func fetchArtistTrackArtworks(id: String, limit: Int) async -> [Artwork] {
-        do {
-            let songs = try await MusicLibraryService.shared.artistLibrarySongs(
-                artistID: MusicItemID(id)
-            )
-            let ascending = sortOrder.ascending
-            let sorted = songs.sorted { lhs, rhs in
-                let l = lhs.libraryAddedDate ?? .distantPast
-                let r = rhs.libraryAddedDate ?? .distantPast
-                return ascending ? l < r : l > r
-            }
-            return sorted.prefix(limit).compactMap(\.artwork)
         } catch {
             return []
         }

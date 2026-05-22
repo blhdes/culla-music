@@ -65,9 +65,9 @@ enum ReviewMode: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .library:   "Your full music library"
-        case .unsorted:  "Songs not in any of your playlists"
-        case .dismissed: "Songs you've previously skipped"
+        case .library:   "Everything"
+        case .unsorted:  "Not in any playlist"
+        case .dismissed: "Previously skipped"
         }
     }
 

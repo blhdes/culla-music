@@ -88,6 +88,17 @@ struct HomeHeroArtStack: View {
         // below off-center).
         .frame(maxWidth: .infinity)
         .frame(height: size + 24)
+        // Hit-test the whole section, not just the centred card silhouette,
+        // so the scrub can start from the empty flanks too. The
+        // `including:` mask disables the gesture entirely when the scrub
+        // doesn't apply (sourced modes, empty-deck loading state), which
+        // matches the prior behavior where the gesture only lived inside
+        // the cards branch of `scrubDeck`.
+        .contentShape(Rectangle())
+        .gesture(
+            scrubGesture,
+            including: (source == nil && !artworks.isEmpty) ? .gesture : .subviews
+        )
         .task(id: fetchKey) {
             dragX = 0
             await loadArtworks()
@@ -132,8 +143,6 @@ struct HomeHeroArtStack: View {
             .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
             .id(fetchKey)
             .transition(.scale(scale: 0.9).combined(with: .opacity))
-            .contentShape(Rectangle())
-            .gesture(scrubGesture)
         }
     }
 

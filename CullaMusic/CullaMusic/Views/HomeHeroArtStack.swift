@@ -49,6 +49,14 @@ struct HomeHeroArtStack: View {
     /// lifting the finger springs this back to 0 so the first cover returns
     /// to the front. Always 0 in source-picked modes.
     @State private var dragX: CGFloat = 0
+    /// Axis lock for the scrub gesture. The first tick past `minimumDistance`
+    /// picks `.horizontal` or `.ignored` from the dominant translation axis;
+    /// subsequent ticks honor that lock for the rest of the gesture so a
+    /// mid-drag vertical drift can't freeze the deck halfway through a scrub.
+    /// `.onEnded` resets to `.undecided`.
+    @State private var dragAxis: DragAxis = .undecided
+
+    private enum DragAxis { case undecided, horizontal, ignored }
 
     private let size: CGFloat = 168
     /// Library/dismissed deck holds up to this many covers — the rest state
@@ -144,11 +152,15 @@ struct HomeHeroArtStack: View {
         // arrives at it. No per-slot special cases: every card runs the
         // same layout function, so the newcomers behave identically to
         // the initial three.
-        let restPositions: [CGFloat] = [0, 1, -1, 2, -2]
-        guard slot < restPositions.count else { return Self.centreSlot }
-        let virtualPos = restPositions[slot] - dragX / revealDistance
+        guard slot < Self.restPositions.count else { return Self.centreSlot }
+        let virtualPos = Self.restPositions[slot] - dragX / revealDistance
         return layoutAtVirtualPosition(virtualPos)
     }
+
+    /// Rest virtual positions indexed by `slot`. Hoisted to `static let` so the
+    /// scrub gesture's 60Hz body re-evaluations don't allocate a fresh array
+    /// per card per tick.
+    private static let restPositions: [CGFloat] = [0, 1, -1, 2, -2]
 
     /// Maps a continuous virtual position to the rendered card layout.
     /// Waypoints: 0 = centre, ±1 = near peek, ±1.5 = spread peek,
@@ -211,15 +223,14 @@ struct HomeHeroArtStack: View {
             .rotationEffect(.degrees(layout.rotation))
             .offset(layout.offset)
             .opacity(layout.opacity)
+            // Single accent halo whose strength rides `centreness`; off-centre
+            // cards naturally fade to no shadow. Dropping the secondary depth
+            // shadow that used to cross-fade in here halves the per-tick
+            // offscreen-shadow renders without changing the focus-card halo.
             .shadow(
                 color: appAccent.opacity(0.35 * centreness),
                 radius: 16 + (pulse ? 12 : 0) * centreness,
                 y: 6 + 6 * centreness
-            )
-            .shadow(
-                color: .black.opacity(0.18 * (1 - centreness)),
-                radius: 10,
-                y: 6
             )
     }
 
@@ -233,7 +244,19 @@ struct HomeHeroArtStack: View {
     private var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { value in
-                guard abs(value.translation.width) >= abs(value.translation.height) else { return }
+                // Pick an axis on the first tick past minimumDistance and keep
+                // it for the rest of the gesture. Without this, a per-tick
+                // dominant-axis check would freeze the deck mid-scrub the
+                // moment vertical motion briefly outpaced horizontal — and
+                // then resume when horizontal caught back up, reading to the
+                // user as the gesture randomly cutting out.
+                if dragAxis == .undecided {
+                    dragAxis = abs(value.translation.width) >= abs(value.translation.height)
+                        ? .horizontal
+                        : .ignored
+                }
+                guard dragAxis == .horizontal else { return }
+
                 let raw = value.translation.width
                 let maxDrag = 2 * revealDistance
                 let absRaw = abs(raw)
@@ -247,6 +270,7 @@ struct HomeHeroArtStack: View {
                 }
             }
             .onEnded { _ in
+                dragAxis = .undecided
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.78)) {
                     dragX = 0
                 }
@@ -404,33 +428,48 @@ struct HomeHeroArtStack: View {
     private func loadArtworks() async {
         frontFallbackKind = fallbackKind(for: mode, source: source)
 
+        // Every `await` below is guarded by `Task.isCancelled` before any
+        // @State mutation or callback. `.task(id: fetchKey)` cancels the
+        // previous task when the key changes, but the awaited MusicKit /
+        // SwiftData calls may still resume with a result after that — and
+        // without these guards the stale result would clobber the new
+        // task's `artworks` (and tint the ambient background to the wrong
+        // cover via `onPrimaryArtworkResolved`).
+
         switch source {
         case .playlist(let id, _, _):
             // Hero is the playlist cover (rendered by PlaylistCoverView), so
             // we only need the next 2 track artworks for the back cards.
-            artworks = await fetchPlaylistTrackArtworks(id: id, limit: 2)
+            let result = await fetchPlaylistTrackArtworks(id: id, limit: 2)
+            if Task.isCancelled { return }
+            artworks = result
             onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forPlaylistID: id))
             return
         case .artist(let id, _):
             // Same idea — hero is the artist artwork; back cards preview the
             // first 2 songs by this artist in the user's sort order.
-            artworks = await fetchArtistTrackArtworks(id: id, limit: 2)
+            let result = await fetchArtistTrackArtworks(id: id, limit: 2)
+            if Task.isCancelled { return }
+            artworks = result
             onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forArtistID: id))
             return
         case .none:
             break
         }
 
+        let result: [Artwork]
         switch mode {
         case .library, .unsorted:
-            artworks = await fetchLibraryArtworks(limit: deckCapacity)
+            result = await fetchLibraryArtworks(limit: deckCapacity)
         case .dismissed:
-            artworks = await fetchRecentlyDismissedArtworks(limit: deckCapacity)
+            result = await fetchRecentlyDismissedArtworks(limit: deckCapacity)
         }
+        if Task.isCancelled { return }
+        artworks = result
         // Ambient tint always follows the first cover — the scrub is a peek
         // that returns home, so the background colour shouldn't follow the
         // finger (would feel busy and jittery during the gesture).
-        onPrimaryArtworkResolved?(artworks.first)
+        onPrimaryArtworkResolved?(result.first)
     }
 
     /// Fresh small library request — does not touch the swipe-session paging

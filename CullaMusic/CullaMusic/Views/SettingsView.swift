@@ -70,22 +70,11 @@ struct SettingsView: View {
         GlassPanel(icon: "paintbrush.fill", title: "Appearance") {
             ThemeChipPicker(selection: $colorSchemeRaw)
 
-            Toggle(isOn: $useDynamicAccent) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.secondary.opacity(0.14))
-                            .frame(width: 30, height: 30)
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Match song artwork")
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(.primary)
-                }
-            }
-            .tint(appAccent)
+            SettingsToggleRow(
+                icon: "wand.and.stars",
+                title: "Match song artwork",
+                isOn: $useDynamicAccent
+            )
 
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 44), spacing: 14)],
@@ -97,6 +86,7 @@ struct SettingsView: View {
                 }
             }
             .opacity(useDynamicAccent ? 0.5 : 1.0)
+            .disabled(useDynamicAccent)
             .animation(.snappy(duration: 0.2), value: useDynamicAccent)
         }
     }

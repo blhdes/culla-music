@@ -7,6 +7,7 @@ struct PlaylistSidebarView: View {
     let highlightedID: UUID?
     let dragProgress: CGFloat
 
+    @Environment(\.appAccent) private var appAccent
     @Environment(\.appAccentSecondary) private var accentSecondary
 
     private var isDragging: Bool { dragProgress > 0 }
@@ -17,7 +18,12 @@ struct PlaylistSidebarView: View {
                 emptyState
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(playlists.enumerated()), id: \.element.id) { _, playlist in
+                    ForEach(Array(playlists.enumerated()), id: \.element.id) { index, playlist in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(.white.opacity(0.08))
+                                .frame(height: 0.5)
+                        }
                         PlaylistSidebarItem(
                             playlist: playlist,
                             isHighlighted: playlist.id == highlightedID,
@@ -56,46 +62,42 @@ struct PlaylistSidebarView: View {
         }
     }
 
+    /// First-time empty state. Visually styled as a call-to-action tile, but
+    /// the actual interaction lives in `MusicSwipeView.handleSwipeEnd` —
+    /// releasing the right-drag while the sidebar is empty opens the Manage
+    /// sheet. The sidebar overlay disables hit testing so a `Button` here
+    /// would never receive taps; the gesture-release model is both more
+    /// honest about how the screen works and more ergonomic (no need to lift
+    /// the finger and re-tap).
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Spacer()
-
-            // 64pt glass tile around the icon — gives the empty state a focal
-            // anchor against the panelTint gradient. Modest size so it doesn't
-            // crowd the narrow ~80%-width sidebar panel.
+        VStack(spacing: 12) {
             Image(systemName: "rectangle.stack.badge.plus")
                 .font(.title2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appAccent)
+                .symbolEffect(.pulse, options: .repeating, isActive: isDragging)
                 .frame(width: 64, height: 64)
                 .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                        .strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
                 )
+                .shadow(color: appAccent.opacity(0.35), radius: 14, y: 6)
 
-            Text("Add a playlist\nto sort songs")
+            Text("Add playlists")
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text("Release to open Manage")
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: 4) {
-                Text("Tap Manage")
-                    .font(.caption)
-                // Pulse gated to `isDragging` so the arrow only animates while
-                // the panel is actually visible — pointing the eye at the
-                // Manage button at exactly the moment the user needs it.
-                // `accessibilityReduceMotion` is honored by symbolEffect at
-                // the system level, no manual gate needed.
-                Image(systemName: "arrow.down.right")
-                    .font(.caption)
-                    .symbolEffect(.pulse, options: .repeating, isActive: isDragging)
-            }
-            .foregroundStyle(.tertiary)
-
-            Spacer()
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        // Multiplied by the outer .opacity(dragProgress) on the Group, so the
+        // floor only matters once any drag exists. Ramp finishes the reveal
+        // at 85% → 100% over the back half of the drag.
+        .opacity(0.85 + 0.15 * dragProgress)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .opacity(isDragging ? 0.6 + 0.4 * dragProgress : 0.55)
     }
 }
 
@@ -126,14 +128,22 @@ struct PlaylistSidebarItem: View {
             )
             .opacity(isHighlighted ? 0.6 : 0)
 
+            // Complementary leading bar — independent of accent saturation so
+            // pale song-derived accents still get an unambiguous "you're here"
+            // cue. Sits on top of the gradient so it reads as a stronger edge.
+            Rectangle()
+                .fill(appAccent)
+                .frame(width: 3)
+                .opacity(isHighlighted ? 1.0 : 0.0)
+
             HStack(spacing: 12) {
                 PlaylistCoverView(
                     appleMusicPlaylistID: playlist.appleMusicPlaylistID,
-                    size: 52,
+                    size: 44,
                     cornerRadius: 8
                 )
                 Text(playlist.name)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(.headline, design: .rounded))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
@@ -154,9 +164,14 @@ struct PlaylistSidebarItem: View {
         return isDragging ? .primary : .secondary
     }
 
+    /// Smoothly ramps with dragProgress instead of jumping when isDragging
+    /// flips. At rest = 0.5; full drag, non-highlighted = 0.7; full drag,
+    /// highlighted = 1.0. The previous version stepped 0.5 → 0.7 on the
+    /// first millisecond of drag, which read as a small pop.
     private var textOpacity: Double {
-        if !isDragging { return 0.5 }
-        return isHighlighted ? 1.0 : 0.7
+        let p = Double(max(0, min(1, dragProgress)))
+        let target: Double = isHighlighted ? 1.0 : 0.7
+        return 0.5 + (target - 0.5) * p
     }
 }
 

@@ -2,7 +2,8 @@ import UIKit
 
 enum Haptics {
     static func swipeLeft()  { impact(.light)  }   // dismiss
-    static func swipeRight() { impact(.medium) }   // assign to playlist
+    static func loved()      { impact(.medium) }   // up-swipe → Loved
+    static func sidebarDrop() { notification(.success) }  // drop into a sidebar row — heavier "landed" feel
     static func skip()       { impact(.soft)   }   // double-tap → skip (session-only)
     static func tap()        { impact(.light)  }
     static func scrubTick()  { selection() }       // scrub start / end

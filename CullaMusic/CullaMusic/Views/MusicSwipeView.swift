@@ -489,6 +489,19 @@ struct MusicSwipeView: View {
         let ptx = value.predictedEndTranslation.width
         let pty = value.predictedEndTranslation.height
 
+        // Empty-sidebar shortcut: the user dragged far enough to reveal the
+        // "Add playlists" tile, and they have no sidebar playlists to drop
+        // into. Treat the release as their entry into Manage — the only
+        // useful next action — instead of a silent snap-back. Without this
+        // a first-time user has no in-context path forward; the bottom-left
+        // Manage button is hidden during drag.
+        if viewModel.sidebarPlaylists.isEmpty && sidebarProgress > 0.5 {
+            snapBack()
+            Haptics.tap()
+            showManageSheet = true
+            return
+        }
+
         // Sidebar claims the gesture: while the finger is parked over a
         // playlist row, only right-swipe-onto-playlist applies. Vertical
         // motion across rows must not trigger Loved or Dismiss.
@@ -498,7 +511,7 @@ struct MusicSwipeView: View {
                tx > swipeThreshold || ptx > swipeThreshold {
                 flyOff(x: 500) {
                     viewModel.assignToPlaylist(playlist)
-                    Haptics.swipeRight()
+                    Haptics.sidebarDrop()
                 }
                 return
             }
@@ -517,7 +530,7 @@ struct MusicSwipeView: View {
         if !horizontalDominant, ty < -swipeThreshold || pty < -swipeThreshold {
             flyOff(y: -700) {
                 viewModel.loveCurrent()
-                Haptics.swipeRight()
+                Haptics.loved()
             }
             return
         }
@@ -528,7 +541,7 @@ struct MusicSwipeView: View {
                let playlist = viewModel.sidebarPlaylists.first(where: { $0.id == id }) {
                 flyOff(x: 500) {
                     viewModel.assignToPlaylist(playlist)
-                    Haptics.swipeRight()
+                    Haptics.sidebarDrop()
                 }
                 return
             }

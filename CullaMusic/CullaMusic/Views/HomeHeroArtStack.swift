@@ -64,11 +64,15 @@ struct HomeHeroArtStack: View {
     /// the last two live off-screen and slide in when the user drags in
     /// their direction. Anything past 5 is loaded but not rendered.
     private let deckCapacity: Int = 5
-    /// Drag distance at which the far-side card is fully revealed. Past
-    /// this the gesture rubber-bands so the user feels the end of the deck
-    /// without an abrupt stop. Sized so a comfortable thumb sweep reveals
-    /// the full card without making the user reach across the screen.
-    private let revealDistance: CGFloat = 120
+    /// Drag distance per stage in the scrub. Stage 1 (`0 → revealDistance`)
+    /// pulls the near-side rest peek to centre; stage 2 (`revealDistance →
+    /// 2 × revealDistance`) pulls the newcomer all the way to centre. So the
+    /// total drag to fully reveal a newcomer is `2 × revealDistance`. Sized
+    /// so even stage 2 lands well within a single thumb sweep — earlier 120pt
+    /// made the newcomer's centring need ~240pt, almost full screen width.
+    /// Past the second stage the gesture rubber-bands so the user feels the
+    /// end of the deck without an abrupt stop.
+    private let revealDistance: CGFloat = 80
 
     var body: some View {
         ZStack {

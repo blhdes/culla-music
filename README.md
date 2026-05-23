@@ -12,14 +12,15 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
   - **Library** — full library minus what the app has already touched.
   - **Unsorted** — songs not in any of your personal playlists (editorial / replay / personalMix / external are hidden by default).
   - **Dismissed** — the rejected pile, with an un-dismiss path.
+- **Home art carousel** — tap the hero on Home to open a fullscreen center-anchored carousel of every cover in the current mode (in the chosen sort order). Drag/scroll snaps to the nearest cover, side-tap snaps it to centre and starts its preview, centre-tap toggles play/pause. The currently-centred song is the seed for the swipe session — tap **Start Cullaing** from inside the carousel and the preview keeps playing through the morph into the swipe card.
 - **Dismissed-mode cleanup menu** — long-press a dismissed card to see a preview of every playlist that song lives in, then **selectively strip it from any subset** of them (toggleable rows, all selected by default). Or pick **Forget dismissal** to un-dismiss without sorting. Destructive removals get a 6 s inline-snackbar Undo that also cancels the in-flight Apple Music task before reverting — no remove/add race.
 - **Source playlist sorting** — point the deck at a specific playlist, then **COPY** songs into other playlists or **MOVE** them out as you go. Read-only sources (Apple-curated, shared, smart Favorites) are allowed too, locked to copy.
 - **Up-swipe = Loved** — pull a card upward to drop the song into a "Loved" playlist. Defaults to a Culla-created *Culla Loves* (auto-created on first up-swipe); any of your own playlists can be picked as the target in Settings.
-- **Hot-clip preview** (optional) — plays Apple Music's curated ~30s preview instead of streaming from 0:00. Faster triage, no 20-second intro to skip.
+- **Auto-play on swipe** (default on) — each new card's preview starts the moment the card lands. Toggle off in Settings to keep the swipe screen silent until you tap play. Combine with **Hot-clip preview** for Apple Music's curated ~30 s preview instead of streaming from 0:00.
 - **Scrubbable progress bar** with haptic ticks; cross-fades on track change.
 - **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed. The Loved chip is marked with a ♥.
 - **Artist hub** — info button on the swipe card opens a sheet with the artist's top songs, similar artists, and a Google fallback (branded, multi-color "G"). Tapping a similar artist drills deeper without dismissing back to the deck.
-- **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, author-name override for created playlists, read-only-playlist scope toggle, up-swipe Loved-playlist target.
+- **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, auto-play on swipe, hot-clip preview, author-name override for created playlists, read-only-playlist scope toggle, up-swipe Loved-playlist target.
 - **Undo history** — every swipe is reversible, including the playlist write on Apple Music's side. Failed remote writes roll back the local state too, so a swipe that didn't reach Apple Music leaves no trace.
 
 ---

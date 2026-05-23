@@ -226,16 +226,25 @@ final class HomeViewModel {
 // MARK: - HomeView
 
 struct HomeView: View {
-    let onStart: (SwipeConfig) -> Void
+    /// Starts a swipe session. `anchorSongs` is empty for the regular
+    /// "Start Cullaing" path; when launched from `HomeArtCarouselView` it
+    /// holds the centred song plus a small forward window so the swipe view
+    /// can begin where the user was browsing (and the already-playing
+    /// preview keeps going seamlessly).
+    let onStart: (SwipeConfig, [Song]) -> Void
     /// Namespace for the Home → Swipe hero morph. The "Start Cullaing" button
     /// tags itself with `heroStart`; the current SongCard's artwork shares
     /// the same id so SwiftUI interpolates between them.
     var heroNamespace: Namespace.ID?
+    /// Mode pile selection, owned by RootView so it survives Home ⇄ Swipe
+    /// remounts but resets on a fresh app launch. See `RootView.selectedHomeMode`
+    /// for the rationale; a local @State here would reset on every remount
+    /// and desync the hero / carousel which both re-fetch off this mode.
+    @Binding var selectedMode: ReviewMode
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appAccent) private var appAccent
     @State private var homeVM: HomeViewModel?
-    @State private var selectedMode: ReviewMode = .library
     @State private var source: SourceScope?
     @State private var showSourcePicker = false
     @State private var showSettings = false
@@ -260,6 +269,17 @@ struct HomeView: View {
     /// on the Library mode card so it stops spinning after a failure instead
     /// of dangling forever because the count never landed.
     @State private var artistTrackCountsLoading: Set<String> = []
+    /// Drives the `HomeArtCarouselView` overlay — flipped on by tapping the
+    /// hero (only in source-less modes; sourced stacks route through their
+    /// own UIs), flipped off by tapping the carousel's backdrop or by its
+    /// "Start Cullaing" CTA handing off into the swipe view.
+    @State private var showCarousel: Bool = false
+    /// Apple Music song-id of the cover the user last centred in the
+    /// carousel. Forwarded to `HomeHeroArtStack` so the hero on Home
+    /// reflects "where you left off." Cleared whenever the deck source
+    /// changes (mode / source / sort) so a stale id from one deck
+    /// doesn't leak into another.
+    @State private var lastCenteredCarouselSongID: String?
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     /// Scoped-only opt-in: when on, dismissed tracks also surface inside
@@ -285,7 +305,13 @@ struct HomeView: View {
                     source: source,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
                     modelContext: modelContext,
-                    onPrimaryArtworkResolved: { heroArtwork = $0 }
+                    onPrimaryArtworkResolved: { heroArtwork = $0 },
+                    onHeroTap: {
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            showCarousel = true
+                        }
+                    },
+                    preferredFrontSongID: lastCenteredCarouselSongID
                 )
                 .padding(.bottom, 22)
 
@@ -357,6 +383,41 @@ struct HomeView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 32)
             }
+
+            // Carousel overlay — covers Home while showing. Home stays
+            // mounted underneath (its .task, ambient background, and source
+            // state all persist), but the dim backdrop + covers visually
+            // replace it. Tapping the CTA dismisses the carousel and lets
+            // Home's startButton carry the matchedHero morph into the
+            // swipe card; tapping the backdrop returns to Home as-is.
+            if showCarousel {
+                HomeArtCarouselView(
+                    mode: selectedMode,
+                    sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
+                    modelContext: modelContext,
+                    totalCount: count(for: selectedMode),
+                    onStart: { anchor in
+                        let config = buildSwipeConfig()
+                        // Dismiss the carousel synchronously so Home's
+                        // startButton re-renders before RootView's startSession
+                        // kicks off the Home → Swipe morph. The CTA's screen
+                        // position is identical in both views, so the user
+                        // doesn't see the swap — they see the CTA lift off.
+                        showCarousel = false
+                        onStart(config, anchor)
+                    },
+                    onDismiss: {
+                        withAnimation(.easeInOut(duration: 0.28)) {
+                            showCarousel = false
+                        }
+                    },
+                    onCenteredSongOnExit: { id in
+                        lastCenteredCarouselSongID = id
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(100)
+            }
         }
         .overlay(alignment: .topTrailing) {
             Button {
@@ -372,6 +433,15 @@ struct HomeView: View {
             .buttonStyle(.plain)
             .padding(.trailing, 14)
             .padding(.top, 16)
+            // The overlay sits above the carousel's zIndex(100), so without
+            // gating, the gear would stay tappable through the carousel.
+            // Fade + disable in tandem so the carousel reads as a focused
+            // exploration view, not a layer with stray Home chrome poking
+            // through. The opacity picks up the `withAnimation` transaction
+            // that toggles `showCarousel`, so the fade is in sync with the
+            // carousel's own transition.
+            .opacity(showCarousel ? 0 : 1)
+            .allowsHitTesting(!showCarousel)
         }
         .task {
             let vm = HomeViewModel(modelContext: modelContext)
@@ -409,11 +479,22 @@ struct HomeView: View {
             if newValue != .library {
                 source = nil
             }
+            // The carousel's "where you left off" id is per-deck. Swapping
+            // mode swaps the deck, so the stale id from the prior mode must
+            // not leak into the new hero — clear it before the next render.
+            lastCenteredCarouselSongID = nil
         }
         .onChange(of: source) { _, newValue in
             if case .artist(let id, _) = newValue {
                 Task { await fetchArtistTrackCountIfNeeded(id: id) }
             }
+            // Same as mode: picking / clearing a source changes the deck.
+            lastCenteredCarouselSongID = nil
+        }
+        .onChange(of: sortOrderRaw) { _, _ in
+            // Flipping newest/oldest reorders the deck — the carousel-anchor
+            // song from the previous order would land at a meaningless slot.
+            lastCenteredCarouselSongID = nil
         }
         .onChange(of: membershipIncludeCurated) { _, _ in
             homeVM?.triggerRecompute()
@@ -626,31 +707,38 @@ struct HomeView: View {
             icon: "play.fill",
             iconEffect: .pulse
         ) {
-            let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
-            let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
-            let activeScope: SourceScope? = selectedMode == .library ? source : nil
-            // Force `.copy` whenever the source can't accept removals:
-            // read-only playlists (Apple-curated / smart Favorites / shared),
-            // or artist scope (no "remove from artist" exists).
-            let transferMode: SourceTransferMode = {
-                switch activeScope {
-                case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
-                case .artist:                          return .copy
-                case .none:                            return storedMode
-                }
-            }()
-            // The flag is only meaningful in scoped sessions — gate it here
-            // so an unrelated stored value can't leak into an All-Library run.
-            let includeDismissed = activeScope != nil && includeDismissedInScope
-            onStart(SwipeConfig(
-                mode: selectedMode,
-                order: order,
-                source: activeScope,
-                sourceTransferMode: transferMode,
-                includeDismissedInScope: includeDismissed
-            ))
+            onStart(buildSwipeConfig(), [])
         }
         .matchedHero(id: "heroStart", in: heroNamespace)
+    }
+
+    /// Builds the `SwipeConfig` from the current Home selections. Extracted
+    /// so the carousel CTA can reuse the exact same resolution (transfer mode
+    /// gating, scope gating, read-only fallback) the regular Start button uses.
+    private func buildSwipeConfig() -> SwipeConfig {
+        let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
+        let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
+        let activeScope: SourceScope? = selectedMode == .library ? source : nil
+        // Force `.copy` whenever the source can't accept removals:
+        // read-only playlists (Apple-curated / smart Favorites / shared),
+        // or artist scope (no "remove from artist" exists).
+        let transferMode: SourceTransferMode = {
+            switch activeScope {
+            case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
+            case .artist:                          return .copy
+            case .none:                            return storedMode
+            }
+        }()
+        // The flag is only meaningful in scoped sessions — gate it here
+        // so an unrelated stored value can't leak into an All-Library run.
+        let includeDismissed = activeScope != nil && includeDismissedInScope
+        return SwipeConfig(
+            mode: selectedMode,
+            order: order,
+            source: activeScope,
+            sourceTransferMode: transferMode,
+            includeDismissedInScope: includeDismissed
+        )
     }
 
     /// Opt-in toggle for scoped sessions to also surface dismissed tracks.

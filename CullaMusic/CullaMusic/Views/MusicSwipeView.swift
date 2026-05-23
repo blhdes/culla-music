@@ -17,6 +17,11 @@ struct MusicSwipeView: View {
 
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
+    /// When on (default), each new card's preview starts automatically on
+    /// arrival — session entry and every swipe. The Settings toggle flips it
+    /// off without disturbing what's currently playing; the policy only
+    /// applies to *future* card changes.
+    @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
 
     /// One-time discovery hint for the long-press cleanup menu. Flips to true
     /// the first time the user successfully long-presses in Dismissed mode (or
@@ -78,7 +83,14 @@ struct MusicSwipeView: View {
         }
         .overlay(alignment: .topLeading) {
             if let onBack {
-                Button(action: onBack) {
+                Button {
+                    // Cut the preview the instant the user taps back — the
+                    // exit spring runs ~0.55s, and `.onDisappear` only fires
+                    // at the end of it. Without this explicit stop the
+                    // user hears their song bleed into the Home transition.
+                    MusicLibraryService.shared.stopPreview()
+                    onBack()
+                } label: {
                     Image(systemName: "chevron.left")
                         .font(.title3.weight(.medium))
                         .frame(width: 24, height: 24)
@@ -113,6 +125,11 @@ struct MusicSwipeView: View {
             ArtistDetailSheet(song: song)
         }
         .task(id: viewModel.currentSong?.id.rawValue) {
+            // Autoplay fires first because it's synchronous — audio kicks off
+            // the same frame the new card is presented, then the accent
+            // extraction continues in the background. Re-fires on every
+            // current-song change (session entry, swipe, undo).
+            autoplayCurrentIfEnabled()
             await refreshDynamicAccent()
         }
         .task(id: viewModel.nextSong?.id.rawValue) {
@@ -153,6 +170,12 @@ struct MusicSwipeView: View {
                     }
                 }
             }
+        }
+        // Safety net for any exit path that bypasses the back button (e.g.
+        // a future swipe-to-dismiss gesture, or programmatic teardown).
+        // Idempotent — `stopPreview` is a no-op when nothing is playing.
+        .onDisappear {
+            MusicLibraryService.shared.stopPreview()
         }
     }
 
@@ -627,6 +650,21 @@ struct MusicSwipeView: View {
         withAnimation(.easeInOut(duration: 0.35)) {
             dynamicAccent = extracted
         }
+    }
+
+    /// Starts the current card's preview when `autoplayOnSwipe` is on, unless
+    /// it's already playing. The "already playing" guard avoids a tear-and-
+    /// restart click when the user lands on the swipe view with a preview
+    /// the carousel started (same song, no reason to reset playback).
+    /// Toggling the setting off mid-session doesn't stop a playing track —
+    /// the policy only affects subsequent card arrivals.
+    private func autoplayCurrentIfEnabled() {
+        guard autoplayOnSwipe, let song = viewModel.currentSong else { return }
+        let service = MusicLibraryService.shared
+        if service.isPlayingPreview, service.nowPlayingSongID == song.id.rawValue {
+            return
+        }
+        service.playPreview(for: song)
     }
 
     // MARK: - Helpers

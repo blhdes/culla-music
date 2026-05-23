@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MusicKit
+import SwiftData
 
 /// True if `amPlaylist` accepts programmatic writes via `MusicLibrary.shared.add(...)`.
 /// Editorial / external / personalMix / replay are stamped by Apple as read-only.
@@ -655,6 +656,48 @@ final class MusicLibraryService {
     /// over `fetchAllPlaylistData`.
     func fetchPlaylistMembershipIndex(includeCurated: Bool) async throws -> [String: [MusicItemID]] {
         try await fetchAllPlaylistData(includeCurated: includeCurated).membershipIndex
+    }
+
+    // MARK: - Deck Filtering
+
+    /// Set of song IDs to exclude from a deck for the given mode. The single
+    /// source of truth shared by `CarouselSongFeed` and `HomeHeroArtStack` so
+    /// both surfaces agree on "what counts as the next song." Before this
+    /// existed, the hero ran an unfiltered library request and could surface a
+    /// song the carousel had already excluded — first-cover mismatch.
+    ///
+    /// - `.library`:   sorted ∪ dismissed  (already acted on)
+    /// - `.unsorted`:  playlists ∪ sorted ∪ dismissed  (everything that "has a home")
+    /// - `.dismissed`: empty (dismissed mode *shows* dismissed songs, doesn't filter them)
+    ///
+    /// On a playlist-fetch failure in `.unsorted`, returns `[]` to match
+    /// `CarouselSongFeed.buildExclusionSet`'s prior behavior — without this,
+    /// the hero and the carousel would diverge in the failure path.
+    func deckExclusionSet(
+        for mode: ReviewMode,
+        modelContext: ModelContext
+    ) async -> Set<String> {
+        let sortedIDs = Set(
+            (try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? []
+        )
+        let dismissedIDs = Set(
+            (try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? []
+        )
+        switch mode {
+        case .library:
+            return sortedIDs.union(dismissedIDs)
+        case .unsorted:
+            let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
+            do {
+                let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: !chipToggleOn)
+                return playlistIDs.union(sortedIDs).union(dismissedIDs)
+            } catch {
+                print("deckExclusionSet unsorted failed: \(error)")
+                return []
+            }
+        case .dismissed:
+            return []
+        }
     }
 
     // Apple stamps the creating app's name into curatorName for third-party-

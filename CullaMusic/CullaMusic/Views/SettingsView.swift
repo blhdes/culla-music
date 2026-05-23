@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
+    @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
     @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
@@ -100,8 +101,9 @@ struct SettingsView: View {
         GlassPanel(icon: "waveform", title: "Behavior") {
             VStack(spacing: 14) {
                 SettingsToggleRow(icon: "hand.tap.fill", title: "Haptics", isOn: $hapticsEnabled)
+                SettingsToggleRow(icon: "play.circle.fill", title: "Auto-play tracks", isOn: $autoplayOnSwipe)
                 SettingsToggleRow(icon: "bolt.heart.fill", title: "Start at song highlight", isOn: $useHotPreview)
-                cardFooter("Starts at the curated 30s preview when available.")
+                cardFooter("Auto-play starts each new card's preview. Highlight starts at the curated 30s clip when available.")
             }
         }
     }

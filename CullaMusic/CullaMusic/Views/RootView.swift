@@ -7,6 +7,15 @@ struct RootView: View {
     @State private var authStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
     @State private var activeViewModel: MusicSwipeViewModel?
 
+    /// Mode pile selection lifted out of HomeView so it survives RootView's
+    /// home ⇄ swipe screen swap (each swap remounts HomeView, which would
+    /// otherwise reset a local @State back to `.library`). Living on RootView
+    /// scopes it to the app session — fresh launches start at `.library`, not
+    /// "whatever the user happened to last pick" — which is the intended
+    /// behavior. Don't promote to @AppStorage; that would persist across
+    /// launches and lose the cold-start reset.
+    @State private var selectedHomeMode: ReviewMode = .library
+
     /// Shared namespace for the Home → Swipe hero morph. The "Start Cullaing"
     /// button on Home and the artwork on the current SongCard tag the same
     /// `heroStart` id; SwiftUI interpolates the frame between them so the
@@ -59,7 +68,11 @@ struct RootView: View {
                             .transition(.opacity)
                             .zIndex(1)
                     } else {
-                        HomeView(onStart: startSession, heroNamespace: heroNamespace)
+                        HomeView(
+                            onStart: startSession,
+                            heroNamespace: heroNamespace,
+                            selectedMode: $selectedHomeMode
+                        )
                             .transition(.parallaxRecede)
                             .zIndex(0)
                     }
@@ -93,8 +106,12 @@ struct RootView: View {
     }
 
     @MainActor
-    private func startSession(config: SwipeConfig) {
-        let vm = MusicSwipeViewModel(config: config, modelContext: modelContext)
+    private func startSession(config: SwipeConfig, anchorSongs: [Song] = []) {
+        let vm = MusicSwipeViewModel(
+            config: config,
+            modelContext: modelContext,
+            anchorSongs: anchorSongs
+        )
         // ObjectIdentifier of the freshly minted VM — used to gate the
         // completion handler so a rapid back-out → re-enter can't let a stale
         // completion flash the play button on the new session prematurely.

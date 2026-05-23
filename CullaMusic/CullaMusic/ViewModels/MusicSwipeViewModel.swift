@@ -75,6 +75,14 @@ final class MusicSwipeViewModel {
     /// Exclusion set for the current session — grows as songs are acted on.
     private var sessionExclusionSet: Set<String> = []
 
+    /// Optional pre-loaded songs to lead the deck — set when the swipe is
+    /// launched from `HomeArtCarouselView` so the user starts on the cover
+    /// they were exploring (and the already-playing preview keeps going).
+    /// These are consumed by `loadInitial()`; subsequent paging continues
+    /// normally with these songs added to the exclusion set so they don't
+    /// reappear.
+    private var anchorSongs: [Song] = []
+
     // MARK: - Init
 
     // Explicit @MainActor on the init (not the class) avoids the macro/isolation
@@ -82,8 +90,9 @@ final class MusicSwipeViewModel {
     // No default for config — callers always supply it; removes the nonisolated
     // default-expression evaluation issue with SwipeConfig().
     @MainActor
-    init(config: SwipeConfig, modelContext: ModelContext) {
+    init(config: SwipeConfig, modelContext: ModelContext, anchorSongs: [Song] = []) {
         self.config = config
+        self.anchorSongs = anchorSongs
         let service = MusicLibraryService.shared
         self.service = service
         self.modelContext = modelContext
@@ -117,13 +126,20 @@ final class MusicSwipeViewModel {
         // can so the first card paints sooner.
         await syncPlaylistsFromAppleMusic()
 
+        // Pre-seed the exclusion set with anchor IDs so the subsequent page
+        // fetches don't double-list a song that's already at the head of the
+        // queue. The anchors themselves come from `HomeArtCarouselView`, which
+        // computes the same exclusion semantics — so any anchor we got is one
+        // the session would naturally surface anyway.
+        let anchorIDs = Set(anchorSongs.map { $0.id.rawValue })
+
         do {
             switch config.mode {
             case .library:
-                sessionExclusionSet = fetchExcludedIdentifiers()
+                sessionExclusionSet = fetchExcludedIdentifiers().union(anchorIDs)
                 dismissedStore.loadAll()
-                let songs = try await fetchNextSessionSongs()
-                populateQueue(with: songs)
+                let fetched = try await fetchNextSessionSongs()
+                populateQueue(with: anchorSongs + fetched)
                 // Membership chips fill in once the index lands — the card is
                 // already on screen by then.
                 Task { @MainActor in await membershipIndex.rebuild() }
@@ -143,18 +159,21 @@ final class MusicSwipeViewModel {
                 // so the user can give it another chance (marked with the
                 // "Dismissed Xmo ago" chip).
                 let recentDismissed = dismissedStore.recentSongIDs()
-                sessionExclusionSet = data.songIDs.union(sortedIDs).union(recentDismissed)
+                sessionExclusionSet = data.songIDs
+                    .union(sortedIDs)
+                    .union(recentDismissed)
+                    .union(anchorIDs)
                 dismissedStore.loadAll()
-                let songs = try await service.fetchNextLibrarySongs(
+                let fetched = try await service.fetchNextLibrarySongs(
                     excluding: sessionExclusionSet,
                     desired: batchSize,
                     ascending: config.order.ascending
                 )
-                populateQueue(with: songs)
+                populateQueue(with: anchorSongs + fetched)
 
             case .dismissed:
                 dismissedStore.loadAll()
-                try await loadDismissedDeck()
+                try await loadDismissedDeck(skipping: anchorIDs, leadingWith: anchorSongs)
                 Task { @MainActor in await membershipIndex.rebuild() }
             }
         } catch {
@@ -840,7 +859,14 @@ final class MusicSwipeViewModel {
 
     // MARK: - Private
 
-    private func loadDismissedDeck() async throws {
+    /// Loads the dismissed deck in order. When an anchor is in play (the swipe
+    /// was launched from `HomeArtCarouselView`), the anchor songs lead the
+    /// deck and the SwiftData fetch skips their IDs so the same songs don't
+    /// land in the queue twice.
+    private func loadDismissedDeck(
+        skipping skipIDs: Set<String> = [],
+        leadingWith lead: [Song] = []
+    ) async throws {
         let ascending = config.order.ascending
         let sortDescriptor = ascending
             ? SortDescriptor<DismissedSong>(\.dismissedAt, order: .forward)
@@ -848,14 +874,16 @@ final class MusicSwipeViewModel {
         let descriptor = FetchDescriptor<DismissedSong>(sortBy: [sortDescriptor])
         let dismissed = (try? modelContext.fetch(descriptor)) ?? []
 
-        guard !dismissed.isEmpty else {
+        guard !dismissed.isEmpty || !lead.isEmpty else {
             isEmpty = true
             return
         }
 
-        let orderedIDs = dismissed.map(\.songID)
-        let songs = try await service.resolveSongs(ids: orderedIDs)
-        populateQueue(with: songs)
+        let remainingIDs = dismissed.map(\.songID).filter { !skipIDs.contains($0) }
+        let resolved = remainingIDs.isEmpty
+            ? []
+            : try await service.resolveSongs(ids: remainingIDs)
+        populateQueue(with: lead + resolved)
     }
 
     private func populateQueue(with songs: [Song]) {

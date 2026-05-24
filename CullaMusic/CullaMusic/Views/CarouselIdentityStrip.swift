@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// Top breadcrumb strip on `HomeArtCarouselView`. Tells the user which mode
-/// they're exploring and how many covers are loaded into the deck.
+/// they're exploring and how many covers are loaded into the deck, and is the
+/// tap target for the mode-switcher Menu the carousel wraps it in. The
+/// trailing `chevron.up.chevron.down` is the only affordance for that
+/// interactivity — small and secondary so the strip still reads as a label
+/// first, control second.
 ///
 /// Lives in its own file (instead of as a private struct on the carousel
 /// view) so `HomeArtCarouselView.swift` stays under the global manifesto's
-/// 200-line extraction threshold. The strip is intentionally non-interactive
-/// — it's a label, not a control, so we don't paint it with the accent or
-/// chevron vocabulary used by `ModeTile`.
+/// 200-line extraction threshold.
 ///
 /// The count uses `.contentTransition(.numericText())` so the digit ticks
 /// up smoothly as the feed pages in additional songs.
@@ -32,6 +34,7 @@ struct CarouselIdentityStrip: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(.primary)
+                .contentTransition(.opacity)
 
             Circle()
                 .fill(.secondary)
@@ -39,6 +42,14 @@ struct CarouselIdentityStrip: View {
                 .opacity(0.55)
 
             countLabel
+
+            // Standard "this opens a menu" affordance — same glyph iOS uses
+            // for Menu-backed controls system-wide. Kept secondary and small
+            // so the strip still reads label-first.
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

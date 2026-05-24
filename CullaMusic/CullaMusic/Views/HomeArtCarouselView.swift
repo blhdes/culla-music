@@ -11,6 +11,9 @@ import MusicKit
 /// - Tap a **side cover** → snap it to centre and start its preview.
 /// - Tap the **centred cover** → toggle play/pause of its preview.
 /// - Drag/scroll → snaps to the nearest cover; preview keeps playing.
+/// - Tap the **identity strip** → opens a Menu to switch mode (Library /
+///   Unsorted / Dismissed). The selection is bound to HomeView so the choice
+///   syncs back to the Home screen.
 /// - Tap **Start Cullaing** → opens `MusicSwipeView` seeded with the centred
 ///   song as its first card, so an already-playing preview keeps going.
 /// - Tap the **dim backdrop** → returns to Home. The carousel band has a
@@ -19,7 +22,7 @@ import MusicKit
 /// Scope (v1): only `.library`, `.unsorted`, `.dismissed`. Playlist/artist
 /// sources are deferred — those screens have their own portrait vocabulary.
 struct HomeArtCarouselView: View {
-    let mode: ReviewMode
+    @Binding var mode: ReviewMode
     let sortOrder: SortOrder
     let modelContext: ModelContext
     /// Real total for the current mode, sourced from `HomeView.count(for:)`.
@@ -36,7 +39,6 @@ struct HomeArtCarouselView: View {
     /// reflects "where you left off." `nil` if the feed never landed.
     var onCenteredSongOnExit: ((String?) -> Void)? = nil
 
-    @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let service = MusicLibraryService.shared
 
@@ -61,22 +63,31 @@ struct HomeArtCarouselView: View {
 
     var body: some View {
         ZStack {
-            // Opaque ambient backdrop — `HomeAmbientBackground` covers Home
-            // entirely (its base is `Color(.systemBackground)`) so the page
-            // below stops bleeding through. The soft glow tracks the centred
-            // cover's dominant color, so the page tone shifts with whichever
-            // album the user is exploring.
-            HomeAmbientBackground(tint: ambientTint)
+            // Pure backdrop — flat `Color(.systemBackground)` so nothing
+            // competes with the cover. An earlier draft used
+            // `HomeAmbientBackground` here for continuity with Home, but its
+            // tinted glow + grain read as a cropped silvery wash against the
+            // surrounding system colour. Minimalism wins on this screen; the
+            // cover IS the personality.
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
-            // Tap-to-dismiss surface above the backdrop. Separate from the
-            // ambient view because `HomeAmbientBackground.allowsHitTesting`
-            // is false — it ignores taps so it doesn't compete with the
-            // grain/glow rendering. This invisible layer is what actually
-            // catches the dismiss tap. Sits at z-level below the VStack so
-            // the strip / band / metadata / CTA can swallow their own taps.
+            // Drag-to-step surface above the backdrop. Empty regions of the
+            // screen (the slack around the cover, above the strip, below the
+            // metadata) feed horizontal swipes into a one-song step so the
+            // user can explore without aiming at the strict cover row. The
+            // threshold is deliberately generous so an incidental finger
+            // glide doesn't change the centred song. Dismiss is handled by
+            // the X button now — backdrop-tap is gone so this real estate
+            // can belong entirely to browsing.
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture { dismiss() }
+                .gesture(
+                    DragGesture(minimumDistance: 40)
+                        .onEnded { value in
+                            handleBackgroundSwipe(translation: value.translation.width)
+                        }
+                )
                 .accessibilityHidden(true)
 
             // Layered column: identity at the top, carousel centred, song
@@ -134,6 +145,12 @@ struct HomeArtCarouselView: View {
             await loadFeedIfNeeded()
         }
         .onAppear { runEntranceChoreography() }
+        .onChange(of: mode) { _, _ in
+            // Mode swap via the Menu — reload the feed against the new
+            // method. The brief loading placeholder while the new page
+            // lands is intentional feedback that the swap took effect.
+            Task { await reloadFeedForModeChange() }
+        }
         // Stop preview on exit so audio doesn't keep playing once the user
         // returns to Home — Home has no transport to surface or stop it.
         .onDisappear {
@@ -143,19 +160,29 @@ struct HomeArtCarouselView: View {
 
     // MARK: - Identity strip
 
-    /// Breadcrumb above the carousel: mode name + the real song count for
-    /// the current mode (passed in from HomeView). Falls back to the loaded
-    /// page count with a `+` suffix while Home's count is still computing,
-    /// so the strip never shows a misleadingly small number.
+    /// Breadcrumb above the carousel, wrapped in a Menu that switches mode.
+    /// The selection is bound up to HomeView via `$mode`, so picking
+    /// "Dismissed" here also flips the Home screen's selected mode tile.
+    /// Falls back to the loaded page count with a `+` suffix while Home's
+    /// real count is still computing, so the strip never shows a
+    /// misleadingly small number.
     private var identityStrip: some View {
         let (count, isPartial) = displayCount
-        return CarouselIdentityStrip(
-            mode: mode,
-            count: count,
-            isPartial: isPartial
-        )
-        .contentShape(Capsule())
-        .onTapGesture { /* swallow — strip is a label, not a dismiss target */ }
+        return Menu {
+            Picker("Mode", selection: $mode) {
+                ForEach(ReviewMode.allCases) { reviewMode in
+                    Label(reviewMode.title, systemImage: reviewMode.icon)
+                        .tag(reviewMode)
+                }
+            }
+        } label: {
+            CarouselIdentityStrip(
+                mode: mode,
+                count: count,
+                isPartial: isPartial
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Resolves what to show in the strip's count slot.
@@ -206,8 +233,6 @@ struct HomeArtCarouselView: View {
         .contentTransition(.opacity)
         .animation(reduceMotion ? nil : .smooth(duration: 0.32), value: scrollPositionID)
         .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture { /* swallow — metadata sits in the safe band */ }
     }
 
     private var currentCenteredSong: Song? {
@@ -258,17 +283,15 @@ struct HomeArtCarouselView: View {
             } else {
                 // Race fallback — the user opened the carousel just as the
                 // last song was sorted/dismissed. Show a gentle prompt; the
-                // backdrop tap still dismisses.
+                // X button dismisses.
                 emptyPlaceholder
             }
         }
-        // Safe gutter — vertical band around the carousel that absorbs taps.
-        // Without it, lifting off just above/below the covers (common on a
-        // fast scroll release) would fall through to the backdrop and
-        // dismiss the user out by accident.
+        // Vertical breathing room around the cover. Was previously a
+        // tap-swallowing gutter; with backdrop dismiss gone, it's pure
+        // layout padding — hits on it fall through to the background
+        // drag-step surface like every other empty region.
         .padding(.vertical, bandGutter)
-        .contentShape(Rectangle())
-        .onTapGesture { /* swallow — keep us inside the carousel */ }
     }
 
     private func loadedCarousel(feed: CarouselSongFeed) -> some View {
@@ -382,7 +405,6 @@ struct HomeArtCarouselView: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .strokeBorder(.white.opacity(0.18), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.5), radius: 24, y: 18)
     }
 
     /// Tight progress ring traced around the play/pause button as the preview
@@ -448,6 +470,32 @@ struct HomeArtCarouselView: View {
 
     // MARK: - Tap behavior
 
+    /// Translates a horizontal swipe on the empty background area into a
+    /// one-song step. The 70pt threshold means a casual finger drift won't
+    /// scrub the carousel — it takes a deliberate flick. No auto-play on
+    /// step: the user is exploring visually; tapping the centred cover
+    /// engages audio. Matches the in-band ScrollView's snap feel.
+    private func handleBackgroundSwipe(translation: CGFloat) {
+        let threshold: CGFloat = 70
+        guard abs(translation) > threshold else { return }
+
+        guard
+            let feed,
+            let currentID = scrollPositionID,
+            let currentIdx = feed.songs.firstIndex(where: { $0.id.rawValue == currentID })
+        else { return }
+
+        // Drag right → previous song (revealing what was off to the left);
+        // drag left → next song. Matches the natural "pull the strip"
+        // mental model of a horizontal carousel.
+        let newIdx = translation > 0 ? currentIdx - 1 : currentIdx + 1
+        guard feed.songs.indices.contains(newIdx) else { return }
+
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) {
+            scrollPositionID = feed.songs[newIdx].id.rawValue
+        }
+    }
+
     private func handleCoverTap(song: Song, isCentered: Bool) {
         if isCentered {
             // Centred cover — toggle preview.
@@ -498,21 +546,6 @@ struct HomeArtCarouselView: View {
         onDismiss()
     }
 
-    // MARK: - Ambient tint
-
-    /// Color the `HomeAmbientBackground` glow is keyed to. Tracks the centred
-    /// cover's dominant artwork color so the page tone shifts as the user
-    /// scrolls; falls back to the app accent before the first cover lands or
-    /// when the artwork didn't expose a usable color.
-    private var ambientTint: Color {
-        guard
-            let id = scrollPositionID,
-            let song = feed?.songs.first(where: { $0.id.rawValue == id }),
-            let cg = song.artwork?.backgroundColor
-        else { return appAccent }
-        return Color(cgColor: cg)
-    }
-
     // MARK: - Loading
 
     private func loadFeedIfNeeded() async {
@@ -528,5 +561,17 @@ struct HomeArtCarouselView: View {
                 scrollPositionID = f.songs.first?.id.rawValue
             }
         }
+    }
+
+    /// Tears down the current feed and reloads against the new mode. Stops
+    /// any in-flight preview first so we don't keep an old song playing
+    /// against a new deck, and clears `scrollPositionID` so the new feed
+    /// settles on its own first song instead of trying to find an id that
+    /// belongs to the previous mode's library.
+    private func reloadFeedForModeChange() async {
+        service.stopPreview()
+        scrollPositionID = nil
+        feed = nil
+        await loadFeedIfNeeded()
     }
 }

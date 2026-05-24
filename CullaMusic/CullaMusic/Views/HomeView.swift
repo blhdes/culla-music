@@ -388,7 +388,7 @@ struct HomeView: View {
             // swipe card; tapping the backdrop returns to Home as-is.
             if showCarousel {
                 HomeArtCarouselView(
-                    mode: selectedMode,
+                    mode: $selectedMode,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
                     modelContext: modelContext,
                     totalCount: count(for: selectedMode),

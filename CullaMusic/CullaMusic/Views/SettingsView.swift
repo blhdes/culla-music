@@ -48,6 +48,7 @@ struct SettingsView: View {
                     lookCard
                     playbackCard
                     personalCard
+                    copyrightFooter
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 20)
@@ -198,6 +199,28 @@ struct SettingsView: View {
         Rectangle()
             .fill(Color.primary.opacity(0.06))
             .frame(height: 0.5)
+    }
+
+    // MARK: - Copyright
+
+    private var copyrightFooter: some View {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        let year = Calendar.current.component(.year, from: Date())
+        let versionLine = build.isEmpty ? "Version \(version)" : "Version \(version) (\(build))"
+        return VStack(spacing: 3) {
+            Text("Culla Music")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(versionLine)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Text("© \(String(year)) Culla Music")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 }
 

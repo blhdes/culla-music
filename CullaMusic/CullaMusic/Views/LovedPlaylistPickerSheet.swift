@@ -5,6 +5,9 @@ import SwiftUI
 /// "auto-create Culla Loves on first up-swipe". The footer is gone because
 /// the Up-swipe card in Settings already explains the behaviour — repeating
 /// it here was just noise.
+///
+/// Visual tier matches the Settings parent: plain `systemBackground`, no
+/// `LivingMeshBackground`, `SettingsCard` containers instead of `GlassPanel`.
 struct LovedPlaylistPickerSheet: View {
     let playlists: [Playlist]
     let selectedID: String                 // "" → auto-create default
@@ -15,33 +18,30 @@ struct LovedPlaylistPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                LivingMeshBackground()
+            ScrollView {
+                VStack(spacing: 18) {
+                    SettingsCard(title: "Default") {
+                        autoRow
+                    }
 
-                ScrollView {
-                    VStack(spacing: 18) {
-                        GlassPanel(icon: "sparkles", title: "Default") {
-                            autoRow
-                        }
-
-                        if !playlists.isEmpty {
-                            GlassPanel(icon: "music.note.list", title: "Playlists") {
-                                VStack(spacing: 4) {
-                                    ForEach(Array(playlists.enumerated()), id: \.element.id) { index, playlist in
-                                        playlistRow(playlist)
-                                        if index < playlists.count - 1 {
-                                            Divider().opacity(0.4)
-                                        }
+                    if !playlists.isEmpty {
+                        SettingsCard(title: "Playlists") {
+                            VStack(spacing: 4) {
+                                ForEach(Array(playlists.enumerated()), id: \.element.id) { index, playlist in
+                                    playlistRow(playlist)
+                                    if index < playlists.count - 1 {
+                                        Divider().opacity(0.4)
                                     }
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 20)
                 }
-                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemBackground))
             .navigationTitle("Loved Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,15 +62,6 @@ struct LovedPlaylistPickerSheet: View {
             dismiss()
         } label: {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color.pink.opacity(0.18))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.pink)
-                }
-
                 Text("Auto (Culla Loves)")
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)
@@ -80,7 +71,7 @@ struct LovedPlaylistPickerSheet: View {
                 pickOneCheckmark(isSelected: isSelected)
             }
             .contentShape(Rectangle())
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
     }

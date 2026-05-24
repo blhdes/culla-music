@@ -3,6 +3,10 @@ import SwiftUI
 /// Sheet for picking the app accent. The rainbow of 13 swatches lives here
 /// instead of always-on in Settings so the Settings page can stay calm — the
 /// grid is meaningful as a destination, not as decoration.
+///
+/// Single-section sheet: no section-card chrome. The nav title "Accent Color"
+/// carries identity; the grid sits directly on `Color(.systemBackground)` to
+/// match the Settings parent's calm utility surface.
 struct AccentPalettePickerSheet: View {
     @Binding var selectedRaw: String
 
@@ -10,28 +14,21 @@ struct AccentPalettePickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                LivingMeshBackground()
-
-                ScrollView {
-                    VStack(spacing: 18) {
-                        GlassPanel(icon: "paintpalette.fill", title: "Color") {
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 56), spacing: 18)],
-                                alignment: .leading,
-                                spacing: 18
-                            ) {
-                                ForEach(AccentPalette.allCases) { palette in
-                                    swatch(palette)
-                                }
-                            }
-                        }
+            ScrollView {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 56), spacing: 18)],
+                    alignment: .leading,
+                    spacing: 18
+                ) {
+                    ForEach(AccentPalette.allCases) { palette in
+                        swatch(palette)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 20)
                 }
-                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemBackground))
             .navigationTitle("Accent Color")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

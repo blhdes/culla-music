@@ -48,17 +48,16 @@ final class HomeViewModel {
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
         let today = todayString()
-        let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
 
-        // Library cache — count is unaffected by the chip toggle.
+        // Library cache.
         let libraryFingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
         let libraryCachedDate = UserDefaults.standard.string(forKey: "music.libraryCountDate") ?? ""
         let libraryCachedFP = UserDefaults.standard.string(forKey: "music.libraryCountFingerprint") ?? ""
         let libraryCachedValue = UserDefaults.standard.integer(forKey: "music.libraryCountCached")
         let libraryFresh = (libraryCachedDate == today && libraryCachedFP == libraryFingerprint)
 
-        // Unsorted cache — toggle-aware, so the scope swap forces a refetch.
-        let unsortedFingerprint = "\(sortedSnapshot):\(dismissedSnapshot):curated=\(chipToggleOn)"
+        // Unsorted cache.
+        let unsortedFingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
         let unsortedCachedDate = UserDefaults.standard.string(forKey: "music.unsortedCountDate") ?? ""
         let unsortedCachedFP = UserDefaults.standard.string(forKey: "music.unsortedCountFingerprint") ?? ""
         let unsortedCachedValue = UserDefaults.standard.integer(forKey: "music.unsortedCountCached")
@@ -80,7 +79,7 @@ final class HomeViewModel {
             let playlistIDs: Set<String>
             if !unsortedFresh {
                 playlistIDs = try await MusicLibraryService.shared.fetchPlaylistSongIDs(
-                    includeCurated: !chipToggleOn
+                    includeCurated: true
                 )
             } else {
                 playlistIDs = []
@@ -286,9 +285,6 @@ struct HomeView: View {
     /// playlist/artist sessions. Default off preserves prior behavior; the
     /// per-card "Dismissed Xmo ago" chip identifies them when they appear.
     @AppStorage("music.includeDismissedInScope") private var includeDismissedInScope: Bool = false
-    // Observed so the unsorted count recomputes instantly when the toggle
-    // flips in Settings — without this, the change would only land on next launch.
-    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
 
     var body: some View {
         ZStack {
@@ -495,9 +491,6 @@ struct HomeView: View {
             // Flipping newest/oldest reorders the deck — the carousel-anchor
             // song from the previous order would land at a meaningless slot.
             lastCenteredCarouselSongID = nil
-        }
-        .onChange(of: membershipIncludeCurated) { _, _ in
-            homeVM?.triggerRecompute()
         }
         .sheet(isPresented: $showSourcePicker) {
             SourceScopePickerSheet(

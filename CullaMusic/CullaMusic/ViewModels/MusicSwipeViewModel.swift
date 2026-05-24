@@ -148,9 +148,8 @@ final class MusicSwipeViewModel {
                 // Unsorted needs every playlist's tracks anyway (to compute the
                 // exclusion set), so we build the membership index from the
                 // SAME parallel fetch instead of walking the library twice.
-                let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
                 let data = try await service.fetchAllPlaylistData(
-                    includeCurated: !chipToggleOn
+                    includeCurated: true
                 )
                 membershipIndex.setIndex(data.membershipIndex)
                 let sortedIDs = fetchSortedSongIDs()
@@ -196,33 +195,6 @@ final class MusicSwipeViewModel {
     }
 
     // MARK: - Playlist Membership Index
-
-    /// Passthrough to `membershipIndex.rebuild()` so callers (and the view's
-    /// onChange handler for the curated toggle) don't have to reach through
-    /// the coordinator.
-    func rebuildMembershipIndex() async {
-        await membershipIndex.rebuild()
-    }
-
-    /// Recomputes the exclusion set in unsorted mode after the toggle flips.
-    /// Future refills will respect the new scope; the currently-visible song
-    /// and the small in-flight queue stay as-is until naturally swiped, which
-    /// preserves the undo history.
-    @MainActor
-    func refreshUnsortedExclusion() async {
-        guard config.mode == .unsorted else { return }
-        do {
-            let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
-            let playlistSongIDs = try await service.fetchPlaylistSongIDs(
-                includeCurated: !chipToggleOn
-            )
-            let sortedIDs = fetchSortedSongIDs()
-            let recentDismissed = dismissedStore.recentSongIDs()
-            sessionExclusionSet = playlistSongIDs.union(sortedIDs).union(recentDismissed)
-        } catch {
-            print("refreshUnsortedExclusion failed: \(error)")
-        }
-    }
 
     /// Passthrough to `membershipIndex.memberships(for:)` — kept on the VM so
     /// the view's call sites (read on every drag frame) don't have to reach

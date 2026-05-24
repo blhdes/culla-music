@@ -15,7 +15,6 @@ struct MusicSwipeView: View {
     /// timer. Forwarded to the current `SongCardView` as `chromeRevealed`.
     var chromeRevealed: Bool = true
 
-    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
     /// When on (default), each new card's preview starts automatically on
     /// arrival — session entry and every swipe. The Settings toggle flips it
@@ -149,12 +148,6 @@ struct MusicSwipeView: View {
         }
         .onChange(of: viewModel.actionCount) { _, _ in
             flashUndo()
-        }
-        .onChange(of: membershipIncludeCurated) { _, _ in
-            Task {
-                await viewModel.rebuildMembershipIndex()
-                await viewModel.refreshUnsortedExclusion()
-            }
         }
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }

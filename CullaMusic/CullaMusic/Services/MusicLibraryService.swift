@@ -687,9 +687,8 @@ final class MusicLibraryService {
         case .library:
             return sortedIDs.union(dismissedIDs)
         case .unsorted:
-            let chipToggleOn = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
             do {
-                let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: !chipToggleOn)
+                let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: true)
                 return playlistIDs.union(sortedIDs).union(dismissedIDs)
             } catch {
                 print("deckExclusionSet unsorted failed: \(error)")

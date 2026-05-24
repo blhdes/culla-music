@@ -257,7 +257,13 @@ struct SourceScopePickerSheet: View {
             }
         }
         if playlistSortDescending { rows.reverse() }
-        return rows
+        // Read-only (editorial / replay / shared) playlists always sink to the
+        // bottom regardless of the user's sort — the user's own playlists are
+        // what they're usually hunting for. `filter` is stable, so the user's
+        // sort is preserved inside each group.
+        let editable = rows.filter { $0.isEditable }
+        let readOnly = rows.filter { !$0.isEditable }
+        return editable + readOnly
     }
 
     private func computeFilteredSortedArtists() -> [Artist] {
@@ -479,8 +485,8 @@ struct SourceScopePickerSheet: View {
 
     /// Track count to show, or nil to omit the badge. Editable playlists are
     /// always walked, so a missing key means a true zero. Read-only playlists
-    /// may be skipped when the curated toggle is off — in that case we'd rather
-    /// show nothing than lie with "0".
+    /// aren't in the membership index, so we'd rather show nothing than lie
+    /// with "0".
     private func displayCount(for playlist: Playlist) -> Int? {
         guard let amID = playlist.appleMusicPlaylistID else { return nil }
         if let count = trackCounts[amID] { return count }

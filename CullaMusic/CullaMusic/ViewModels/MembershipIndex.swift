@@ -189,16 +189,16 @@ final class MembershipIndex {
     // MARK: - Refresh
 
     /// Builds the per-song playlist membership index from Apple Music.
-    /// Reads the `membershipIncludeCurated` toggle to decide whether to
-    /// include editorial / replay / personalMix playlists.
+    /// Scoped to user-controlled playlists only — editorial / replay /
+    /// personalMix are intentionally excluded so the membership chips on
+    /// song cards stay readable.
     func rebuild() async {
         isRebuilding = true
         defer { isRebuilding = false }
 
-        let includeCurated = UserDefaults.standard.bool(forKey: "membershipIncludeCurated")
         do {
             let newIndex = try await service.fetchPlaylistMembershipIndex(
-                includeCurated: includeCurated
+                includeCurated: false
             )
             setIndex(newIndex)
         } catch {

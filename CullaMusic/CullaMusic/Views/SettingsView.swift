@@ -11,7 +11,6 @@ struct SettingsView: View {
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
-    @AppStorage("membershipIncludeCurated") private var membershipIncludeCurated: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
 
@@ -96,13 +95,6 @@ struct SettingsView: View {
             SettingsToggleRow(title: "Auto-play tracks", isOn: $autoplayOnSwipe)
             rowDivider
             SettingsToggleRow(title: "Start at song highlight", isOn: $useHotPreview)
-            rowDivider
-            SettingsToggleRow(title: "Include read-only playlists", isOn: $membershipIncludeCurated)
-            Text("Editorial, replay, auto-mix, and shared.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
         }
     }
 

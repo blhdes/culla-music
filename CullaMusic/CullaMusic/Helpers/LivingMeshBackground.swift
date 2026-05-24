@@ -60,9 +60,16 @@ struct LivingMeshBackground: View {
     /// 9 control points on a 3×3 grid. The four interior corners wander on a
     /// slow Lissajous curve so the gradient looks like ink drifting in water.
     /// Edges stay anchored so the gradient never "leaves" the screen.
+    ///
+    /// The side-middle points are based slightly inboard of x=0/x=1 (and the
+    /// wander amp is conservative) so a wandered coordinate can never leave
+    /// the unit square. MeshGradient does bilinear interpolation; once an
+    /// interior point crosses the boundary, the quad triangulation degenerates
+    /// and the gradient renders empty triangles ("diagonal cuts") — visible
+    /// app-wide whenever the timer ticks across the cycle.
     @available(iOS 18.0, *)
     private func meshPoints(at t: TimeInterval) -> [SIMD2<Float>] {
-        let amp: Float = 0.06  // ~6% of the screen — enough to read, never enough to distract.
+        let amp: Float = 0.045
         let speed: Float = 0.18
         let phase = Float(t) * speed
 
@@ -75,9 +82,9 @@ struct LivingMeshBackground: View {
 
         return [
             SIMD2(0, 0), SIMD2(0.5, 0), SIMD2(1, 0),
-            wander(SIMD2(0, 0.5), 0.0, 1.3),
-            wander(SIMD2(0.5, 0.5), 1.7, 2.9),
-            wander(SIMD2(1, 0.5), 3.1, 0.7),
+            wander(SIMD2(0.05, 0.5), 0.0, 1.3),
+            wander(SIMD2(0.5,  0.5), 1.7, 2.9),
+            wander(SIMD2(0.95, 0.5), 3.1, 0.7),
             SIMD2(0, 1), SIMD2(0.5, 1), SIMD2(1, 1)
         ]
     }

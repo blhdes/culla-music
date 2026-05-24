@@ -2,10 +2,11 @@ import SwiftUI
 import MusicKit
 
 /// Lets the user pick which playlists appear in the swipe sidebar (capped to
-/// `MusicSwipeViewModel.maxSidebar`) and create new ones. Redesigned around
-/// the GlassPanel vocabulary shared with Settings and LovedPlaylistPickerSheet
-/// — the New Playlist CTA is promoted to the top so it reads as the primary
-/// action instead of a list row.
+/// `MusicSwipeViewModel.maxSidebar`) and create new ones. The rows are the
+/// screen — a single glass slab on the calm mesh, with the live count baked
+/// into a subtitle line so no section-card header competes with the list. The
+/// New Playlist action lives in the toolbar as a quiet `+` because it's a
+/// utility, not the page's primary purpose.
 struct ManagePlaylistsSheet: View {
     @Bindable var viewModel: MusicSwipeViewModel
     @Environment(\.dismiss) private var dismiss
@@ -30,36 +31,41 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
+    private var isAtCapacity: Bool {
+        !viewModel.canAddToSidebar && !editablePlaylists.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 LivingMeshBackground()
 
                 ScrollView {
-                    VStack(spacing: 18) {
-                        GradientCapsuleButton(
-                            title: "New playlist",
-                            icon: "plus"
-                        ) {
-                            showCreate = true
-                        }
-
-                        GlassPanel(
-                            icon: "sidebar.right",
-                            title: "Sidebar",
-                            trailing: { sidebarCountChip }
-                        ) {
-                            sidebarContent
+                    VStack(alignment: .leading, spacing: 10) {
+                        subtitle
+                        listSlab
+                        if isAtCapacity {
+                            capacityCaption
                         }
                     }
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 24)
                 }
                 .scrollContentBackground(.hidden)
             }
             .navigationTitle("Manage Playlists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showCreate = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .fontWeight(.semibold)
+                    }
+                    .accessibilityLabel("New playlist")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
@@ -78,31 +84,27 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
-    // MARK: - Sidebar card content
+    // MARK: - Page-level caption
 
-    /// Live capacity badge rendered into the GlassPanel's trailing slot.
-    /// The numeric digits cross-fade via `.contentTransition(.numericText)` so
-    /// toggling a row reads as a single motion (row bounce + chip tick).
-    private var sidebarCountChip: some View {
-        Text("\(viewModel.sidebarCount) / \(maxSidebar)")
-            .font(.system(.caption, design: .rounded).weight(.semibold))
+    /// Quiet count line above the slab. The digits tick via
+    /// `.contentTransition(.numericText)` so toggling a row reads as a single
+    /// motion (row bounce + count tick) without needing a floating chip.
+    private var subtitle: some View {
+        Text("\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar")
+            .font(.system(.footnote, design: .rounded))
+            .foregroundStyle(.secondary)
             .monospacedDigit()
-            .foregroundStyle(.primary)
             .contentTransition(.numericText(countsDown: false))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .glassSurface(in: Capsule())
             .animation(.snappy, value: viewModel.sidebarCount)
+            .padding(.horizontal, 4)
     }
 
+    // MARK: - Single glass slab list
+
     @ViewBuilder
-    private var sidebarContent: some View {
+    private var listSlab: some View {
         if editablePlaylists.isEmpty {
-            Text("No playlists yet — create one above.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
+            emptyState
         } else {
             VStack(spacing: 4) {
                 ForEach(Array(editablePlaylists.enumerated()), id: \.element.id) { index, playlist in
@@ -112,7 +114,49 @@ struct ManagePlaylistsSheet: View {
                     }
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+            )
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("No playlists yet")
+                .font(.system(.body, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+            Text("Tap + to create your first one.")
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .padding(.horizontal, 18)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    /// Soft "you've maxed the sidebar" line below the slab. Replaces silent
+    /// `.opacity` dimming with a sentence so the user understands *why*
+    /// unselected rows are inert.
+    private var capacityCaption: some View {
+        Text("Sidebar full — turn one off to add another.")
+            .font(.system(.footnote, design: .rounded))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -164,8 +208,8 @@ struct ManagePlaylistsSheet: View {
                     .symbolEffect(.bounce, value: isOn)
             }
             .contentShape(Rectangle())
-            .padding(.vertical, 4)
-            .opacity(isTappable ? 1.0 : 0.35)
+            .padding(.vertical, 6)
+            .opacity(isTappable ? 1.0 : 0.4)
             .animation(.snappy(duration: 0.22), value: isOn)
         }
         .buttonStyle(.plain)

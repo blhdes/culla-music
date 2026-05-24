@@ -52,9 +52,14 @@ struct SongCardView: View {
                             .matchedHero(id: "heroStart", in: heroNamespace)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
                             .overlay(alignment: .center) {
-                                playButton
-                                    .opacity(chromeRevealed ? 1 : 0)
-                                    .scaleEffect(chromeRevealed ? 1 : 0.85)
+                                ZStack {
+                                    if showHotProgressRing {
+                                        hotProgressRing
+                                    }
+                                    playButton
+                                }
+                                .opacity(chromeRevealed ? 1 : 0)
+                                .scaleEffect(chromeRevealed ? 1 : 0.85)
                             }
                             .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
 
@@ -160,6 +165,28 @@ struct SongCardView: View {
                 .background(.black.opacity(0.45), in: Circle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var showHotProgressRing: Bool {
+        useHotPreview && isPlaying && playbackDuration > 0
+    }
+
+    /// Circular progress trace around the play disc — only shown for the
+    /// 30s hot-clip path, where the horizontal bar is intentionally hidden.
+    /// Mirrors `HomeArtCarouselView.progressRing` so the swipe screen and
+    /// the carousel feel like one family.
+    private var hotProgressRing: some View {
+        let progress = min(1.0, max(0, playbackPosition / playbackDuration))
+        return Circle()
+            .trim(from: 0, to: progress)
+            .stroke(
+                .white.opacity(0.92),
+                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+            )
+            .rotationEffect(.degrees(-90))
+            .animation(.linear(duration: 0.2), value: playbackPosition)
+            .frame(width: 86, height: 86)
+            .allowsHitTesting(false)
     }
 
     // Gradient scrim → bar reads against any artwork. Clipped to the artwork's

@@ -30,11 +30,19 @@ struct ProgressBarView: View {
                     .frame(width: max(geo.size.width * progress, 0))
             }
             .frame(height: 1.5)
-            .frame(maxHeight: .infinity, alignment: .center)
+            // Anchor the hairline to the bottom of the expanded touch frame
+            // (with a small inset so it lands at roughly the same visual
+            // position as before) — extra height grows *upward* into the
+            // artwork as pure hit area.
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, 10)
             .contentShape(Rectangle())
-            .gesture(scrubGesture(width: geo.size.width))
+            // `highPriorityGesture` beats the parent card-stack's own
+            // `.highPriorityGesture(dragGesture)` because the inner-most
+            // wins — without this every scrub attempt swipes the card.
+            .highPriorityGesture(scrubGesture(width: geo.size.width))
         }
-        .frame(height: 22)
+        .frame(height: 44)
     }
 
     private func scrubGesture(width: CGFloat) -> some Gesture {

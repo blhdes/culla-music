@@ -154,6 +154,9 @@ struct SettingsView: View {
             showLovedPicker = true
         } label: {
             HStack(spacing: 12) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(appAccent)
                 Text("Loved playlist")
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)

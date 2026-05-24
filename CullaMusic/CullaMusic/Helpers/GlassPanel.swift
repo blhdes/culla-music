@@ -61,7 +61,6 @@ extension GlassPanel where Trailing == EmptyView {
 // MARK: - SettingsToggleRow
 
 struct SettingsToggleRow: View {
-    let icon: String
     let title: String
     @Binding var isOn: Bool
 
@@ -69,19 +68,9 @@ struct SettingsToggleRow: View {
 
     var body: some View {
         Toggle(isOn: $isOn) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color.secondary.opacity(0.14))
-                        .frame(width: 30, height: 30)
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                Text(title)
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(.primary)
-            }
+            Text(title)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(.primary)
         }
         .tint(appAccent)
     }
@@ -163,8 +152,8 @@ struct ThemeChipPicker: View {
                 ThemeChipPicker(selection: .constant("dark"))
             }
             GlassPanel(icon: "waveform", title: "Behavior") {
-                SettingsToggleRow(icon: "hand.tap.fill", title: "Haptics", isOn: .constant(true))
-                SettingsToggleRow(icon: "bolt.heart.fill", title: "Start at song highlight", isOn: .constant(false))
+                SettingsToggleRow(title: "Haptics", isOn: .constant(true))
+                SettingsToggleRow(title: "Start at song highlight", isOn: .constant(false))
             }
         }
         .padding(20)

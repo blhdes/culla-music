@@ -18,6 +18,7 @@ struct SettingsView: View {
     @Query(sort: \Playlist.displayOrder) private var allPlaylists: [Playlist]
 
     @State private var showLovedPicker = false
+    @State private var showColorPicker = false
 
     private var pickablePlaylists: [Playlist] {
         allPlaylists.filter { $0.isEditable && $0.appleMusicPlaylistID != nil }
@@ -28,24 +29,31 @@ struct SettingsView: View {
         return pickablePlaylists.first { $0.appleMusicPlaylistID == lovedPlaylistID }
     }
 
+    private var currentPalette: AccentPalette {
+        AccentPalette(rawValue: accentPaletteRaw) ?? .blue
+    }
+
+    private var themeLabel: String {
+        switch colorSchemeRaw {
+        case "light": "Light"
+        case "dark":  "Dark"
+        default:      "System"
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ZStack {
-                LivingMeshBackground()
-
-                ScrollView {
-                    VStack(spacing: 18) {
-                        appearanceCard
-                        behaviorCard
-                        playlistScopeCard
-                        upSwipeCard
-                        authorCard
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 20)
+            ScrollView {
+                VStack(spacing: 22) {
+                    lookCard
+                    playbackCard
+                    personalCard
                 }
-                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemBackground))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,101 +70,97 @@ struct SettingsView: View {
                     lovedPlaylistID = picked?.appleMusicPlaylistID ?? ""
                 }
             }
+            .sheet(isPresented: $showColorPicker) {
+                AccentPalettePickerSheet(selectedRaw: $accentPaletteRaw)
+            }
         }
     }
 
     // MARK: - Cards
 
-    private var appearanceCard: some View {
-        GlassPanel(icon: "paintbrush.fill", title: "Appearance") {
-            ThemeChipPicker(selection: $colorSchemeRaw)
-
-            SettingsToggleRow(
-                icon: "wand.and.stars",
-                title: "Match song artwork",
-                isOn: $useDynamicAccent
-            )
-
-            // The palette swatches stay live regardless of "Match song
-            // artwork". That toggle only affects the swipe screen — every
-            // other surface (Home, sidebar, sheets, gradient buttons, mesh
-            // background) reads the palette directly, so disabling the
-            // swatches when the toggle is on would mislead the user into
-            // thinking the chosen color stops mattering. It still does.
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 44), spacing: 14)],
-                alignment: .leading,
-                spacing: 14
-            ) {
-                ForEach(AccentPalette.allCases) { palette in
-                    paletteSwatch(palette)
-                }
-            }
-
-            cardFooter("Used across the app. Swipe overrides per-song when Match song artwork is on.")
+    private var lookCard: some View {
+        SettingsCard(title: "Look") {
+            themeMenuRow
+            rowDivider
+            colorRow
+            rowDivider
+            SettingsToggleRow(title: "Match song artwork", isOn: $useDynamicAccent)
         }
     }
 
-    private var behaviorCard: some View {
-        GlassPanel(icon: "waveform", title: "Behavior") {
-            VStack(spacing: 14) {
-                SettingsToggleRow(icon: "hand.tap.fill", title: "Haptics", isOn: $hapticsEnabled)
-                SettingsToggleRow(icon: "play.circle.fill", title: "Auto-play tracks", isOn: $autoplayOnSwipe)
-                SettingsToggleRow(icon: "bolt.heart.fill", title: "Start at song highlight", isOn: $useHotPreview)
-                cardFooter("Auto-play starts each new card's preview. Highlight starts at the curated 30s clip when available.")
-            }
+    private var playbackCard: some View {
+        SettingsCard(title: "Playback") {
+            SettingsToggleRow(title: "Haptics", isOn: $hapticsEnabled)
+            rowDivider
+            SettingsToggleRow(title: "Auto-play tracks", isOn: $autoplayOnSwipe)
+            rowDivider
+            SettingsToggleRow(title: "Start at song highlight", isOn: $useHotPreview)
+            rowDivider
+            SettingsToggleRow(title: "Include read-only playlists", isOn: $membershipIncludeCurated)
+            Text("Editorial, replay, auto-mix, and shared.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
         }
     }
 
-    private var playlistScopeCard: some View {
-        GlassPanel(icon: "music.note.list", title: "Playlist scope") {
-            VStack(spacing: 12) {
-                SettingsToggleRow(icon: "lock.fill", title: "Include read-only playlists", isOn: $membershipIncludeCurated)
-                cardFooter("Editorial, replay, auto-mix, and shared.")
-            }
+    private var personalCard: some View {
+        SettingsCard(title: "Personal") {
+            lovedRow
+            rowDivider
+            TextField("Your name", text: $authorDisplayName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled(true)
+                .font(.system(.body, design: .rounded))
+                .padding(.vertical, 4)
         }
     }
 
-    private var upSwipeCard: some View {
-        GlassPanel(icon: "arrow.up.heart.fill", title: "Up-swipe") {
-            VStack(spacing: 12) {
-                lovedTargetRow
-                cardFooter("Auto uses a Culla Loves playlist.")
+    // MARK: - Rows
+
+    private var themeMenuRow: some View {
+        Menu {
+            Picker("Theme", selection: $colorSchemeRaw) {
+                Text("System").tag("system")
+                Text("Light").tag("light")
+                Text("Dark").tag("dark")
             }
+        } label: {
+            menuRowLabel(title: "Theme", value: themeLabel)
         }
+        .buttonStyle(.plain)
     }
 
-    private var authorCard: some View {
-        GlassPanel(icon: "pencil.tip", title: "Playlists") {
-            VStack(spacing: 12) {
-                TextField("Your name", text: $authorDisplayName)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled(true)
+    private var colorRow: some View {
+        Button {
+            showColorPicker = true
+        } label: {
+            HStack(spacing: 12) {
+                Text("Color")
                     .font(.system(.body, design: .rounded))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .glassSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                cardFooter("Author shown on new Apple Music playlists.")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Circle()
+                    .fill(currentPalette.color)
+                    .frame(width: 16, height: 16)
+                Text(currentPalette.label)
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
-    // MARK: - Subviews
-
-    @ViewBuilder
-    private var lovedTargetRow: some View {
+    private var lovedRow: some View {
         Button {
             showLovedPicker = true
         } label: {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(Color.pink.opacity(0.18))
-                        .frame(width: 30, height: 30)
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.pink)
-                }
                 Text("Loved playlist")
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)
@@ -174,34 +178,55 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func cardFooter(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func menuRowLabel(title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
     }
 
-    @ViewBuilder
-    private func paletteSwatch(_ palette: AccentPalette) -> some View {
-        let isSelected = accentPaletteRaw == palette.rawValue
-        Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                accentPaletteRaw = palette.rawValue
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.06))
+            .frame(height: 0.5)
+    }
+}
+
+// MARK: - SettingsCard
+
+/// Quieter sibling of `GlassPanel`. No icon, sentence-case title in a calmer
+/// weight, tighter row stacking — used only by SettingsView so the rest of the
+/// app's glass vocabulary (Manage, LovedPicker, AccentPicker) stays untouched.
+private struct SettingsCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.system(.callout, design: .rounded).weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                content()
             }
-        } label: {
-            Circle()
-                .fill(palette.color)
-                .frame(width: 32, height: 32)
-                .shadow(color: palette.color.opacity(isSelected ? 0.55 : 0.0), radius: 10, y: 4)
-                .overlay {
-                    Circle()
-                        .stroke(.primary, lineWidth: isSelected ? 2 : 0)
-                        .padding(-3)
-                }
-                .scaleEffect(isSelected ? 1.08 : 1.0)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(palette.label)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        )
     }
 }
 

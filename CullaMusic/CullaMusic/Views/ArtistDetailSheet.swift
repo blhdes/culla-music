@@ -109,6 +109,16 @@ private struct ArtistDetailView: View {
         return components?.url
     }
 
+    /// Direct catalog page when we have one; otherwise an Apple Music search
+    /// for the artist, so the button always resolves — library-only artists
+    /// have no catalog `url`. Both are universal links that open Apple Music.
+    private var appleMusicURL: URL {
+        if let url = current.url { return url }
+        var components = URLComponents(string: "https://music.apple.com/search")
+        components?.queryItems = [URLQueryItem(name: "term", value: artist.name)]
+        return components?.url ?? URL(string: "https://music.apple.com")!
+    }
+
     var body: some View {
         ScrollView {
             // Horizontal padding is applied per-section instead of on this
@@ -123,11 +133,9 @@ private struct ArtistDetailView: View {
                 bioSection
                 topSongsSection
                 similarArtistsSection
-                VStack(spacing: 12) {
+                HStack(spacing: 12) {
                     googleButton
-                    if let appleMusicURL = current.url {
-                        appleMusicButton(url: appleMusicURL)
-                    }
+                    appleMusicButton(url: appleMusicURL)
                 }
                 .padding(.horizontal, 20)
             }
@@ -261,15 +269,9 @@ private struct ArtistDetailView: View {
                         .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-                )
                 .sheet(isPresented: $showWikipedia) {
                     SafariView(url: bio.pageURL).ignoresSafeArea()
                 }
@@ -306,6 +308,7 @@ private struct ArtistDetailView: View {
         } else if !songs.isEmpty {
             VStack(spacing: 12) {
                 sectionHeader("Top Songs")
+                    .padding(.horizontal, 20)
                 VStack(spacing: 0) {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                         let isPlayingThis = service.isPlayingPreview &&
@@ -321,17 +324,11 @@ private struct ArtistDetailView: View {
                         }
                         .buttonStyle(.plain)
                         if index < songs.count - 1 {
-                            Divider().padding(.leading, 68)
+                            Divider().padding(.leading, 76)
                         }
                     }
                 }
-                .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-                )
             }
-            .padding(.horizontal, 20)
         }
     }
 
@@ -412,6 +409,8 @@ private struct TopSongRow: View {
     let song: Song
     let isPlaying: Bool
 
+    @Environment(\.appAccent) private var appAccent
+
     var body: some View {
         HStack(spacing: 12) {
             Group {
@@ -426,7 +425,7 @@ private struct TopSongRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
-                    .foregroundStyle(isPlaying ? .pink : .primary)
+                    .foregroundStyle(isPlaying ? appAccent : .primary)
                     .lineLimit(1)
                 if let album = song.albumTitle {
                     Text(album)
@@ -440,10 +439,10 @@ private struct TopSongRow: View {
 
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.footnote)
-                .foregroundStyle(isPlaying ? Color.pink : .secondary)
+                .foregroundStyle(isPlaying ? appAccent : .secondary)
                 .contentTransition(.symbolEffect(.replace))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
@@ -481,8 +480,8 @@ private struct SimilarArtistTile: View {
 /// Apple's official "Listen on Apple Music" lockup. Per identity guidelines
 /// the artwork must not be modified, recolored, or combined with custom text,
 /// so we render it as a single tappable image — no surrounding pill, no extra
-/// label. Height ~40pt keeps it above the 30px digital minimum and gives a
-/// comfortable tap target.
+/// label. Sits in an equal-width 48pt slot to pair with the Google button;
+/// the badge scales to fit, staying above the 30px digital minimum.
 private struct AppleMusicLinkButton: View {
     let action: () -> Void
 
@@ -492,9 +491,9 @@ private struct AppleMusicLinkButton: View {
                 .resizable()
                 .renderingMode(.original)
                 .scaledToFit()
-                .frame(height: 40)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Listen on Apple Music")
@@ -506,25 +505,24 @@ private struct GoogleSearchButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image("google-g")
                     .resizable()
                     .renderingMode(.original)
                     .scaledToFit()
                     .frame(width: 18, height: 18)
-                Text("Search on Google")
+                Text("Google")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
             .background(
                 Capsule().fill(Color(.secondarySystemBackground))
             )
             .overlay(
                 Capsule().strokeBorder(.quaternary, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -533,11 +531,21 @@ private struct GoogleSearchButton: View {
 private struct FallbackArtistView: View {
     let name: String
     @State private var showGoogle = false
+    @Environment(\.openURL) private var openURL
 
     private var googleURL: URL? {
         var components = URLComponents(string: "https://www.google.com/search")
         components?.queryItems = [URLQueryItem(name: "q", value: name)]
         return components?.url
+    }
+
+    /// Apple Music search for the artist — there's no catalog entity here, but
+    /// the link still opens the app to the artist's results, so the action is
+    /// always available (matches the resolved hub's footer).
+    private var appleMusicURL: URL {
+        var components = URLComponents(string: "https://music.apple.com/search")
+        components?.queryItems = [URLQueryItem(name: "term", value: name)]
+        return components?.url ?? URL(string: "https://music.apple.com")!
     }
 
     var body: some View {
@@ -554,8 +562,11 @@ private struct FallbackArtistView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            GoogleSearchButton { showGoogle = true }
-                .disabled(googleURL == nil)
+            HStack(spacing: 12) {
+                GoogleSearchButton { showGoogle = true }
+                    .disabled(googleURL == nil)
+                AppleMusicLinkButton { openURL(appleMusicURL) }
+            }
         }
         .padding()
         .sheet(isPresented: $showGoogle) {

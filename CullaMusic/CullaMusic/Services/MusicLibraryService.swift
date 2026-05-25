@@ -719,26 +719,40 @@ final class MusicLibraryService {
     /// library-only or uploaded tracks. Returns nil only when both paths miss —
     /// the caller degrades to a name-only view in that case.
     func resolveArtist(for song: Song) async throws -> Artist? {
-        let populated = try await song.with([.artists])
-        if let direct = populated.artists?.first {
-            return direct
+        // Lead with the track's own `artistName`, resolved against the catalog.
+        // The song's `.artists` relationship returns the *album* artist on
+        // compilation tracks ("Various Artists") and, worse, a library artist
+        // whose ID 404s on the topSongs/similarArtists catalog request the hub
+        // then makes. Searching the catalog by the track artist name avoids
+        // both: we get the concrete per-track artist as a catalog entity.
+        let term = song.artistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !term.isEmpty, !Self.isVariousArtists(term) {
+            var request = MusicCatalogSearchRequest(term: term, types: [Artist.self])
+            request.limit = 5
+            let response = try await request.response()
+
+            // Only accept an exact (case-insensitive) name match. Without this
+            // guard a library track by "Tyler" would resolve to whichever
+            // Tyler the catalog returned first.
+            let lower = term.lowercased()
+            if let match = response.artists.first(where: { $0.name.lowercased() == lower }) {
+                return match
+            }
         }
 
-        let term = song.artistName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return nil }
+        // Fallback for names the catalog search misses (uploaded / local
+        // tracks, unusual spellings): the song's own artist relationship.
+        // Nil → caller renders FallbackArtistView with a Google search.
+        let populated = try await song.with([.artists])
+        return populated.artists?.first
+    }
 
-        var request = MusicCatalogSearchRequest(term: term, types: [Artist.self])
-        request.limit = 5
-        let response = try await request.response()
-
-        // Only return an exact (case-insensitive) name match. Without this
-        // guard, the previous `?? response.artists.first` fallback would
-        // surface the wrong artist on common-name collisions (a library
-        // track by "Tyler" would resolve to whichever Tyler the catalog
-        // returned first). Nil → caller renders FallbackArtistView, which
-        // already handles "no rich data" with a Google search.
-        let lower = term.lowercased()
-        return response.artists.first(where: { $0.name.lowercased() == lower })
+    /// Compilation albums tag tracks with an album artist of "Various Artists"
+    /// (and localized equivalents). That's never a real artist to look up, so
+    /// we skip the catalog search and fall through to the per-track relationship.
+    private static func isVariousArtists(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower == "various artists" || lower.contains("various artist")
     }
 
     /// Hydrates an `Artist` with the relationships the hub renders.

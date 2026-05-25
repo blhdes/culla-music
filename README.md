@@ -19,7 +19,8 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
 - **Auto-play on swipe** (default on) — each new card's preview starts the moment the card lands. Toggle off in Settings to keep the swipe screen silent until you tap play. Combine with **Hot-clip preview** for Apple Music's curated ~30 s preview instead of streaming from 0:00.
 - **Scrubbable progress bar** with haptic ticks; cross-fades on track change.
 - **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed. The Loved chip is marked with a ♥.
-- **Artist hub** — info button on the swipe card opens a sheet with the artist's top songs, similar artists, and a Google fallback (branded, multi-color "G"). Tapping a similar artist drills deeper without dismissing back to the deck.
+- **Artist hub** — info button on the swipe card opens a sheet with the artist's top songs, similar artists, an **About** blurb, and a Google fallback (branded, multi-color "G"). Tapping a similar artist drills deeper without dismissing back to the deck.
+- **Artist "About"** — a one-paragraph bio pulled from Wikipedia, shown in a collapsible card: tap to expand the full text (one-way), tap again to open the article. Names that collide with something else ("Air" the band vs. the gas) are disambiguated through MusicBrainz → Wikidata; when no reliable artist match exists the section hides rather than show a wrong bio. Bios are cached on disk for a week (misses included, so the long tail isn't re-fetched every open).
 - **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, auto-play on swipe, hot-clip preview, author-name override for created playlists, read-only-playlist scope toggle, up-swipe Loved-playlist target.
 - **Undo history** — every swipe is reversible, including the playlist write on Apple Music's side. Failed remote writes roll back the local state too, so a swipe that didn't reach Apple Music leaves no trace.
 
@@ -61,13 +62,15 @@ CullaMusic/
     ├── CullaMusicApp.swift
     ├── Models/        — Playlist, SortedSong, DismissedSong, SwipeConfig
     ├── Services/      — MusicLibraryService (MusicKit, players, playlist CRUD),
-    │                    PlaylistTracksCache (actor-isolated membership cache)
+    │                    PlaylistTracksCache (actor-isolated membership cache),
+    │                    ArtistBioService + ArtistBioCache + MusicBrainzClient
+    │                    (Wikipedia bios with MusicBrainz disambiguation)
     ├── ViewModels/    — MusicSwipeViewModel (deck state) + extracted coordinators:
     │                    UndoCoordinator, MembershipIndex, LovedPlaylistResolver,
     │                    DismissedDateStore
     ├── Views/         — Home, Swipe, Sidebar, Manage, Settings sheets
     ├── Helpers/       — AccentPalette + AccentEnvironment + AccentExtractor,
-    │                    Haptics, LinearLoader
+    │                    Haptics, LinearLoader, HTTP (shared User-Agent fetch)
     └── Assets.xcassets/
 ```
 
@@ -81,6 +84,7 @@ See `AGENTS.md` for the contributor-side guide (conventions, build commands, com
 - **SwiftData** for local persistence (`SortedSong`, `DismissedSong`, `Playlist` rows).
 - **MusicKit** for Apple Music access — `MusicLibraryRequest` for library reads, `MusicLibrary.shared` for playlist edits, `Playlist.with([.tracks])` for membership queries.
 - **`ApplicationMusicPlayer`** for full-song playback; **`AVPlayer`** for hot-clip previews (with an `AVMutableAudioMix` volume ramp to avoid boundary clicks).
+- **Wikipedia REST + MusicBrainz + Wikidata** for artist bios — all auth-free. MusicBrainz disambiguates by MBID (rate-limited to 1 req/sec via an actor gate, descriptive `User-Agent` on every call); results are cached to disk.
 
 ---
 

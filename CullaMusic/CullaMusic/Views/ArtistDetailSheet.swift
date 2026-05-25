@@ -78,7 +78,25 @@ private struct ArtistDetailView: View {
     @State private var detail: Artist?
     @State private var isLoadingDetail = true
     @State private var showGoogle = false
+    @State private var bioState: BioState = .loading
+    @State private var showWikipedia = false
+    @State private var bioExpanded = false
+    @State private var bioIsTruncated = false
+
+    /// True only while there's still hidden text to reveal. When the bio fits
+    /// in the clamp (short bios) or is already expanded, the card's tap opens
+    /// Wikipedia directly instead of doing a no-op "expand".
+    private var bioCanExpand: Bool { bioIsTruncated && !bioExpanded }
     @Environment(\.openURL) private var openURL
+
+    /// `empty` (no/likely-wrong Wikipedia page) hides the section silently;
+    /// `failed` (network/decode error) is transient, so it shows a retry row.
+    private enum BioState {
+        case loading
+        case loaded(ArtistBioService.ArtistBio)
+        case empty
+        case failed
+    }
 
     /// Falls back to the seed `artist` until `detail` (with relationships)
     /// arrives; that way the hero / genres render instantly while top songs
@@ -102,6 +120,7 @@ private struct ArtistDetailView: View {
                 hero
                     .padding(.horizontal, 20)
                 if !(current.genreNames ?? []).isEmpty { genreChips }
+                bioSection
                 topSongsSection
                 similarArtistsSection
                 VStack(spacing: 12) {
@@ -117,6 +136,7 @@ private struct ArtistDetailView: View {
         .navigationTitle(artist.name)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: artist.id.rawValue) { await loadDetail() }
+        .task(id: artist.id.rawValue) { await loadBio() }
         .sheet(isPresented: $showGoogle) {
             if let googleURL {
                 SafariView(url: googleURL)
@@ -156,9 +176,9 @@ private struct ArtistDetailView: View {
         }
     }
 
-    /// Subtle accent-tinted shadow when we have artwork (gives the hero a halo
-    /// that ties it to the rest of the accent vocabulary), neutral when we
-    /// don't (the placeholder reads more cleanly without a colored halo).
+    /// Neutral depth shadow — slightly deeper when we have artwork so the hero
+    /// lifts off the page, lighter for the placeholder. No accent tint; the
+    /// artwork carries its own colour.
     private var heroShadow: Color {
         current.artwork == nil ? .black.opacity(0.18) : .black.opacity(0.28)
     }
@@ -181,6 +201,94 @@ private struct ArtistDetailView: View {
             }
         }
         .contentMargins(.horizontal, 20, for: .scrollContent)
+    }
+
+    @ViewBuilder
+    private var bioSection: some View {
+        switch bioState {
+        case .empty:
+            EmptyView()   // silent — no page, or a likely-wrong match
+        case .loading:
+            VStack(spacing: 12) {
+                sectionHeader("About")
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .padding(.horizontal, 20)
+        case .loaded(let bio):
+            VStack(spacing: 12) {
+                sectionHeader("About")
+                Button {
+                    // First tap expands (one-way — never collapses back);
+                    // once fully shown, the next tap opens the article.
+                    if bioCanExpand {
+                        withAnimation(.easeInOut(duration: 0.25)) { bioExpanded = true }
+                    } else {
+                        showWikipedia = true
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(bio.extract)
+                            .font(.callout)
+                            .foregroundStyle(.primary)
+                            .lineLimit(bioExpanded ? nil : 4)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.leading)
+                            .background {
+                                // Render a hidden full-length copy behind the
+                                // clamped text. ViewThatFits uses it when it
+                                // fits; otherwise the clear fallback flags the
+                                // bio as truncated so we show "More".
+                                if !bioExpanded {
+                                    ViewThatFits(in: .vertical) {
+                                        Text(bio.extract).font(.callout).hidden()
+                                        Color.clear.onAppear { bioIsTruncated = true }
+                                    }
+                                }
+                            }
+                        if let descriptor = bio.descriptor {
+                            Text(descriptor)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 6) {
+                            Image(systemName: bioCanExpand ? "chevron.down" : "arrow.up.right")
+                                .contentTransition(.symbolEffect(.replace))
+                            Text(bioCanExpand ? "More" : "Read on Wikipedia")
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+                )
+                .sheet(isPresented: $showWikipedia) {
+                    SafariView(url: bio.pageURL).ignoresSafeArea()
+                }
+            }
+            .padding(.horizontal, 20)
+        case .failed:
+            VStack(spacing: 12) {
+                sectionHeader("About")
+                HStack {
+                    Text("Couldn't load bio.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Retry") { Task { await loadBio() } }
+                        .font(.footnote.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 20)
+        }
     }
 
     @ViewBuilder
@@ -281,6 +389,20 @@ private struct ArtistDetailView: View {
             print("ArtistDetailView.loadDetail failed: \(error)")
         }
         isLoadingDetail = false
+    }
+
+    private func loadBio() async {
+        bioState = .loading
+        do {
+            if let bio = try await ArtistBioService.shared.bio(forName: artist.name) {
+                bioState = .loaded(bio)
+            } else {
+                bioState = .empty
+            }
+        } catch {
+            print("ArtistDetailView.loadBio failed: \(error)")
+            bioState = .failed
+        }
     }
 }
 

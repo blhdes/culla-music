@@ -18,12 +18,7 @@ struct PlaylistSidebarView: View {
                 emptyState
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(playlists.enumerated()), id: \.element.id) { index, playlist in
-                        if index > 0 {
-                            Rectangle()
-                                .fill(.white.opacity(0.08))
-                                .frame(height: 0.5)
-                        }
+                    ForEach(playlists, id: \.id) { playlist in
                         PlaylistSidebarItem(
                             playlist: playlist,
                             isHighlighted: playlist.id == highlightedID,

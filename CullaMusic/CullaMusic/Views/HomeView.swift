@@ -866,7 +866,7 @@ private struct ArtistThumbnail: View {
 
 /// One row in the mode selector. Glass surface on iOS 26 (via `glassSurface`),
 /// `.thinMaterial` fallback elsewhere. Selected tile picks up an accent tint,
-/// halo shadow, and trailing chevron to telegraph "this is the deck you open".
+/// border, and trailing chevron to telegraph "this is the deck you open".
 private struct ModeTile: View {
     let mode: ReviewMode
     let isSelected: Bool
@@ -917,11 +917,6 @@ private struct ModeTile: View {
                         isSelected ? appAccent.opacity(0.45) : .white.opacity(0.06),
                         lineWidth: isSelected ? 1.4 : 1
                     )
-            )
-            .shadow(
-                color: isSelected ? appAccent.opacity(0.28) : .clear,
-                radius: 16,
-                y: 8
             )
         }
         .buttonStyle(.plain)

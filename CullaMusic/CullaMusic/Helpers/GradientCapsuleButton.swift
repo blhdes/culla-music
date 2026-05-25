@@ -52,7 +52,7 @@ struct GradientCapsuleButton: View {
                 Capsule()
                     .strokeBorder(.white.opacity(0.22), lineWidth: 1)
             }
-            .shadow(color: appAccent.opacity(0.55), radius: 22, y: 10)
+            .shadow(color: appAccent.opacity(0.30), radius: 18, y: 8)
         }
         .buttonStyle(.plain)
     }

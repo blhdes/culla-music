@@ -81,7 +81,7 @@ struct SettingsToggleRow: View {
 /// Three glass capsules — System / Light / Dark. Replaces `.pickerStyle(.segmented)`
 /// so the theme picker shares the screen's glass vocabulary instead of dropping
 /// to a stock UIKit segmented control. The selected chip picks up the accent
-/// tint + a soft halo, mirroring the mode-tile pattern on Home.
+/// tint + border, mirroring the mode-tile pattern on Home.
 struct ThemeChipPicker: View {
     @Binding var selection: String
 
@@ -133,11 +133,6 @@ struct ThemeChipPicker: View {
                         isSelected ? appAccent.opacity(0.45) : .white.opacity(0.06),
                         lineWidth: isSelected ? 1.4 : 1
                     )
-            )
-            .shadow(
-                color: isSelected ? appAccent.opacity(0.22) : .clear,
-                radius: 12,
-                y: 6
             )
         }
         .buttonStyle(.plain)

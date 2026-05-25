@@ -163,7 +163,7 @@ struct HomeHeroArtStack: View {
         let cards = combinedArtworks
         if cards.isEmpty {
             placeholderCard
-                .shadow(color: appAccent.opacity(0.35), radius: pulse ? 28 : 16, y: 12)
+                .shadow(color: .black.opacity(0.22), radius: 18, y: 12)
                 .scaleEffect(pulse ? 1.0 : 0.96)
                 .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
                 .transition(.scale(scale: 0.9).combined(with: .opacity))
@@ -256,14 +256,14 @@ struct HomeHeroArtStack: View {
     /// Renders one card with the layout values resolved for the current
     /// drag. All cards render at the same base size; scale is what makes a
     /// card read as "front" or "back". Shadow strength tracks scale too, so
-    /// whichever card is currently closest to the centre carries the accent
-    /// halo and the bigger lift — that's how the focus visibly shifts to
+    /// whichever card is currently closest to the centre carries the deeper
+    /// shadow and the bigger lift — that's how the focus visibly shifts to
     /// whichever cover the user has dragged to the middle.
     private func scrubCard(artwork: Artwork, layout: ScrubLayout) -> some View {
         // Continuous "centre-ness": 1.0 at the centre slot's scale, fading
-        // to 0 as the card shrinks toward the side scales. Used to blend
-        // between the accent halo and the plain depth shadow as the user
-        // drags a new cover into focus.
+        // to 0 as the card shrinks toward the side scales. Used to scale
+        // the plain depth shadow up as the user drags a new cover into
+        // focus.
         let centreness = max(0, min(1, (layout.scale - 0.92) / (1.0 - 0.92)))
 
         return ArtworkImage(artwork, width: size, height: size)
@@ -277,13 +277,13 @@ struct HomeHeroArtStack: View {
             .rotationEffect(.degrees(layout.rotation))
             .offset(layout.offset)
             .opacity(layout.opacity)
-            // Single accent halo whose strength rides `centreness`; off-centre
-            // cards naturally fade to no shadow. Dropping the secondary depth
-            // shadow that used to cross-fade in here halves the per-tick
-            // offscreen-shadow renders without changing the focus-card halo.
+            // Neutral depth shadow whose strength rides `centreness`; the
+            // centre card sits slightly higher off the page while off-centre
+            // cards flatten toward the background. No accent tint — the
+            // artwork and the artwork-keyed ambient glow carry all the colour.
             .shadow(
-                color: appAccent.opacity(0.35 * centreness),
-                radius: 16 + (pulse ? 12 : 0) * centreness,
+                color: .black.opacity(0.18 + 0.10 * centreness),
+                radius: 14 + 6 * centreness,
                 y: 6 + 6 * centreness
             )
     }
@@ -396,7 +396,7 @@ struct HomeHeroArtStack: View {
                 EmptyView() // unreachable — `sourcedStack` only renders with a source
             }
         }
-        .shadow(color: appAccent.opacity(0.35), radius: pulse ? 28 : 16, y: 12)
+        .shadow(color: .black.opacity(0.22), radius: 18, y: 12)
         .scaleEffect(pulse ? 1.0 : 0.96)
         .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
         .transition(.scale(scale: 0.9).combined(with: .opacity))

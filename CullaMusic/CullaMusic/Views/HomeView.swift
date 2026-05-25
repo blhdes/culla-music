@@ -864,9 +864,11 @@ private struct ArtistThumbnail: View {
 
 // MARK: - ModeTile
 
-/// One row in the mode selector. Glass surface on iOS 26 (via `glassSurface`),
-/// `.thinMaterial` fallback elsewhere. Selected tile picks up an accent tint,
-/// border, and trailing chevron to telegraph "this is the deck you open".
+/// One row in the mode selector. Unselected tiles sit on a glass surface
+/// (iOS 26) / `.thinMaterial` fallback. The selected tile fills solid with the
+/// accent gradient and flips its label, icon, and count to a contrast-aware
+/// foreground (`Color.idealForeground`) so it reads clearly on any palette —
+/// the fill alone telegraphs "this is the deck you open", no accent halo.
 private struct ModeTile: View {
     let mode: ReviewMode
     let isSelected: Bool
@@ -877,6 +879,11 @@ private struct ModeTile: View {
 
     @Environment(\.appAccent) private var appAccent
 
+    /// Foreground for the selected (accent-filled) state — white on dark
+    /// swatches, near-black on light ones (Amber, Rose) so the label stays
+    /// legible whatever the accent.
+    private var accentForeground: Color { appAccent.idealForeground }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 14) {
@@ -885,10 +892,10 @@ private struct ModeTile: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.title)
                         .font(.system(.body, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(isSelected ? accentForeground : .primary)
                     Text(mode.description)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isSelected ? accentForeground.opacity(0.82) : .secondary)
                         .lineLimit(1)
                 }
 
@@ -899,23 +906,36 @@ private struct ModeTile: View {
                 if isSelected {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(appAccent)
+                        .foregroundStyle(accentForeground)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
+            // Selected → a confident solid accent fill (same gradient
+            // vocabulary as the Start CTA). Sits in front of the glass below
+            // so the white/near-black label reads against an opaque surface
+            // instead of a muddy tint. Unselected → nothing here, just glass.
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [appAccent, appAccent.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .glassSurface(
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous),
-                tint: isSelected ? appAccent : nil,
                 interactive: true
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(
-                        isSelected ? appAccent.opacity(0.45) : .white.opacity(0.06),
-                        lineWidth: isSelected ? 1.4 : 1
+                        isSelected ? .white.opacity(0.20) : .white.opacity(0.06),
+                        lineWidth: 1
                     )
             )
         }
@@ -929,11 +949,11 @@ private struct ModeTile: View {
     private var iconBadge: some View {
         ZStack {
             Circle()
-                .fill(isSelected ? appAccent.opacity(0.22) : Color.secondary.opacity(0.12))
+                .fill(isSelected ? accentForeground.opacity(0.20) : Color.secondary.opacity(0.12))
                 .frame(width: 40, height: 40)
             Image(systemName: mode.icon)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(isSelected ? appAccent : .secondary)
+                .foregroundStyle(isSelected ? accentForeground : .secondary)
                 .symbolEffect(.bounce, value: isSelected)
         }
     }
@@ -946,7 +966,7 @@ private struct ModeTile: View {
             } else if let count {
                 Text(count.formatted())
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                    .foregroundStyle(isSelected ? appAccent : .secondary)
+                    .foregroundStyle(isSelected ? accentForeground : .secondary)
                     .monospacedDigit()
                     .contentTransition(.numericText(countsDown: true))
             }

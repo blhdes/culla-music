@@ -223,12 +223,13 @@ final class MusicSwipeViewModel {
 
                 if let existing = localByAMID[amID] {
                     let wasEditable = existing.isEditable
-                    // Sticky-downgrade: once a playlist is known read-only
-                    // (heuristic match OR a write that actually failed via
-                    // the self-heal path in `loveCurrent`), keep it that
-                    // way. Sync can downgrade an editable playlist but must
-                    // never re-upgrade a read-only one.
-                    let newEditable = wasEditable && editable
+                    // Recompute editability fresh from Apple's current metadata
+                    // every sync — no one-way latch. The only demotion that
+                    // sticks is `writeConfirmedReadOnly`, set when a write
+                    // actually failed against a non-system playlist; that can't
+                    // be re-derived from kind/name, so it's preserved here and
+                    // cleared only on a successful write.
+                    let newEditable = editable && !existing.writeConfirmedReadOnly
                     existing.isEditable = newEditable
                     existing.name = amPlaylist.name
 
@@ -372,8 +373,10 @@ final class MusicSwipeViewModel {
             advance()
 
             Task { @MainActor in
-                do { try await service.addSong(song, toPlaylistID: amID) }
-                catch { setToast("Couldn't add to \(playlist.name)") }
+                do {
+                    try await service.addSong(song, toPlaylistID: amID)
+                    lovedResolver.confirmWritable(playlist)
+                } catch { setToast("Couldn't add to \(playlist.name)") }
             }
             return
         }
@@ -392,6 +395,7 @@ final class MusicSwipeViewModel {
         Task { @MainActor in
             do {
                 try await service.addSong(song, toPlaylistID: amID)
+                lovedResolver.confirmWritable(playlist)
                 try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
             } catch {
                 setToast("Couldn't add to \(playlist.name)")
@@ -580,6 +584,7 @@ final class MusicSwipeViewModel {
 
             do {
                 try await service.addSong(song, toPlaylistID: amID)
+                lovedResolver.confirmWritable(playlist)
             } catch {
                 print("loveCurrent addSong failed: \(error)")
                 // Either way, undo the optimistic local write so the song

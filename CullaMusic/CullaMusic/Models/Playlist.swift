@@ -17,11 +17,19 @@ final class Playlist {
     /// User-controlled: which playlists appear in the right-swipe sidebar (capped to 5).
     var isInSidebar: Bool = false
 
-    /// True for user-owned writable playlists (MusicKit `curatorName == nil`).
-    /// False for Apple editorial content and playlists shared by other users
-    /// (both have curatorName populated).
+    /// Whether this playlist accepts writes. Recomputed from Apple's current
+    /// `Playlist.Kind` / name on every sync (see `computeEditability`) — it is
+    /// NOT latched, so a playlist Apple reports as writable always recovers,
+    /// even if an older heuristic once demoted it.
     /// Only editable playlists can be sorted into or added to the sidebar.
     var isEditable: Bool = true
+
+    /// Set only when a write to this playlist *actually failed* against a
+    /// non-system target (the self-heal path for unknown-locale smart
+    /// playlists). This is the one demotion that can't be re-derived from
+    /// Apple's metadata, so it persists across syncs — and is cleared the
+    /// moment a write to the playlist succeeds.
+    var writeConfirmedReadOnly: Bool = false
 
     @Relationship(deleteRule: .cascade, inverse: \SortedSong.playlist)
     var sortedSongs: [SortedSong]

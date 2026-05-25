@@ -178,10 +178,10 @@ final class HomeViewModel {
                 let editable = computeEditability(for: amPlaylist)
 
                 if let existing = localByAMID[amPlaylist.id.rawValue] {
-                    // Sticky-downgrade: never re-upgrade a playlist that was
-                    // previously marked read-only (by either sync's heuristic
-                    // or by the self-heal path in MusicSwipeViewModel.loveCurrent).
-                    existing.isEditable = existing.isEditable && editable
+                    // Recomputed fresh each sync; only a write-verified failure
+                    // (`writeConfirmedReadOnly`) sticks, since that can't be
+                    // re-derived from Apple's kind/name metadata.
+                    existing.isEditable = editable && !existing.writeConfirmedReadOnly
                     existing.name = amPlaylist.name
                 } else {
                     let row = Playlist(

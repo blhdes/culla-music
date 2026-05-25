@@ -149,12 +149,27 @@ final class LovedPlaylistResolver {
     func markReadOnly(_ playlist: Playlist) {
         let amIDString = playlist.appleMusicPlaylistID ?? ""
         playlist.isEditable = false
+        // Persist this as a *write-verified* demotion so sync won't re-upgrade
+        // it from Apple's (here, misleading) kind/name metadata next launch.
+        playlist.writeConfirmedReadOnly = true
         if playlist.isInSidebar { playlist.isInSidebar = false }
         try? modelContext.save()
         let defaults = UserDefaults.standard
         if defaults.string(forKey: Self.defaultsKey) == amIDString {
             defaults.removeObject(forKey: Self.defaultsKey)
         }
+        onPlaylistsChanged()
+    }
+
+    /// A write to this playlist just succeeded — definitive proof it's
+    /// writable. Clear any prior write-verified read-only demotion (and the
+    /// editable flag it forced) so a one-off past failure can't keep the
+    /// playlist branded read-only.
+    func confirmWritable(_ playlist: Playlist) {
+        guard playlist.writeConfirmedReadOnly || !playlist.isEditable else { return }
+        playlist.writeConfirmedReadOnly = false
+        playlist.isEditable = true
+        try? modelContext.save()
         onPlaylistsChanged()
     }
 
@@ -171,6 +186,7 @@ final class LovedPlaylistResolver {
         let playlists = playlistsProvider()
         if let existing = playlists.first(where: { $0.appleMusicPlaylistID == amID }) {
             existing.isEditable = true
+            existing.writeConfirmedReadOnly = false
             row = existing
         } else {
             let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1

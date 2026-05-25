@@ -49,7 +49,17 @@ struct SongCardView: View {
                     VStack(spacing: 18) {
                         artwork(for: song, size: artworkSize)
                             .clipShape(RoundedRectangle(cornerRadius: 24))
-                            .matchedHero(id: "heroStart", in: heroNamespace)
+                            // Only carry the matched-geometry hero while the
+                            // morph is still running. Once it lands
+                            // (`chromeRevealed`), drop it — a matched effect left
+                            // active outlives its purpose and re-resolves the
+                            // artwork's frame on every later re-render (e.g. a
+                            // play/pause toggle opens an animation transaction via
+                            // `progressOpacity`), which made the overlaid play
+                            // button jump and snap back. On exit RootView flips
+                            // `chromeRevealed` false again, re-arming it for the
+                            // dismiss morph.
+                            .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
                             .overlay(alignment: .center) {
                                 ZStack {

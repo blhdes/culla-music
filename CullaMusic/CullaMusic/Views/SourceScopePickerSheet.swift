@@ -64,13 +64,7 @@ struct SourceScopePickerSheet: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
-
-                HStack {
-                    Spacer()
-                    sortChip
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.bottom, 4)
 
                 listBody
             }
@@ -161,13 +155,34 @@ struct SourceScopePickerSheet: View {
                 Text(currentSortLabel)
                     .font(.system(.caption, design: .rounded).weight(.medium))
                     .contentTransition(.opacity)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .opacity(0.6)
             }
+            // Section headers uppercase their text; keep the chip's own casing.
+            .textCase(nil)
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
             .foregroundStyle(.secondary)
             .glassSurface(in: Capsule(), interactive: true)
         }
         .animation(.snappy(duration: 0.2), value: currentSortLabel)
+    }
+
+    /// Section header carrying the per-tab sort menu at its trailing edge.
+    /// Anchoring the menu here — directly above the rows it reorders — replaces
+    /// the old floating chip that sat in a detached band under the segmented
+    /// control. `showsSpinner` surfaces the artist-count backfill inline.
+    private func sortHeader(_ title: String, showsSpinner: Bool = false) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if showsSpinner {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            sortChip
+        }
     }
 
     private var currentSortLabel: String {
@@ -310,10 +325,12 @@ struct SourceScopePickerSheet: View {
             }
 
             if !rows.isEmpty {
-                Section("Playlists") {
+                Section {
                     ForEach(rows, id: \.id) { playlist in
                         playlistRow(playlist)
                     }
+                } header: {
+                    sortHeader("Playlists")
                 }
             } else if !trimmedQuery.isEmpty {
                 noMatchesRow
@@ -349,14 +366,7 @@ struct SourceScopePickerSheet: View {
                         artistRow(artist)
                     }
                 } header: {
-                    HStack {
-                        Text("Artists")
-                        Spacer()
-                        if isLoadingCounts && artistTrackCounts.isEmpty {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
+                    sortHeader("Artists", showsSpinner: isLoadingCounts && artistTrackCounts.isEmpty)
                 }
             } else if !trimmedQuery.isEmpty {
                 noMatchesRow
@@ -456,15 +466,12 @@ struct SourceScopePickerSheet: View {
             dismiss()
         } label: {
             HStack(spacing: 12) {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay(
-                        Image(systemName: "music.note.list")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                    )
+                Image(systemName: "square.stack.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
                     .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .glassSurface(in: RoundedRectangle(cornerRadius: 8))
 
                 Text("All Library")
                     .foregroundStyle(.primary)

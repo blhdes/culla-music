@@ -29,6 +29,7 @@ struct SongCardView: View {
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
+    @AppStorage("showAlbumOnHero") private var showAlbumOnHero: Bool = false
 
     private let swipeThreshold: CGFloat = 100
 
@@ -82,6 +83,15 @@ struct SongCardView: View {
                                 .font(.title2.weight(.semibold))
                                 .multilineTextAlignment(.center)
                                 .lineLimit(2)
+
+                            if showAlbumOnHero, let album = song.albumTitle, !album.isEmpty {
+                                let year = song.releaseDate.map { Calendar.current.component(.year, from: $0) }
+                                Text(year.map { "@\(album) (\($0))" } ?? "@\(album)")
+                                    .font(.system(.subheadline, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(1)
+                            }
 
                             artistRow(for: song)
 

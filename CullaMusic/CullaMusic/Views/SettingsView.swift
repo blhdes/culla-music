@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
+    @AppStorage("showAlbumOnHero") private var showAlbumOnHero: Bool = false
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
@@ -85,6 +86,8 @@ struct SettingsView: View {
             colorRow
             rowDivider
             SettingsToggleRow(title: "Match song artwork", isOn: $useDynamicAccent)
+            rowDivider
+            SettingsToggleRow(title: "Show album on cards", isOn: $showAlbumOnHero)
         }
     }
 

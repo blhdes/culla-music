@@ -12,6 +12,9 @@ struct PlaylistMembershipChips: View {
     var isLoading: Bool = false
 
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+    /// Album-derived tint when dynamic accent is on, palette accent otherwise —
+    /// resolved upstream in `MusicSwipeView`, so the chips just read it.
+    @Environment(\.appAccent) private var appAccent
     @State private var placeholderPulse: Bool = false
 
     var body: some View {
@@ -86,21 +89,29 @@ struct PlaylistMembershipChips: View {
             Text(playlist.name)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .glassSurface(in: Capsule())
+        // Accent rides on the tint + hairline border, never the text — album
+        // accents can be pale and would fail contrast as a foreground colour.
+        .glassSurface(in: Capsule(), tint: appAccent)
+        .overlay(
+            Capsule().strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private func chip(text: String) -> some View {
         Text(text)
             .font(.caption.weight(.medium))
             .lineLimit(1)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .glassSurface(in: Capsule())
+            .glassSurface(in: Capsule(), tint: appAccent)
+            .overlay(
+                Capsule().strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
+            )
     }
 
     /// Width-matched to a typical playlist name so the layout doesn't jump

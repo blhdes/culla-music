@@ -16,6 +16,14 @@ struct RootView: View {
     /// launches and lose the cold-start reset.
     @State private var selectedHomeMode: ReviewMode = .library
 
+    /// Picked Sort-From scope (a specific playlist or artist), lifted out of
+    /// HomeView for the same reason as `selectedHomeMode`: each home ⇄ swipe
+    /// swap remounts HomeView, so a local @State would reset to `nil` and the
+    /// user would lose their scoped source on every trip back. Living here
+    /// scopes it to the app session — fresh launches start unscoped — matching
+    /// the built-in modes' persistence. Don't promote to @AppStorage.
+    @State private var selectedSourceScope: SourceScope?
+
     /// Shared namespace for the Home → Swipe hero morph. The "Start Cullaing"
     /// button on Home and the artwork on the current SongCard tag the same
     /// `heroStart` id; SwiftUI interpolates the frame between them so the
@@ -71,7 +79,8 @@ struct RootView: View {
                         HomeView(
                             onStart: startSession,
                             heroNamespace: heroNamespace,
-                            selectedMode: $selectedHomeMode
+                            selectedMode: $selectedHomeMode,
+                            source: $selectedSourceScope
                         )
                             .transition(.parallaxRecede)
                             .zIndex(0)

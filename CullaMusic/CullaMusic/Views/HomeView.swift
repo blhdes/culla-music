@@ -239,11 +239,14 @@ struct HomeView: View {
     /// for the rationale; a local @State here would reset on every remount
     /// and desync the hero / carousel which both re-fetch off this mode.
     @Binding var selectedMode: ReviewMode
+    /// Picked Sort-From scope, owned by RootView so it survives Home ⇄ Swipe
+    /// remounts but resets on a fresh launch — same rationale as `selectedMode`.
+    /// See `RootView.selectedSourceScope`.
+    @Binding var source: SourceScope?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appAccent) private var appAccent
     @State private var homeVM: HomeViewModel?
-    @State private var source: SourceScope?
     @State private var showSourcePicker = false
     @State private var showSettings = false
     /// Per-playlist track counts read from the persisted membership index.

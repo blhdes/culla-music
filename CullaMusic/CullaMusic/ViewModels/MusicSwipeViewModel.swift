@@ -223,17 +223,12 @@ final class MusicSwipeViewModel {
 
                 if let existing = localByAMID[amID] {
                     let wasEditable = existing.isEditable
-                    // Recompute editability fresh from Apple's current metadata
-                    // every sync — no one-way latch. The only demotion that
-                    // sticks is `writeConfirmedReadOnly`, set when a write
-                    // actually failed against a non-system playlist; that can't
-                    // be re-derived from kind/name, so it's preserved here and
-                    // cleared only on a successful write.
-                    let newEditable = editable && !existing.writeConfirmedReadOnly
-                    existing.isEditable = newEditable
+                    // Editability mirrors Apple's current kind/name every sync —
+                    // no local latch, so it can never get stuck read-only.
+                    existing.isEditable = editable
                     existing.name = amPlaylist.name
 
-                    if wasEditable && !newEditable {
+                    if wasEditable && !editable {
                         if existing.isInSidebar { existing.isInSidebar = false }
                         let defaults = UserDefaults.standard
                         if defaults.string(forKey: LovedPlaylistResolver.defaultsKey) == amID {
@@ -373,10 +368,8 @@ final class MusicSwipeViewModel {
             advance()
 
             Task { @MainActor in
-                do {
-                    try await service.addSong(song, toPlaylistID: amID)
-                    lovedResolver.confirmWritable(playlist)
-                } catch { setToast("Couldn't add to \(playlist.name)") }
+                do { try await service.addSong(song, toPlaylistID: amID) }
+                catch { setToast("Couldn't add to \(playlist.name)") }
             }
             return
         }
@@ -395,7 +388,6 @@ final class MusicSwipeViewModel {
         Task { @MainActor in
             do {
                 try await service.addSong(song, toPlaylistID: amID)
-                lovedResolver.confirmWritable(playlist)
                 try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
             } catch {
                 setToast("Couldn't add to \(playlist.name)")
@@ -584,7 +576,6 @@ final class MusicSwipeViewModel {
 
             do {
                 try await service.addSong(song, toPlaylistID: amID)
-                lovedResolver.confirmWritable(playlist)
             } catch {
                 print("loveCurrent addSong failed: \(error)")
                 // Either way, undo the optimistic local write so the song
@@ -608,12 +599,11 @@ final class MusicSwipeViewModel {
                     // creating a fresh duplicate every time.
                     setToast("Couldn't reach \(playlist.name) — try again")
                 } else {
-                    // Self-heal: name-based detection can't cover every locale
-                    // (and Apple ships new system playlists over time). Demote
-                    // the playlist locally and clear defaults; the next
-                    // up-swipe will pick a different target.
+                    // A real write failure on a playlist we didn't just create.
+                    // Drop the loved-target pointer so the next up-swipe picks a
+                    // fresh target; we don't brand it read-only off one failure.
                     let displayName = playlist.name
-                    lovedResolver.markReadOnly(playlist)
+                    lovedResolver.forgetLovedTarget(playlist)
                     setToast("Couldn't add to \(displayName)")
                 }
             }

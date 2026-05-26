@@ -3,20 +3,29 @@ import Foundation
 import MusicKit
 import SwiftData
 
-/// True if `amPlaylist` accepts programmatic writes via `MusicLibrary.shared.add(...)`.
-/// Editorial / external / personalMix / replay are stamped by Apple as read-only.
-/// The smart "Favorites" playlist (populated by the Apple Music heart button)
-/// has `kind=nil` / `curatorName=nil` — identical to a user-made playlist — so
-/// it can only be flagged by name. Add new locales below as we discover them;
-/// callers also stickily downgrade any playlist that a write actually fails
-/// against, so unknown locales heal themselves on first use.
-func computeEditability(for amPlaylist: MusicKit.Playlist) -> Bool {
-    switch amPlaylist.kind {
-    case .editorial, .external, .personalMix, .replay:
-        return false
-    default:
-        return !smartFavoritesNames.contains(amPlaylist.name)
+/// Apple-generated playlist kinds that are never the user's own content.
+///
+/// `.external` is deliberately ABSENT: it spans both catalog playlists the user
+/// saved (truly read-only) AND the user's own playlists imported or synced from
+/// iTunes / another device (fully writable), and MusicKit exposes no flag to tell
+/// them apart. We optimistically treat `.external` as the user's own — a genuine
+/// write failure just surfaces a toast (we no longer brand a playlist read-only
+/// off one failed write). Shared by `computeEditability` (write / read-only badge)
+/// and `isUserControlled` (membership-index scope) so the two can't drift apart.
+func isAppleGeneratedKind(_ kind: MusicKit.Playlist.Kind?) -> Bool {
+    switch kind {
+    case .editorial, .personalMix, .replay: return true
+    default: return false
     }
+}
+
+/// True if `amPlaylist` accepts programmatic writes via `MusicLibrary.shared.add(...)`.
+/// The smart "Favorites" playlist (Apple Music heart button) has `kind=nil` /
+/// `curatorName=nil` — identical to a user-made playlist — so it's flagged by
+/// name. Add new locales to `smartFavoritesNames` as we discover them.
+func computeEditability(for amPlaylist: MusicKit.Playlist) -> Bool {
+    !isAppleGeneratedKind(amPlaylist.kind)
+        && !smartFavoritesNames.contains(amPlaylist.name)
 }
 
 /// Localized names of Apple Music's system "Favorite Songs" playlist.
@@ -699,16 +708,12 @@ final class MusicLibraryService {
         }
     }
 
-    // Apple stamps the creating app's name into curatorName for third-party-
-    // created playlists, so we rely on Playlist.Kind. Editorial / auto-generated
-    // / externally-shared kinds are read-only; everything else is user-controlled.
+    // Editorial / auto-generated kinds aren't the user's content; everything else
+    // (including `.external` imports) is. Mirrors `computeEditability` via the
+    // shared `isAppleGeneratedKind` so write-eligibility and membership scope
+    // stay in lockstep.
     private func isUserControlled(_ kind: MusicKit.Playlist.Kind?) -> Bool {
-        switch kind {
-        case .editorial, .external, .personalMix, .replay:
-            return false
-        default:
-            return true
-        }
+        !isAppleGeneratedKind(kind)
     }
 
     // MARK: - Artist Hub

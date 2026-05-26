@@ -24,13 +24,6 @@ final class Playlist {
     /// Only editable playlists can be sorted into or added to the sidebar.
     var isEditable: Bool = true
 
-    /// Set only when a write to this playlist *actually failed* against a
-    /// non-system target (the self-heal path for unknown-locale smart
-    /// playlists). This is the one demotion that can't be re-derived from
-    /// Apple's metadata, so it persists across syncs — and is cleared the
-    /// moment a write to the playlist succeeds.
-    var writeConfirmedReadOnly: Bool = false
-
     @Relationship(deleteRule: .cascade, inverse: \SortedSong.playlist)
     var sortedSongs: [SortedSong]
 

@@ -178,10 +178,9 @@ final class HomeViewModel {
                 let editable = computeEditability(for: amPlaylist)
 
                 if let existing = localByAMID[amPlaylist.id.rawValue] {
-                    // Recomputed fresh each sync; only a write-verified failure
-                    // (`writeConfirmedReadOnly`) sticks, since that can't be
-                    // re-derived from Apple's kind/name metadata.
-                    existing.isEditable = editable && !existing.writeConfirmedReadOnly
+                    // Editability mirrors Apple's current kind/name every sync —
+                    // no local latch, so it can never get stuck read-only.
+                    existing.isEditable = editable
                     existing.name = amPlaylist.name
                 } else {
                     let row = Playlist(

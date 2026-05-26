@@ -388,9 +388,21 @@ final class MusicSwipeViewModel {
         Task { @MainActor in
             do {
                 try await service.addSong(song, toPlaylistID: amID)
-                try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
             } catch {
                 setToast("Couldn't add to \(playlist.name)")
+                return
+            }
+            // The add landed. In Move mode we also strip the song from the
+            // source — but some sources (e.g. imported `.external` playlists)
+            // accept adds yet reject track-list edits, so the removal can fail
+            // even though the add succeeded. Keep the add (it stands as a copy)
+            // and report the removal failure honestly rather than mislabeling
+            // it as an add failure.
+            do {
+                try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
+            } catch {
+                let sourceName = config.sourcePlaylistName ?? "source playlist"
+                setToast("Couldn't remove from \(sourceName)")
             }
         }
     }
@@ -501,7 +513,8 @@ final class MusicSwipeViewModel {
                 displayOrder: nextOrder,
                 appleMusicPlaylistID: amPlaylist.id.rawValue,
                 isInSidebar: addToSidebar,
-                isEditable: true
+                isEditable: true,
+                createdByApp: true
             )
             modelContext.insert(local)
             try? modelContext.save()

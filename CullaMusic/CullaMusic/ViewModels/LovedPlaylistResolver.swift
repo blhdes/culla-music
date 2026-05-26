@@ -94,7 +94,10 @@ final class LovedPlaylistResolver {
                 $0.name == Self.defaultName && computeEditability(for: $0)
             }
             if let adopted = candidates.first {
-                return upsertLocalLovedRow(amID: adopted.id.rawValue)
+                // Adopted, not freshly created by us this run — we can't prove
+                // Apple will accept edits to it, so leave `createdByApp` false
+                // (Move-out stays gated off; a failed remove would only toast).
+                return upsertLocalLovedRow(amID: adopted.id.rawValue, createdByApp: false)
             }
         }
 
@@ -127,7 +130,9 @@ final class LovedPlaylistResolver {
                }) {
                 canonicalAMID = canonical.id.rawValue
             }
-            return upsertLocalLovedRow(amID: canonicalAMID)
+            // We created this playlist ourselves, so Apple will accept edits —
+            // mark it so "Move out" can be offered when sorting from it.
+            return upsertLocalLovedRow(amID: canonicalAMID, createdByApp: true)
         } catch {
             return nil
         }
@@ -164,11 +169,14 @@ final class LovedPlaylistResolver {
     /// flag so a transient first-add failure doesn't kick off the duplicate-
     /// spawning self-heal.
     @discardableResult
-    private func upsertLocalLovedRow(amID: String) -> Playlist {
+    private func upsertLocalLovedRow(amID: String, createdByApp: Bool) -> Playlist {
         let row: Playlist
         let playlists = playlistsProvider()
         if let existing = playlists.first(where: { $0.appleMusicPlaylistID == amID }) {
             existing.isEditable = true
+            // Only ever promote `createdByApp` — never downgrade a row we
+            // already know we created just because we re-adopted it.
+            if createdByApp { existing.createdByApp = true }
             row = existing
         } else {
             let nextOrder = (playlists.map(\.displayOrder).max() ?? -1) + 1
@@ -177,7 +185,8 @@ final class LovedPlaylistResolver {
                 displayOrder: nextOrder,
                 appleMusicPlaylistID: amID,
                 isInSidebar: false,
-                isEditable: true
+                isEditable: true,
+                createdByApp: createdByApp
             )
             modelContext.insert(inserted)
             row = inserted

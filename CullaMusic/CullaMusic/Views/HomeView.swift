@@ -544,6 +544,18 @@ struct HomeView: View {
         return false
     }
 
+    /// "Move out" removes the song from the source, which Apple only allows on
+    /// playlists this app created (see `Playlist.createdByApp`). Every other
+    /// source — imported, Music-app made, read-only, artist — is capped to Copy.
+    private func playlistCanRemove(amID: String) -> Bool {
+        homeVM?.playlists.first { $0.appleMusicPlaylistID == amID }?.createdByApp ?? false
+    }
+
+    private var selectedSourceCanRemove: Bool {
+        guard case .playlist(let id, _, _) = source else { return false }
+        return playlistCanRemove(amID: id)
+    }
+
     /// Color the ambient background glow is keyed to. Reads the hero artwork's
     /// dominant background color when available so the page tone shifts per
     /// album; falls back to the app accent before the first resolve lands or
@@ -711,14 +723,15 @@ struct HomeView: View {
         let order = SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
         let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
         let activeScope: SourceScope? = selectedMode == .library ? source : nil
-        // Force `.copy` whenever the source can't accept removals:
-        // read-only playlists (Apple-curated / smart Favorites / shared),
-        // or artist scope (no "remove from artist" exists).
+        // Force `.copy` whenever the source can't accept removals. Apple only
+        // permits track removal on playlists THIS app created, so Move out is
+        // honored solely for `createdByApp` sources; read-only / imported /
+        // Music-app playlists and artist scope all fall back to Copy.
         let transferMode: SourceTransferMode = {
             switch activeScope {
-            case .playlist(_, _, let isEditable): return isEditable ? storedMode : .copy
-            case .artist:                          return .copy
-            case .none:                            return storedMode
+            case .playlist(let id, _, _): return playlistCanRemove(amID: id) ? storedMode : .copy
+            case .artist:                 return .copy
+            case .none:                   return storedMode
             }
         }()
         // The flag is only meaningful in scoped sessions — gate it here
@@ -766,11 +779,13 @@ struct HomeView: View {
     }
 
     private var sourceTransferPicker: some View {
-        // For read-only sources the picker is forced to Keep — Apple doesn't
-        // let us remove songs from those, so Move would silently fail.
+        // Move out removes from the source. Apple only allows that on playlists
+        // Culla created, so the toggle is enabled only for those; read-only and
+        // imported / Music-app playlists are forced to Keep.
         let isReadOnly = selectedSourceIsReadOnly
+        let canRemove = selectedSourceCanRemove
         let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
-        let displayMode: SourceTransferMode = isReadOnly ? .copy : storedMode
+        let displayMode: SourceTransferMode = canRemove ? storedMode : .copy
 
         return VStack(spacing: 6) {
             Picker("Source behavior", selection: Binding(
@@ -782,18 +797,21 @@ struct HomeView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .disabled(isReadOnly)
+            .disabled(!canRemove)
 
-            Text(transferModeFooter(isReadOnly: isReadOnly, mode: displayMode))
+            Text(transferModeFooter(isReadOnly: isReadOnly, canRemove: canRemove, mode: displayMode))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 24)
     }
 
-    private func transferModeFooter(isReadOnly: Bool, mode: SourceTransferMode) -> String {
+    private func transferModeFooter(isReadOnly: Bool, canRemove: Bool, mode: SourceTransferMode) -> String {
         if isReadOnly {
             return "This playlist is read-only — sorted songs stay where they are."
+        }
+        if !canRemove {
+            return "Songs can only be moved out of playlists Culla created — they'll stay here."
         }
         return mode == .copy
             ? "Sorted songs stay in the source playlist too."

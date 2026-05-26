@@ -517,6 +517,13 @@ final class MusicLibraryService {
             let filtered = currentTracks.filter { $0.id != song.id }
             guard filtered.count != currentTracks.count else { return }
 
+            // NOTE: `MusicLibrary.shared.edit` only succeeds on playlists THIS
+            // app created — Apple rejects edits to any other library playlist
+            // with `ICPlaylistUpdateErrorDomain` "Updating playlists are only
+            // allowed when updating a playlist that your app has created." There
+            // is no public API to remove a track from a user's own Music-app
+            // playlist, so callers must treat removal failure as expected for
+            // non-app-created sources (see `removeFromSourceIfNeeded`).
             let updated = try await MusicLibrary.shared.edit(populated, items: Array(filtered))
             playlistCache[updated.id] = updated
         }

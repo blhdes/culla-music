@@ -708,6 +708,9 @@ struct MusicSwipeView: View {
         HStack(spacing: 10) {
             Text(message)
                 .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             if viewModel.toastUndoable, viewModel.canUndo {
                 Divider().frame(height: 14)
                 Button {
@@ -726,6 +729,7 @@ struct MusicSwipeView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .frame(maxWidth: 320)
         .glassSurface(in: Capsule(), interactive: true)
     }
 

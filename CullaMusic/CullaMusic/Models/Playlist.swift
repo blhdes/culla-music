@@ -24,6 +24,15 @@ final class Playlist {
     /// Only editable playlists can be sorted into or added to the sidebar.
     var isEditable: Bool = true
 
+    /// True only for playlists THIS app created (via `createPlaylist`). Apple's
+    /// `MusicLibrary.shared.edit` — the only way to *remove* a track — succeeds
+    /// solely on app-created playlists; it rejects every other library playlist
+    /// (even the user's own Music-app ones) with `ICPlaylistUpdateErrorDomain`.
+    /// So "Move out" (which removes from the source) is only offered when this
+    /// is true. Defaults false: imported / synced / Music-app playlists can be
+    /// added to but never edited, and a reinstall conservatively re-gates them.
+    var createdByApp: Bool = false
+
     @Relationship(deleteRule: .cascade, inverse: \SortedSong.playlist)
     var sortedSongs: [SortedSong]
 
@@ -34,7 +43,8 @@ final class Playlist {
         displayOrder: Int = 0,
         appleMusicPlaylistID: String? = nil,
         isInSidebar: Bool = false,
-        isEditable: Bool = true
+        isEditable: Bool = true,
+        createdByApp: Bool = false
     ) {
         self.id = UUID()
         self.name = name
@@ -46,6 +56,7 @@ final class Playlist {
         self.appleMusicPlaylistID = appleMusicPlaylistID
         self.isInSidebar = isInSidebar
         self.isEditable = isEditable
+        self.createdByApp = createdByApp
         self.sortedSongs = []
     }
 }

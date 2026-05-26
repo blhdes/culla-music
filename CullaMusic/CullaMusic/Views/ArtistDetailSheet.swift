@@ -38,8 +38,7 @@ struct ArtistDetailSheet: View {
     private var content: some View {
         switch resolutionState {
         case .loading:
-            ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ArtistLoadingView(name: song.artistName)
         case .resolved:
             if let resolvedArtist {
                 ArtistDetailView(artist: resolvedArtist)
@@ -76,7 +75,7 @@ private struct ArtistDetailView: View {
     let artist: Artist
 
     @State private var detail: Artist?
-    @State private var isLoadingDetail = true
+    @State private var isReady = false
     @State private var showGoogle = false
     @State private var bioState: BioState = .loading
     @State private var showWikipedia = false
@@ -88,6 +87,7 @@ private struct ArtistDetailView: View {
     /// Wikipedia directly instead of doing a no-op "expand".
     private var bioCanExpand: Bool { bioIsTruncated && !bioExpanded }
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `empty` (no/likely-wrong Wikipedia page) hides the section silently;
     /// `failed` (network/decode error) is transient, so it shows a retry row.
@@ -120,6 +120,32 @@ private struct ArtistDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if isReady {
+                content
+                    .transition(.opacity)
+            } else {
+                // Same branded loading view the root sheet shows during
+                // resolution — so the breathing hero + name stays put across
+                // resolve → detail and on every similar-artist push, then
+                // crossfades to the assembled sheet in one beat.
+                ArtistLoadingView(name: artist.name)
+                    .transition(.opacity)
+            }
+        }
+        .navigationTitle(artist.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: artist.id.rawValue) { await loadDetail() }
+        .task(id: artist.id.rawValue) { await loadBio() }
+        .sheet(isPresented: $showGoogle) {
+            if let googleURL {
+                SafariView(url: googleURL)
+                    .ignoresSafeArea()
+            }
+        }
+    }
+
+    private var content: some View {
         ScrollView {
             // Horizontal padding is applied per-section instead of on this
             // outer VStack so the genre chips and similar-artists carousels
@@ -140,16 +166,6 @@ private struct ArtistDetailView: View {
                 .padding(.horizontal, 20)
             }
             .padding(.vertical, 20)
-        }
-        .navigationTitle(artist.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .task(id: artist.id.rawValue) { await loadDetail() }
-        .task(id: artist.id.rawValue) { await loadBio() }
-        .sheet(isPresented: $showGoogle) {
-            if let googleURL {
-                SafariView(url: googleURL)
-                    .ignoresSafeArea()
-            }
         }
     }
 
@@ -214,16 +230,12 @@ private struct ArtistDetailView: View {
     @ViewBuilder
     private var bioSection: some View {
         switch bioState {
-        case .empty:
-            EmptyView()   // silent — no page, or a likely-wrong match
-        case .loading:
-            VStack(spacing: 12) {
-                sectionHeader("About")
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .padding(.horizontal, 20)
+        case .empty, .loading:
+            // No spinner. The bio is supplementary, so it stays absent while it
+            // loads (the sheet already revealed on the music data) and fades in
+            // when it lands. `.empty` (no page / likely-wrong match) stays
+            // hidden for good.
+            EmptyView()
         case .loaded(let bio):
             VStack(spacing: 12) {
                 sectionHeader("About")
@@ -277,6 +289,7 @@ private struct ArtistDetailView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .transition(.opacity)
         case .failed:
             VStack(spacing: 12) {
                 sectionHeader("About")
@@ -290,6 +303,7 @@ private struct ArtistDetailView: View {
                 }
             }
             .padding(.horizontal, 20)
+            .transition(.opacity)
         }
     }
 
@@ -297,15 +311,7 @@ private struct ArtistDetailView: View {
     private var topSongsSection: some View {
         let songs = Array((current.topSongs ?? []).prefix(5))
         let service = MusicLibraryService.shared
-        if isLoadingDetail && songs.isEmpty {
-            VStack(spacing: 12) {
-                sectionHeader("Top Songs")
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .padding(.horizontal, 20)
-        } else if !songs.isEmpty {
+        if !songs.isEmpty {
             VStack(spacing: 12) {
                 sectionHeader("Top Songs")
                     .padding(.horizontal, 20)
@@ -378,32 +384,63 @@ private struct ArtistDetailView: View {
     }
 
     private func loadDetail() async {
-        if detail?.id == artist.id { return }
-        isLoadingDetail = true
+        if detail?.id == artist.id {
+            isReady = true
+            return
+        }
         do {
             detail = try await MusicLibraryService.shared.loadArtistDetail(artist)
         } catch {
+            // Reveal anyway: the seed artist still carries the hero, name, and
+            // genres, so a failed relationship fetch degrades to a thinner
+            // sheet rather than a permanent loading state.
             print("ArtistDetailView.loadDetail failed: \(error)")
         }
-        isLoadingDetail = false
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.4)) {
+            isReady = true
+        }
     }
 
     private func loadBio() async {
         bioState = .loading
         do {
             if let bio = try await ArtistBioService.shared.bio(forName: artist.name) {
-                bioState = .loaded(bio)
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.35)) {
+                    bioState = .loaded(bio)
+                }
             } else {
                 bioState = .empty
             }
         } catch {
             print("ArtistDetailView.loadBio failed: \(error)")
-            bioState = .failed
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.35)) {
+                bioState = .failed
+            }
         }
     }
 }
 
 // MARK: - Subviews
+
+/// Single branded loading state, shown while the song→artist resolution (root
+/// sheet) and the topSongs/similarArtists fetch (root + every pushed artist)
+/// are in flight. Mirrors the hero footprint with a breathing glyph and the
+/// already-known name, so the reveal crossfades into a fuller sheet instead of
+/// popping from a blank centered spinner.
+private struct ArtistLoadingView: View {
+    let name: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            HeroIconTile(systemName: "music.mic", size: 220, pulse: true)
+            Text(name)
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 private struct TopSongRow: View {
     let song: Song

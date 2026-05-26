@@ -90,7 +90,7 @@ struct SongCardView: View {
                                     .font(.system(.subheadline, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
 
                             artistRow(for: song)

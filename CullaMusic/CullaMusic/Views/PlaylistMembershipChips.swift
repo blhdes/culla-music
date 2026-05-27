@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct PlaylistMembershipChips: View {
     let playlists: [Playlist]
@@ -49,6 +50,16 @@ struct PlaylistMembershipChips: View {
         max(playlists.count - maxVisible, 0)
     }
 
+    /// Black or white — whichever contrasts the tinted pill better. The album
+    /// accent washing the glass can land genuinely dark: `AccentExtractor`
+    /// clamps HSL *lightness* to [0.40, 0.58], but a saturated hue at L=0.40
+    /// is still dark to the eye, so the old `.primary` label went black-on-dark
+    /// and disappeared. Deriving the label from the tint's perceived luminance
+    /// is scheme-independent — it flips correctly for dark *and* pale accents.
+    private var accentLabelColor: Color {
+        UIColor(appAccent).contrastingLabel
+    }
+
     private func dismissedChip(date: Date) -> some View {
         Text("Dismissed \(Self.relativeAge(from: date))")
             .font(.caption.weight(.semibold))
@@ -89,12 +100,13 @@ struct PlaylistMembershipChips: View {
             Text(playlist.name)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(.primary)
+                .foregroundStyle(accentLabelColor)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        // Accent rides on the tint + hairline border, never the text — album
-        // accents can be pale and would fail contrast as a foreground colour.
+        // Accent rides on the tint + hairline border. The label color is
+        // derived from the tint's luminance (see `accentLabelColor`) so it
+        // stays legible whether the album accent lands pale or dark.
         .glassSurface(in: Capsule(), tint: appAccent)
         .overlay(
             Capsule().strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
@@ -105,7 +117,7 @@ struct PlaylistMembershipChips: View {
         Text(text)
             .font(.caption.weight(.medium))
             .lineLimit(1)
-            .foregroundStyle(.primary)
+            .foregroundStyle(accentLabelColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .glassSurface(in: Capsule(), tint: appAccent)
@@ -128,6 +140,23 @@ struct PlaylistMembershipChips: View {
                 value: placeholderPulse
             )
             .onAppear { placeholderPulse = true }
+    }
+}
+
+private extension UIColor {
+    /// `.white` or `.black`, whichever has the higher WCAG contrast ratio
+    /// against this color used as a background. Contrast vs white is
+    /// `1.05 / (L + 0.05)`; vs black is `(L + 0.05) / 0.05`. They cross at a
+    /// relative luminance of ≈0.179 — above it black wins, below it white.
+    var contrastingLabel: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+
+        func linear(_ c: CGFloat) -> CGFloat {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        return luminance > 0.179 ? .black : .white
     }
 }
 

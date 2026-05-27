@@ -48,31 +48,43 @@ struct SongCardView: View {
                     let artworkSize = min(geo.size.width * 0.78, 360)
 
                     VStack(spacing: 18) {
-                        artwork(for: song, size: artworkSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 24))
-                            // Only carry the matched-geometry hero while the
-                            // morph is still running. Once it lands
-                            // (`chromeRevealed`), drop it — a matched effect left
-                            // active outlives its purpose and re-resolves the
-                            // artwork's frame on every later re-render (e.g. a
-                            // play/pause toggle opens an animation transaction via
-                            // `progressOpacity`), which made the overlaid play
-                            // button jump and snap back. On exit RootView flips
-                            // `chromeRevealed` false again, re-arming it for the
-                            // dismiss morph.
-                            .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
-                            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
-                            .overlay(alignment: .center) {
-                                ZStack {
-                                    if showHotProgressRing {
-                                        hotProgressRing
-                                    }
-                                    playButton
+                        ZStack {
+                            artwork(for: song, size: artworkSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 24))
+                                // Only carry the matched-geometry hero while the
+                                // morph is still running. Once it lands
+                                // (`chromeRevealed`), drop it — a matched effect left
+                                // active outlives its purpose and re-resolves the
+                                // artwork's frame on every later re-render (e.g. a
+                                // play/pause toggle opens an animation transaction via
+                                // `progressOpacity`), which made the overlaid play
+                                // button jump and snap back. On exit RootView flips
+                                // `chromeRevealed` false again, re-arming it for the
+                                // dismiss morph.
+                                .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
+                                .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
+                                .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
+
+                            // Play controls as a ZStack *sibling* of the artwork —
+                            // centred by this ZStack, never an `.overlay(alignment:
+                            // .center)` on the artwork. As an overlay the disc's
+                            // centre was re-resolved against the artwork's frame
+                            // inside the play/pause animation transaction (the same
+                            // one that fades the progress bar), so it jumped on every
+                            // toggle. A sibling is laid out by the ZStack independently
+                            // of the artwork's overlay chain — this is exactly the
+                            // carousel's non-jumping `playPauseButton` structure. Still
+                            // hidden until the hero morph lands, so it doesn't need to
+                            // track the morphing cover during entry.
+                            ZStack {
+                                if showHotProgressRing {
+                                    hotProgressRing
                                 }
-                                .opacity(chromeRevealed ? 1 : 0)
-                                .scaleEffect(chromeRevealed ? 1 : 0.85)
+                                playButton
                             }
-                            .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
+                            .opacity(chromeRevealed ? 1 : 0)
+                            .scaleEffect(chromeRevealed ? 1 : 0.85)
+                        }
 
                         timeLabels(width: artworkSize)
                             .opacity(progressOpacity)

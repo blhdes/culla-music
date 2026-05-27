@@ -28,6 +28,15 @@ struct ProgressBarView: View {
                 Capsule()
                     .fill(accent)
                     .frame(width: max(geo.size.width * progress, 0))
+                    // A progress/scrub fill should track the live position
+                    // exactly — never ease its width. Without this, when the
+                    // parent fades the bar out on pause (`progressOpacity`'s
+                    // 0.35s animation), that same transaction also tweens the
+                    // fill's width down to zero, so the colored bar visibly
+                    // retracts toward the left as it disappears. Pinning the
+                    // width change to no animation makes it snap to its value
+                    // while only the opacity fades.
+                    .animation(nil, value: progress)
             }
             .frame(height: 1.5)
             // Anchor the hairline to the bottom of the expanded touch frame

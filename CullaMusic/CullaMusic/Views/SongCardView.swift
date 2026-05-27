@@ -69,6 +69,20 @@ struct SongCardView: View {
                                     }
                                     playButton
                                 }
+                                // Pin to the ring's size (matches
+                                // hotProgressRing's 86×86 frame) so this box
+                                // never resizes when the ring is added or
+                                // removed. Without it the box shrank 86→72 on
+                                // pause (ring gone), and the centred play disc
+                                // got re-resolved to a new position as it
+                                // shrank — the long-unsolved "disc drifts
+                                // bottom-right on pause" bug. It only repro'd
+                                // with hot preview AND a preview that had played
+                                // long enough for the ring to appear (the clip's
+                                // duration loads a beat after play starts), so a
+                                // quick manual play/pause never showed it —
+                                // which is why it looked "autoplay-only".
+                                .frame(width: 86, height: 86)
                                 .opacity(chromeRevealed ? 1 : 0)
                                 .scaleEffect(chromeRevealed ? 1 : 0.85)
                             }

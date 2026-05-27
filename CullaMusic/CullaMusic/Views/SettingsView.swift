@@ -95,9 +95,9 @@ struct SettingsView: View {
         SettingsCard(title: "Playback") {
             SettingsToggleRow(title: "Haptics", isOn: $hapticsEnabled)
             rowDivider
-            SettingsToggleRow(title: "Auto-play tracks", isOn: $autoplayOnSwipe)
+            SettingsToggleRow(title: "Auto play", isOn: $autoplayOnSwipe)
             rowDivider
-            SettingsToggleRow(title: "Start at song highlight", isOn: $useHotPreview)
+            SettingsToggleRow(title: "Hot Preview", isOn: $useHotPreview)
         }
     }
 

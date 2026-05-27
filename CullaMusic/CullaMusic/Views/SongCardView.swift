@@ -48,47 +48,44 @@ struct SongCardView: View {
                     let artworkSize = min(geo.size.width * 0.78, 360)
 
                     VStack(spacing: 18) {
-                        ZStack {
-                            artwork(for: song, size: artworkSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 24))
-                                // Only carry the matched-geometry hero while the
-                                // morph is still running. Once it lands
-                                // (`chromeRevealed`), drop it — a matched effect left
-                                // active outlives its purpose and re-resolves the
-                                // artwork's frame on every later re-render (e.g. a
-                                // play/pause toggle opens an animation transaction via
-                                // `progressOpacity`), which made the overlaid play
-                                // button jump and snap back. On exit RootView flips
-                                // `chromeRevealed` false again, re-arming it for the
-                                // dismiss morph.
-                                .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
-                                .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
-                                .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
-
-                            // Play controls as a ZStack *sibling* of the artwork —
-                            // centred by this ZStack, never an `.overlay(alignment:
-                            // .center)` on the artwork. As an overlay the disc's
-                            // centre was re-resolved against the artwork's frame
-                            // inside the play/pause animation transaction (the same
-                            // one that fades the progress bar), so it jumped on every
-                            // toggle. A sibling is laid out by the ZStack independently
-                            // of the artwork's overlay chain — this is exactly the
-                            // carousel's non-jumping `playPauseButton` structure. Still
-                            // hidden until the hero morph lands, so it doesn't need to
-                            // track the morphing cover during entry.
-                            ZStack {
-                                if showHotProgressRing {
-                                    hotProgressRing
+                        artwork(for: song, size: artworkSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 24))
+                            // Only carry the matched-geometry hero while the
+                            // morph is still running. Once it lands
+                            // (`chromeRevealed`), drop it — a matched effect left
+                            // active outlives its purpose and re-resolves the
+                            // artwork's frame on every later re-render (e.g. a
+                            // play/pause toggle opens an animation transaction via
+                            // `progressOpacity`), which made the overlaid play
+                            // button jump and snap back. On exit RootView flips
+                            // `chromeRevealed` false again, re-arming it for the
+                            // dismiss morph.
+                            .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
+                            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
+                            .overlay(alignment: .center) {
+                                ZStack {
+                                    if showHotProgressRing {
+                                        hotProgressRing
+                                    }
+                                    playButton
                                 }
-                                playButton
+                                .opacity(chromeRevealed ? 1 : 0)
+                                .scaleEffect(chromeRevealed ? 1 : 0.85)
                             }
-                            .opacity(chromeRevealed ? 1 : 0)
-                            .scaleEffect(chromeRevealed ? 1 : 0.85)
-                        }
+                            .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
 
                         timeLabels(width: artworkSize)
                             .opacity(progressOpacity)
-                            .animation(.easeInOut(duration: 0.35), value: progressOpacity)
+                            // No implicit `.animation(value: progressOpacity)` here
+                            // or on `progressOverlay`. When auto-play is on, the
+                            // preview is playing, so pausing flips progressOpacity
+                            // 1→0 and that fade was the ONLY animation transaction
+                            // open during the toggle re-render — and the centred
+                            // play disc's overlay position got re-resolved inside
+                            // it, sliding the whole disc right+down before settling.
+                            // (Confirmed: auto-play off = no playing preview = no
+                            // fade = no jump.) Letting the show/hide be instant
+                            // keeps the disc dead-still.
 
                         VStack(spacing: 6) {
                             Text(song.title)
@@ -216,7 +213,12 @@ struct SongCardView: View {
                 style: StrokeStyle(lineWidth: 3, lineCap: .round)
             )
             .rotationEffect(.degrees(-90))
-            .animation(.linear(duration: 0.2), value: playbackPosition)
+            // No implicit `.animation(value: playbackPosition)`. This ring is a
+            // ZStack sibling of the play disc, so when pausing fires this 0.2s
+            // transaction (playbackPosition → 0) the disc rode its layout pass
+            // and slid before settling — the "only with auto-play / hot preview"
+            // drift. The trim already updates ~10×/s from the clip observer, so
+            // stepping it un-animated is imperceptible on a hairline ring.
             .frame(width: 86, height: 86)
             .allowsHitTesting(false)
     }
@@ -247,8 +249,9 @@ struct SongCardView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
         }
+        // Instant show/hide — see the note on `timeLabels`. The fade's
+        // animation transaction was sliding the play disc on pause.
         .opacity(progressOpacity)
-        .animation(.easeInOut(duration: 0.35), value: progressOpacity)
     }
 
     private func timeLabels(width: CGFloat) -> some View {

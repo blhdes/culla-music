@@ -96,6 +96,10 @@ final class MusicLibraryService {
     private var clipEndObserver: NSObjectProtocol?
     private var clipTimeObserverToken: Any?
     private var fullSongPositionTimer: Timer?
+    /// In-flight volume ramp for the clip player. Cancelled before starting a
+    /// new one so a rapid pause→resume doesn't leave two ramps fighting over
+    /// `clipPlayer.volume`.
+    private var clipVolumeRampTask: Task<Void, Never>?
 
     private init() {}
 
@@ -877,18 +881,98 @@ final class MusicLibraryService {
     }
 
     func stopPreview() {
-        // The swipe path calls this on every `advance()`, even when nothing's
-        // actually playing. Without this guard we'd run the pause/observer
-        // teardown AND fire spurious @Observable writes that re-render every
-        // view watching playback state — once per swipe.
-        guard isPlayingPreview else { return }
+        // No-op only when nothing is loaded at all. The swipe path calls this on
+        // every `advance()`; without the guard we'd fire spurious @Observable
+        // writes that re-render every playback-watching view once per swipe.
+        // A *paused* preview still has a song + clip loaded (isPlayingPreview is
+        // false but nowPlayingSongID is set), so swiping away must still tear it
+        // down — hence the second clause.
+        guard isPlayingPreview || nowPlayingSongID != nil else { return }
+        clipVolumeRampTask?.cancel()
+        clipVolumeRampTask = nil
         player.pause()
         stopClipPlayer()
         stopPositionObservers()
+        clipPlayer.volume = 1
         isPlayingPreview = false
         nowPlayingSongID = nil
         playbackPosition = 0
         playbackDuration = 0
+    }
+
+    /// Pauses the active preview while keeping the song, position and duration
+    /// intact so `resumePreview()` continues from the same spot. In Hot Preview
+    /// mode the clip audio ramps down first so the pause doesn't click; the
+    /// default ApplicationMusicPlayer path has no volume API, so it pauses
+    /// instantly.
+    func pausePreview() {
+        guard isPlayingPreview else { return }
+        isPlayingPreview = false
+
+        if clipTimeObserverToken != nil {
+            // Clip path — keep the observer (so seek still routes here and resume
+            // knows it's the clip), fade the audio out, then pause once silent.
+            rampClipVolume(to: 0, duration: 0.22) { [weak self] in
+                self?.clipPlayer.pause()
+            }
+        } else {
+            // Full-song path — snapshot the exact time, pause, stop polling.
+            playbackPosition = player.playbackTime
+            player.pause()
+            fullSongPositionTimer?.invalidate()
+            fullSongPositionTimer = nil
+        }
+    }
+
+    /// Resumes a paused preview from its kept position. Mirrors `pausePreview`:
+    /// the clip path fades audio back in, the full-song path plays and restarts
+    /// its position poll. No-op unless a song is loaded and currently paused.
+    func resumePreview() {
+        guard !isPlayingPreview, nowPlayingSongID != nil else { return }
+
+        if clipTimeObserverToken != nil {
+            isPlayingPreview = true
+            clipPlayer.volume = 0
+            clipPlayer.play()
+            rampClipVolume(to: 1, duration: 0.22)
+        } else {
+            Task { @MainActor in
+                do {
+                    try await player.play()
+                    isPlayingPreview = true
+                    startFullSongPositionTimer()
+                } catch {
+                    print("[playback] resume failed: \(error)")
+                    isPlayingPreview = false
+                }
+            }
+        }
+    }
+
+    /// Linearly ramps `clipPlayer.volume` to `target` over `duration`, then runs
+    /// `completion`. AVPlayer has no built-in fade, so we step it ~60×/s. A new
+    /// ramp cancels any in-flight one so rapid pause↔resume can't leave two
+    /// fighting over the volume.
+    private func rampClipVolume(
+        to target: Float,
+        duration: TimeInterval,
+        completion: (() -> Void)? = nil
+    ) {
+        clipVolumeRampTask?.cancel()
+        let start = clipPlayer.volume
+        let steps = max(1, Int(duration * 60))
+        let stepDelay = duration / Double(steps)
+        clipVolumeRampTask = Task { @MainActor in
+            for step in 1...steps {
+                if Task.isCancelled { return }
+                let t = Float(step) / Float(steps)
+                clipPlayer.volume = start + (target - start) * t
+                try? await Task.sleep(for: .seconds(stepDelay))
+            }
+            guard !Task.isCancelled else { return }
+            clipPlayer.volume = target
+            completion?()
+        }
     }
 
     /// Routes to whichever player is active. The clip player path is identified
@@ -955,6 +1039,10 @@ final class MusicLibraryService {
             }
         }
 
+        // A prior pause may have left the master volume at 0; reset it so this
+        // fresh clip is audible (its own start/end fade lives in the audioMix).
+        clipVolumeRampTask?.cancel()
+        clipPlayer.volume = 1
         clipPlayer.play()
         isPlayingPreview = true
         nowPlayingSongID = songID

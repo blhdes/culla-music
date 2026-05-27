@@ -16,6 +16,11 @@ struct SongCardView: View {
     /// small info button next to the artist name. Not wired on the next-card
     /// (underneath) instance so the button never appears on the obscured card.
     var onShowArtist: (() -> Void)? = nil
+    /// Fires `true` the moment the progress bar's scrub begins and `false` when
+    /// it ends. MusicSwipeView uses it to freeze the card's drag-to-sort while
+    /// the user moves through the song, so a horizontal scrub never doubles as
+    /// a dismiss/assign swipe. Only wired on the front card.
+    var onScrubbingChanged: ((Bool) -> Void)? = nil
     /// Hero-morph namespace shared with Home's "Start Cullaing" button. Only
     /// the front (current) card receives it; the preloaded next card omits it
     /// so SwiftUI never sees two simultaneous sources for `heroStart`.
@@ -48,58 +53,56 @@ struct SongCardView: View {
                     let artworkSize = min(geo.size.width * 0.78, 360)
 
                     VStack(spacing: 18) {
-                        artwork(for: song, size: artworkSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 24))
-                            // Only carry the matched-geometry hero while the
-                            // morph is still running. Once it lands
-                            // (`chromeRevealed`), drop it — a matched effect left
-                            // active outlives its purpose and re-resolves the
-                            // artwork's frame on every later re-render (e.g. a
-                            // play/pause toggle opens an animation transaction via
-                            // `progressOpacity`), which made the overlaid play
-                            // button jump and snap back. On exit RootView flips
-                            // `chromeRevealed` false again, re-arming it for the
-                            // dismiss morph.
-                            .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
-                            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
-                            .overlay(alignment: .center) {
-                                ZStack {
-                                    if showHotProgressRing {
-                                        hotProgressRing
-                                    }
-                                    playButton
+                        // The artwork and its centred controls share one ZStack,
+                        // but the controls are a *sibling* of the artwork — never
+                        // an `.overlay` on it. The artwork hosts the progress
+                        // overlay, and when that chrome fades (play↔pause), an
+                        // overlay-based disc had its centre re-resolved inside the
+                        // same animation transaction and slid bottom-right. As a
+                        // sibling the disc is positioned by this ZStack on its own,
+                        // so the bar can now fade gracefully without moving it.
+                        ZStack {
+                            artwork(for: song, size: artworkSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 24))
+                                // Only carry the matched-geometry hero while the
+                                // morph is still running. Once it lands
+                                // (`chromeRevealed`), drop it — a matched effect left
+                                // active outlives its purpose and re-resolves the
+                                // artwork's frame on every later re-render, which
+                                // made the play button jump and snap back. On exit
+                                // RootView flips `chromeRevealed` false again,
+                                // re-arming it for the dismiss morph.
+                                .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
+                                .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
+                                .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
+
+                            ZStack {
+                                if showHotProgressRing {
+                                    hotProgressRing
                                 }
-                                // Pin to the ring's size (matches
-                                // hotProgressRing's 86×86 frame) so this box
-                                // never resizes when the ring is added or
-                                // removed. Without it the box shrank 86→72 on
-                                // pause (ring gone), and the centred play disc
-                                // got re-resolved to a new position as it
-                                // shrank — the long-unsolved "disc drifts
-                                // bottom-right on pause" bug. It only repro'd
-                                // with hot preview AND a preview that had played
-                                // long enough for the ring to appear (the clip's
-                                // duration loads a beat after play starts), so a
-                                // quick manual play/pause never showed it —
-                                // which is why it looked "autoplay-only".
-                                .frame(width: 86, height: 86)
-                                .opacity(chromeRevealed ? 1 : 0)
-                                .scaleEffect(chromeRevealed ? 1 : 0.85)
+                                playButton
                             }
-                            .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
+                            // Pin to the ring's size (matches hotProgressRing's
+                            // 86×86 frame) so this box never resizes when the ring
+                            // is added or removed — a resizing box re-resolved the
+                            // centred disc's position (the old "disc drifts on
+                            // pause" bug).
+                            .frame(width: 86, height: 86)
+                            .opacity(chromeRevealed ? 1 : 0)
+                            .scaleEffect(chromeRevealed ? 1 : 0.85)
+                        }
+                        // Pin the ZStack to the artwork's size so the disc always
+                        // centres on the cover and the box can't be stretched by a
+                        // child.
+                        .frame(width: artworkSize, height: artworkSize)
 
                         timeLabels(width: artworkSize)
                             .opacity(progressOpacity)
-                            // No implicit `.animation(value: progressOpacity)` here
-                            // or on `progressOverlay`. When auto-play is on, the
-                            // preview is playing, so pausing flips progressOpacity
-                            // 1→0 and that fade was the ONLY animation transaction
-                            // open during the toggle re-render — and the centred
-                            // play disc's overlay position got re-resolved inside
-                            // it, sliding the whole disc right+down before settling.
-                            // (Confirmed: auto-play off = no playing preview = no
-                            // fade = no jump.) Letting the show/hide be instant
-                            // keeps the disc dead-still.
+                            // Safe to fade now that the disc is a ZStack sibling
+                            // (see the note above) — this transaction no longer
+                            // re-resolves the disc's centre. 0→0.55→1 covers
+                            // hidden → paused-dim → playing.
+                            .animation(.easeInOut(duration: 0.3), value: progressOpacity)
 
                         VStack(spacing: 6) {
                             Text(song.title)
@@ -138,6 +141,12 @@ struct SongCardView: View {
             .clipped()
         }
         .ignoresSafeArea()
+        // scrubOverride is non-nil only while a scrub drag is live, so this
+        // mirrors the bar's gesture without ProgressBarView needing to know
+        // about the card stack above it.
+        .onChange(of: scrubOverride != nil) { _, scrubbing in
+            onScrubbingChanged?(scrubbing)
+        }
     }
 
     /// Artist name + an optional info button to open the artist hub. The info
@@ -227,12 +236,11 @@ struct SongCardView: View {
                 style: StrokeStyle(lineWidth: 3, lineCap: .round)
             )
             .rotationEffect(.degrees(-90))
-            // No implicit `.animation(value: playbackPosition)`. This ring is a
-            // ZStack sibling of the play disc, so when pausing fires this 0.2s
-            // transaction (playbackPosition → 0) the disc rode its layout pass
-            // and slid before settling — the "only with auto-play / hot preview"
-            // drift. The trim already updates ~10×/s from the clip observer, so
-            // stepping it un-animated is imperceptible on a hairline ring.
+            // No implicit `.animation(value: playbackPosition)`. The trim
+            // already updates ~10×/s from the clip observer, so stepping it
+            // un-animated is imperceptible on a hairline ring — and an implicit
+            // animation here would only invite another layout transaction next
+            // to the disc.
             .frame(width: 86, height: 86)
             .allowsHitTesting(false)
     }
@@ -263,9 +271,15 @@ struct SongCardView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
         }
-        // Instant show/hide — see the note on `timeLabels`. The fade's
-        // animation transaction was sliding the play disc on pause.
+        // Fades with the same envelope as the time labels. Safe now that the
+        // disc is a ZStack sibling rather than an overlay on this artwork.
         .opacity(progressOpacity)
+        .animation(.easeInOut(duration: 0.3), value: progressOpacity)
+        // Only claim touches while the bar is actually shown (loaded: playing or
+        // paused). Opacity 0 still receives hits in SwiftUI, so without this the
+        // invisible bar's scrub region would hijack card swipes that start in
+        // the bottom strip of the cover when nothing is loaded.
+        .allowsHitTesting(progressOpacity > 0)
     }
 
     private func timeLabels(width: CGFloat) -> some View {
@@ -290,7 +304,12 @@ struct SongCardView: View {
 
     private var progressOpacity: Double {
         // 30s hot-clip previews speak for themselves — no bar needed.
-        !useHotPreview && isPlaying && playbackDuration > 0 ? 1 : 0
+        // `playbackDuration > 0` means this song is loaded (the parent only
+        // feeds a non-zero duration for the loaded card), so the bar stays
+        // visible while paused — just dimmed — letting the user see and scrub
+        // the saved position. Full opacity only while actually playing.
+        guard !useHotPreview, playbackDuration > 0 else { return 0 }
+        return isPlaying ? 1.0 : 0.55
     }
 
     private var cardOpacity: CGFloat {

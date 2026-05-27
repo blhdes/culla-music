@@ -22,6 +22,8 @@ struct ProgressBarView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let scrubbing = scrubOverride != nil
+            let dotSize: CGFloat = scrubbing ? 12 : 8
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(.white.opacity(0.35))
@@ -37,6 +39,21 @@ struct ProgressBarView: View {
                     // width change to no animation makes it snap to its value
                     // while only the opacity fades.
                     .animation(nil, value: progress)
+
+                // Playhead dot — marks the exact spot in the song. White with a
+                // soft shadow so it reads on both the accent fill and the bare
+                // track, and grows a touch while scrubbing for a clearer grab
+                // target. Centred vertically on the hairline (the ZStack's
+                // vertical alignment) and offset to the live position.
+                Circle()
+                    .fill(.white)
+                    .frame(width: dotSize, height: dotSize)
+                    .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 0.5)
+                    .offset(x: max(geo.size.width * progress - dotSize / 2, 0))
+                    // Position tracks the playhead un-animated (same reasoning as
+                    // the fill); only the grow-on-scrub size springs.
+                    .animation(nil, value: progress)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: scrubbing)
             }
             .frame(height: 1.5)
             // Anchor the hairline to the bottom of the expanded touch frame
@@ -46,10 +63,15 @@ struct ProgressBarView: View {
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, 10)
             .contentShape(Rectangle())
-            // `highPriorityGesture` beats the parent card-stack's own
-            // `.highPriorityGesture(dragGesture)` because the inner-most
-            // wins — without this every scrub attempt swipes the card.
-            .highPriorityGesture(scrubGesture(width: geo.size.width))
+            // Must be `simultaneousGesture`, NOT `highPriorityGesture`: the card
+            // stack above attaches its drag with `.highPriorityGesture`, and a
+            // *parent's* high-priority gesture wins over a child's — so a child
+            // high-priority scrub never fired and every scrub swiped the card.
+            // Recognising simultaneously lets the scrub fire alongside the card
+            // drag; because it uses `minimumDistance: 0` it lands on touch-down,
+            // before the card drag's threshold, so MusicSwipeView sees the
+            // scrub start and pins the card before it can move.
+            .simultaneousGesture(scrubGesture(width: geo.size.width))
         }
         .frame(height: 44)
     }

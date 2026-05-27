@@ -830,8 +830,14 @@ final class MusicSwipeViewModel {
 
     func togglePreview() {
         guard let song = currentSong else { return }
-        if service.isPlayingPreview && service.nowPlayingSongID == song.id.rawValue {
-            service.stopPreview()
+        // Same song already loaded: pause/resume in place so the position is
+        // kept. A different song (or nothing loaded): start fresh from the top.
+        if service.nowPlayingSongID == song.id.rawValue {
+            if service.isPlayingPreview {
+                service.pausePreview()
+            } else {
+                service.resumePreview()
+            }
         } else {
             service.playPreview(for: song)
         }

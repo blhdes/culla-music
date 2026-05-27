@@ -38,6 +38,13 @@ struct MusicSwipeView: View {
     @State private var highlightedID: UUID?
     @State private var playlistFrames: [UUID: CGRect] = [:]
 
+    // True while the user is scrubbing the progress bar. `cardDragSuppressed`
+    // latches that fact for the lifetime of the card's own drag gesture, so the
+    // whole gesture — onChanged *and* onEnded — is ignored and a scrub can never
+    // be misread as a dismiss/assign swipe.
+    @State private var isScrubbing = false
+    @State private var cardDragSuppressed = false
+
     // Long-press preview — fully reveals the sidebar while held
     @State private var isLongPressing = false
 
@@ -433,21 +440,26 @@ struct MusicSwipeView: View {
 
             if let current = viewModel.currentSong {
                 let service = MusicLibraryService.shared
-                let isPlayingThis = service.isPlayingPreview &&
-                                    service.nowPlayingSongID == current.id.rawValue
+                // "Loaded" = this card's song is the one the player holds, whether
+                // it's actively playing or paused. We feed position/duration for
+                // the whole loaded lifetime so the bar can stay visible (dimmed)
+                // while paused; `isPlaying` alone drives the play/pause icon.
+                let isLoadedSong = service.nowPlayingSongID == current.id.rawValue
+                let isPlayingThis = service.isPlayingPreview && isLoadedSong
 
                 SongCardView(
                     song: current,
                     offset: cardOffset,
                     isPlaying: isPlayingThis,
-                    playbackPosition: isPlayingThis ? service.playbackPosition : 0,
-                    playbackDuration: isPlayingThis ? service.playbackDuration : 0,
+                    playbackPosition: isLoadedSong ? service.playbackPosition : 0,
+                    playbackDuration: isLoadedSong ? service.playbackDuration : 0,
                     memberships: viewModel.playlistMemberships(for: current),
                     isLoadingMemberships: viewModel.membershipIndex.showsLoadingPlaceholder,
                     dismissedAt: viewModel.dismissedDate(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) },
                     onShowArtist: { artistSheetSong = current },
+                    onScrubbingChanged: { isScrubbing = $0 },
                     heroNamespace: heroNamespace,
                     chromeRevealed: chromeRevealed
                 )
@@ -482,6 +494,14 @@ struct MusicSwipeView: View {
     private var dragGesture: some Gesture {
         DragGesture(coordinateSpace: .global)
             .onChanged { value in
+                // A scrub on the progress bar must not sort the card. Once a
+                // scrub is live, latch the whole drag as suppressed and keep the
+                // card pinned at rest — the bar's own gesture handles seeking.
+                if isScrubbing || cardDragSuppressed {
+                    cardDragSuppressed = true
+                    if cardOffset != .zero { cardOffset = .zero }
+                    return
+                }
                 cardOffset = value.translation
                 let dx = value.translation.width
                 let dy = value.translation.height
@@ -495,6 +515,12 @@ struct MusicSwipeView: View {
                 }
             }
             .onEnded { value in
+                // Suppressed means this drag was a scrub — consume it without
+                // firing any swipe action, then re-arm for the next gesture.
+                if cardDragSuppressed {
+                    cardDragSuppressed = false
+                    return
+                }
                 handleSwipeEnd(value)
             }
     }

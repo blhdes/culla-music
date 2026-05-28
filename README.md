@@ -15,10 +15,12 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
 - **Home art carousel** — tap the hero on Home to open a fullscreen center-anchored carousel of every cover in the current mode (in the chosen sort order). Drag/scroll snaps to the nearest cover, side-tap snaps it to centre and starts its preview, centre-tap toggles play/pause. The currently-centred song is the seed for the swipe session — tap **Start Cullaing** from inside the carousel and the preview keeps playing through the morph into the swipe card.
 - **Dismissed-mode cleanup menu** — long-press a dismissed card to see a preview of every playlist that song lives in, then **selectively strip it from any subset** of them (toggleable rows, all selected by default). Or pick **Forget dismissal** to un-dismiss without sorting. Destructive removals get a 6 s inline-snackbar Undo that also cancels the in-flight Apple Music task before reverting — no remove/add race.
 - **Source playlist sorting** — point the deck at a specific playlist, then **COPY** songs into other playlists or **MOVE** them out as you go. Read-only sources (Apple-curated, shared, smart Favorites) are allowed too, locked to copy.
+- **Per-playlist library filter** — the Manage Playlists sheet has two segments: **Sidebar** (which playlists appear as drop targets) and **Filter queue** (which playlists' songs to hide from `.library` sessions). The filter is lenient — a song only disappears when *every* playlist it belongs to is filtered, so already-sorted tracks drop out of the library deck without hiding songs you still need to triage.
 - **Up-swipe = Loved** — pull a card upward to drop the song into a "Loved" playlist. Defaults to a Culla-created *Culla Loves* (auto-created on first up-swipe); any of your own playlists can be picked as the target in Settings.
 - **Auto-play on swipe** (default on) — each new card's preview starts the moment the card lands. Toggle off in Settings to keep the swipe screen silent until you tap play. Combine with **Hot-clip preview** for Apple Music's curated ~30 s preview instead of streaming from 0:00.
-- **Scrubbable progress bar** with haptic ticks; cross-fades on track change.
-- **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed. The Loved chip is marked with a ♥.
+- **Scrubbable progress bar** with a playhead dot and haptic ticks; the fill holds its position on pause (no retract) and resumes from where you left off, and cross-fades on track change.
+- **Album + year on the card** — an optional line under the title shows the album and release year when available.
+- **Playlist membership chips** — small pills under the artist tell you which playlists the current song already lives in, so you don't re-sort what's already filed. Chips pick up the song's own accent colour (kept legible on dark album art), and the Loved chip is marked with a ♥.
 - **Artist hub** — info button on the swipe card opens a sheet with the artist's top songs, similar artists, an **About** blurb, and a Google fallback (branded, multi-color "G"). Tapping a similar artist drills deeper without dismissing back to the deck.
 - **Artist "About"** — a one-paragraph bio pulled from Wikipedia, shown in a collapsible card: tap to expand the full text (one-way), tap again to open the article. Names that collide with something else ("Air" the band vs. the gas) are disambiguated through MusicBrainz → Wikidata; when no reliable artist match exists the section hides rather than show a wrong bio. Bios are cached on disk for a week (misses included, so the long tail isn't re-fetched every open).
 - **Settings sheet** — theme (System/Light/Dark), sidebar accent palette, haptics master toggle, auto-play on swipe, hot-clip preview, author-name override for created playlists, read-only-playlist scope toggle, up-swipe Loved-playlist target.
@@ -28,9 +30,9 @@ A swipe-sorter for Apple Music — one song at a time. Swipe right to drop it on
 
 ## Requirements
 
-- **iOS 17 or later** on the runtime device (iOS 26 SDK for development).
+- **iOS 17 or later** on the runtime device (the app target deploys to 17.0; built against the iOS 26.2 SDK).
 - An **Apple Music subscription** on the signed-in account. Without one, you'll get 30s previews instead of full songs but the swipe / sort flow still works.
-- **Xcode 16.2 or later** with the iOS 26 simulators installed.
+- **Xcode 26.2 or later** with the iOS 26 simulators installed.
 - A Development signing cert for the App ID's team — MusicKit catalog requests fail without it, even when the Apple Music UI works fine. See `Dev-Insights/MusicKit Catalog API Cert Setup 2026-05-11.md` in the project's notes for details.
 
 ---
@@ -60,17 +62,24 @@ CullaMusic/
 ├── CullaMusic.xcodeproj/
 └── CullaMusic/
     ├── CullaMusicApp.swift
-    ├── Models/        — Playlist, SortedSong, DismissedSong, SwipeConfig
+    ├── Models/        — Playlist, SortedSong, DismissedSong, SwipeConfig,
+    │                    QueueFilterStore (per-playlist library filter, @AppStorage)
     ├── Services/      — MusicLibraryService (MusicKit, players, playlist CRUD),
     │                    PlaylistTracksCache (actor-isolated membership cache),
+    │                    CarouselSongFeed (covers for the Home carousel),
     │                    ArtistBioService + ArtistBioCache + MusicBrainzClient
     │                    (Wikipedia bios with MusicBrainz disambiguation)
     ├── ViewModels/    — MusicSwipeViewModel (deck state) + extracted coordinators:
     │                    UndoCoordinator, MembershipIndex, LovedPlaylistResolver,
     │                    DismissedDateStore
-    ├── Views/         — Home, Swipe, Sidebar, Manage, Settings sheets
-    ├── Helpers/       — AccentPalette + AccentEnvironment + AccentExtractor,
-    │                    Haptics, LinearLoader, HTTP (shared User-Agent fetch)
+    ├── Views/         — Home (+ hero art stack / scrub carousel), Swipe + SongCard,
+    │                    Sidebar, ArtistDetail (artist hub), SourceScopePicker,
+    │                    Manage / Settings / picker sheets
+    ├── Helpers/       — GlassPanel + GlassSurface + SettingsCard (Liquid Glass / calm
+    │                    primitives), LivingMeshBackground + HomeAmbientBackground,
+    │                    AccentPalette + AccentEnvironment + AccentExtractor + Color+Contrast,
+    │                    Transitions (hero morph), Haptics, LinearLoader, SafariView,
+    │                    HTTP (shared User-Agent fetch)
     └── Assets.xcassets/
 ```
 
@@ -90,7 +99,7 @@ See `AGENTS.md` for the contributor-side guide (conventions, build commands, com
 
 ## Status
 
-MVP plus three polish phases. Functional end-to-end on iOS 26 simulators and on physical devices. On-device behavioral coverage continues — see the `Projects/Culla-Music/Phases/` notes for what's verified and what's still pending.
+MVP plus five build phases — most recently a Liquid Glass design-language pass and a deliberate restraint pass back toward minimalism, followed by a polish round (richer swipe card, per-playlist library filter, scrubbable progress bar, iOS 26 glass/mesh fixes). Functional end-to-end on iOS 26 simulators and on physical devices. On-device behavioral coverage continues — see the `Projects/Culla-Music/Phases/` notes for what's verified and what's still pending.
 
 ---
 

@@ -50,6 +50,13 @@ struct MusicSwipeView: View {
 
     // Sheet
     @State private var showManageSheet = false
+    /// Snapshot of the queue-filter set taken the instant `showManageSheet`
+    /// flips on. Compared on dismiss; a difference triggers `viewModel.reload()`
+    /// so the deck honors the new exclusion immediately. Snapshotting at the
+    /// chrome layer (here) rather than passing a callback into the sheet keeps
+    /// the sheet ignorant of who reloads — same pattern would work if a future
+    /// settings surface edits the filter too.
+    @State private var filterSnapshotOnOpen: Set<String> = []
 
     /// Artist hub sheet — non-nil identifies the song whose artist we want to
     /// inspect. `.sheet(item:)` re-keys on the song's id, so opening the hub
@@ -155,6 +162,16 @@ struct MusicSwipeView: View {
         }
         .onChange(of: viewModel.actionCount) { _, _ in
             flashUndo()
+        }
+        .onChange(of: showManageSheet) { _, isOpen in
+            if isOpen {
+                filterSnapshotOnOpen = QueueFilterStore.read()
+            } else if QueueFilterStore.read() != filterSnapshotOnOpen {
+                // Filter changed — rebuild the deck so freshly-excluded
+                // playlists drop out of the queue (and previously-excluded
+                // ones return) without waiting for the next session start.
+                Task { await viewModel.reload() }
+            }
         }
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }

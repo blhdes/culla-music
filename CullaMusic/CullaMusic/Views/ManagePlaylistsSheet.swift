@@ -1,22 +1,43 @@
 import SwiftUI
 import MusicKit
 
-/// Lets the user pick which playlists appear in the swipe sidebar (capped to
-/// `MusicSwipeViewModel.maxSidebar`) and create new ones. The rows are the
-/// screen — a single glass slab on the calm mesh, with the live count baked
-/// into a subtitle line so no section-card header competes with the list. The
-/// New Playlist action lives in the toolbar as a quiet `+` because it's a
-/// utility, not the page's primary purpose.
+/// Two-segment "Playlists" sheet:
+///   • **Sidebar** — which playlists appear in the right-swipe sidebar
+///     (capped to `MusicSwipeViewModel.maxSidebar`). The original behavior.
+///   • **Filter queue** — which playlists' tracks should disappear from a
+///     `.library` swipe session. Persisted in `QueueFilterStore` and consumed
+///     by `MusicLibraryService.deckExclusionSet`. Lenient: a song hides only
+///     when *every* playlist it belongs to is selected here, so excluding one
+///     playlist never silently culls cross-listed tracks.
 struct ManagePlaylistsSheet: View {
     @Bindable var viewModel: MusicSwipeViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
     @State private var showCreate = false
+    @State private var segment: Segment = .sidebar
 
     /// The up-swipe loved target. Hidden from the sidebar list below since the
     /// up-swipe already covers that playlist and double-listing it implies a
     /// toggle that wouldn't add anything. Configured in Settings.
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+
+    /// Comma-joined `appleMusicPlaylistID`s of playlists whose tracks should be
+    /// hidden from `.library` sessions. The raw string lives in `@AppStorage`
+    /// so the sheet, the service, and any future settings surface all stay in
+    /// lockstep without a custom store. See `QueueFilterStore`.
+    @AppStorage(QueueFilterStore.defaultsKey) private var rawExcluded: String = ""
+
+    enum Segment: String, CaseIterable, Identifiable {
+        case sidebar
+        case filter
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .sidebar: "Sidebar"
+            case .filter:  "Filter queue"
+            }
+        }
+    }
 
     private var maxSidebar: Int { MusicSwipeViewModel.maxSidebar }
 
@@ -31,6 +52,18 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
+    /// Every known playlist, surfaced for the filter list. Apple-generated
+    /// playlists (Heavy Rotation Mix, replay, personal mixes) stay in —
+    /// excluding them is a legitimate power-user move. Sorted alphabetically
+    /// because the sidebar's `displayOrder` is meaningless here.
+    private var filterablePlaylists: [Playlist] {
+        viewModel.playlists
+            .filter { $0.appleMusicPlaylistID != nil }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var excludedSet: Set<String> { QueueFilterStore.decode(rawExcluded) }
+
     private var isAtCapacity: Bool {
         !viewModel.canAddToSidebar && !editablePlaylists.isEmpty
     }
@@ -40,31 +73,44 @@ struct ManagePlaylistsSheet: View {
             ZStack {
                 LivingMeshBackground()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        subtitle
-                        listSlab
-                        if isAtCapacity {
-                            capacityCaption
+                VStack(spacing: 12) {
+                    Picker("Section", selection: $segment) {
+                        ForEach(Segment.allCases) { seg in
+                            Text(seg.label).tag(seg)
                         }
                     }
+                    .pickerStyle(.segmented)
                     .padding(.horizontal, 18)
                     .padding(.top, 14)
-                    .padding(.bottom, 24)
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            switch segment {
+                            case .sidebar: sidebarSection
+                            case .filter:  filterSection
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.top, 4)
+                        .padding(.bottom, 24)
+                        .animation(.snappy(duration: 0.22), value: segment)
+                    }
+                    .scrollContentBackground(.hidden)
                 }
-                .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Manage Playlists")
+            .navigationTitle("Playlists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showCreate = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
+                if segment == .sidebar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showCreate = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .fontWeight(.semibold)
+                        }
+                        .accessibilityLabel("New playlist")
                     }
-                    .accessibilityLabel("New playlist")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -84,12 +130,21 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
-    // MARK: - Page-level caption
+    // MARK: - Sidebar segment
+
+    @ViewBuilder
+    private var sidebarSection: some View {
+        sidebarSubtitle
+        sidebarSlab
+        if isAtCapacity {
+            capacityCaption
+        }
+    }
 
     /// Quiet count line above the slab. The digits tick via
     /// `.contentTransition(.numericText)` so toggling a row reads as a single
     /// motion (row bounce + count tick) without needing a floating chip.
-    private var subtitle: some View {
+    private var sidebarSubtitle: some View {
         Text("\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar")
             .font(.system(.footnote, design: .rounded))
             .foregroundStyle(.secondary)
@@ -99,16 +154,18 @@ struct ManagePlaylistsSheet: View {
             .padding(.horizontal, 4)
     }
 
-    // MARK: - Single glass slab list
-
     @ViewBuilder
-    private var listSlab: some View {
+    private var sidebarSlab: some View {
         if editablePlaylists.isEmpty {
-            emptyState
+            emptyState(
+                title: "No playlists yet",
+                detail: "Tap + to create your first one.",
+                icon: "music.note.list"
+            )
         } else {
             VStack(spacing: 4) {
                 ForEach(Array(editablePlaylists.enumerated()), id: \.element.id) { index, playlist in
-                    row(for: playlist)
+                    sidebarRow(for: playlist)
                     if index < editablePlaylists.count - 1 {
                         Divider().opacity(0.4)
                     }
@@ -125,28 +182,6 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "music.note.list")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.secondary)
-            Text("No playlists yet")
-                .font(.system(.body, design: .rounded).weight(.semibold))
-                .foregroundStyle(.primary)
-            Text("Tap + to create your first one.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 18)
-        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-        )
-    }
-
     /// Soft "you've maxed the sidebar" line below the slab. Replaces silent
     /// `.opacity` dimming with a sentence so the user understands *why*
     /// unselected rows are inert.
@@ -160,7 +195,7 @@ struct ManagePlaylistsSheet: View {
     }
 
     @ViewBuilder
-    private func row(for playlist: Playlist) -> some View {
+    private func sidebarRow(for playlist: Playlist) -> some View {
         let isOn = playlist.isInSidebar
         let canEnable = viewModel.canAddToSidebar
         let isTappable = isOn || canEnable
@@ -214,6 +249,171 @@ struct ManagePlaylistsSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!isTappable)
+    }
+
+    // MARK: - Filter segment
+
+    @ViewBuilder
+    private var filterSection: some View {
+        filterSubtitle
+        if viewModel.config.mode != .library {
+            filterModeCaption
+        }
+        filterSlab
+    }
+
+    /// Two-line subtitle: first line is the count summary, second line spells
+    /// out the lenient rule so users don't worry that hiding a "Workout"
+    /// playlist also yanks tracks that happen to live in their "Chill" list.
+    private var filterSubtitle: some View {
+        let count = excludedSet.count
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(count) playlist\(count == 1 ? "" : "s") filtered")
+                .font(.system(.footnote, design: .rounded))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.snappy, value: count)
+            Text("Hide tracks that live *only* in selected playlists — still shown if also in an unselected one.")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(.secondary.opacity(0.85))
+        }
+        .padding(.horizontal, 4)
+    }
+
+    /// Reminder that the filter is library-mode-only. Edits still persist,
+    /// they just won't change the current deck until the user switches modes.
+    private var filterModeCaption: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private var filterSlab: some View {
+        if filterablePlaylists.isEmpty {
+            emptyState(
+                title: "No playlists to filter",
+                detail: "Once you have playlists in your library, you can hide their tracks here.",
+                icon: "line.3.horizontal.decrease.circle"
+            )
+        } else {
+            VStack(spacing: 4) {
+                ForEach(Array(filterablePlaylists.enumerated()), id: \.element.id) { index, playlist in
+                    filterRow(for: playlist)
+                    if index < filterablePlaylists.count - 1 {
+                        Divider().opacity(0.4)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func filterRow(for playlist: Playlist) -> some View {
+        let amID = playlist.appleMusicPlaylistID ?? ""
+        let isFiltered = !amID.isEmpty && excludedSet.contains(amID)
+
+        Button {
+            toggleFilter(amID: amID)
+        } label: {
+            HStack(spacing: 12) {
+                PlaylistCoverView(
+                    appleMusicPlaylistID: playlist.appleMusicPlaylistID,
+                    size: 40,
+                    cornerRadius: 8
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !playlist.isEditable {
+                        Text("Apple Music")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
+                }
+
+                Spacer()
+
+                // `nil` from `trackCount` means the playlist wasn't walked in
+                // this mode's index pass (curated playlists in `.library`
+                // mode skip the walk). Render nothing rather than a misleading
+                // "0" — the toggle still works because the filter calculation
+                // happens server-side in `deckExclusionSet`.
+                if let count = viewModel.membershipIndex.trackCount(
+                    forPlaylistAMID: playlist.appleMusicPlaylistID
+                ) {
+                    Text(count, format: .number)
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+
+                Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isFiltered ? appAccent : Color.secondary.opacity(0.4))
+                    .font(.title3)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: isFiltered)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 6)
+            .animation(.snappy(duration: 0.22), value: isFiltered)
+        }
+        .buttonStyle(.plain)
+        .disabled(amID.isEmpty)
+    }
+
+    private func toggleFilter(amID: String) {
+        guard !amID.isEmpty else { return }
+        var set = excludedSet
+        if set.contains(amID) {
+            set.remove(amID)
+        } else {
+            set.insert(amID)
+        }
+        rawExcluded = QueueFilterStore.encode(set)
+    }
+
+    // MARK: - Shared empty state
+
+    private func emptyState(title: String, detail: String, icon: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(.body, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(detail)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .padding(.horizontal, 18)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        )
     }
 }
 

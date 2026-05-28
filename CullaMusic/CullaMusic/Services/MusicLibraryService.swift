@@ -686,13 +686,25 @@ final class MusicLibraryService {
     /// existed, the hero ran an unfiltered library request and could surface a
     /// song the carousel had already excluded — first-cover mismatch.
     ///
-    /// - `.library`:   sorted ∪ dismissed  (already acted on)
+    /// - `.library`:   sorted ∪ dismissed ∪ filtered  (already acted on, plus
+    ///                 the user's per-playlist exclude list — see
+    ///                 `QueueFilterStore` and the lenient rule below)
     /// - `.unsorted`:  playlists ∪ sorted ∪ dismissed  (everything that "has a home")
     /// - `.dismissed`: empty (dismissed mode *shows* dismissed songs, doesn't filter them)
     ///
+    /// `.library` filter — lenient policy: a song is added to the exclusion
+    /// set only when *every* playlist it belongs to is in the user's
+    /// excluded set. Songs in zero playlists are never filtered. This
+    /// preserves the ability to encounter a song from a non-excluded
+    /// playlist even if it also lives in an excluded one.
+    ///
     /// On a playlist-fetch failure in `.unsorted`, returns `[]` to match
     /// `CarouselSongFeed.buildExclusionSet`'s prior behavior — without this,
-    /// the hero and the carousel would diverge in the failure path.
+    /// the hero and the carousel would diverge in the failure path. The
+    /// `.library` membership fetch follows the same pattern: on failure we
+    /// fall back to the unfiltered sorted ∪ dismissed set rather than empty,
+    /// because losing sort/dismiss filtering would be worse than losing the
+    /// user's optional playlist filter.
     func deckExclusionSet(
         for mode: ReviewMode,
         modelContext: ModelContext
@@ -705,7 +717,22 @@ final class MusicLibraryService {
         )
         switch mode {
         case .library:
-            return sortedIDs.union(dismissedIDs)
+            let base = sortedIDs.union(dismissedIDs)
+            let excludedPlaylists = QueueFilterStore.read()
+            guard !excludedPlaylists.isEmpty else { return base }
+            do {
+                let membership = try await fetchPlaylistMembershipIndex(includeCurated: true)
+                var filtered = base
+                for (songID, playlistAMIDs) in membership where !playlistAMIDs.isEmpty {
+                    if playlistAMIDs.allSatisfy({ excludedPlaylists.contains($0.rawValue) }) {
+                        filtered.insert(songID)
+                    }
+                }
+                return filtered
+            } catch {
+                print("deckExclusionSet library filter failed: \(error)")
+                return base
+            }
         case .unsorted:
             do {
                 let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: true)

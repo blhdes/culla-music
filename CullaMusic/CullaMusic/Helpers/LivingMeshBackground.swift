@@ -57,16 +57,18 @@ struct LivingMeshBackground: View {
         .ignoresSafeArea()
     }
 
-    /// 9 control points on a 3×3 grid. The four interior corners wander on a
-    /// slow Lissajous curve so the gradient looks like ink drifting in water.
-    /// Edges stay anchored so the gradient never "leaves" the screen.
+    /// 9 control points on a 3×3 grid. The center point wanders on a slow
+    /// Lissajous curve so the gradient looks like ink drifting in water; the
+    /// side-middle points drift only in y so the screen edges stay flush.
     ///
-    /// The side-middle points are based slightly inboard of x=0/x=1 (and the
-    /// wander amp is conservative) so a wandered coordinate can never leave
-    /// the unit square. MeshGradient does bilinear interpolation; once an
-    /// interior point crosses the boundary, the quad triangulation degenerates
-    /// and the gradient renders empty triangles ("diagonal cuts") — visible
-    /// app-wide whenever the timer ticks across the cycle.
+    /// Side-middle x is pinned at exactly 0 and 1. A prior version put them
+    /// slightly inboard (0.05 / 0.95) to add safety against the wander pushing
+    /// them outside the unit square, but that left a narrow strip between the
+    /// inboard point and the screen edge where the gradient interpolated from
+    /// the accent-tinted "companion" color back to systemBackground — a
+    /// visible band on the left and right edges that pulsed as y wandered.
+    /// Corner points already live on the boundary, so anchoring side-middle
+    /// there too is the natural layout.
     @available(iOS 18.0, *)
     private func meshPoints(at t: TimeInterval) -> [SIMD2<Float>] {
         let amp: Float = 0.045
@@ -80,11 +82,15 @@ struct LivingMeshBackground: View {
             )
         }
 
+        func wanderY(_ x: Float, _ seedY: Float) -> SIMD2<Float> {
+            SIMD2(x, 0.5 + amp * cos(phase + seedY))
+        }
+
         return [
             SIMD2(0, 0), SIMD2(0.5, 0), SIMD2(1, 0),
-            wander(SIMD2(0.05, 0.5), 0.0, 1.3),
-            wander(SIMD2(0.5,  0.5), 1.7, 2.9),
-            wander(SIMD2(0.95, 0.5), 3.1, 0.7),
+            wanderY(0, 1.3),
+            wander(SIMD2(0.5, 0.5), 1.7, 2.9),
+            wanderY(1, 0.7),
             SIMD2(0, 1), SIMD2(0.5, 1), SIMD2(1, 1)
         ]
     }

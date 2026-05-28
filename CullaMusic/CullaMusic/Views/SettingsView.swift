@@ -41,6 +41,17 @@ struct SettingsView: View {
         }
     }
 
+    // A sheet runs in its own presentation host, so `.preferredColorScheme`
+    // set on the presenter doesn't update this view live — only on the next
+    // re-presentation. Mirror it here so the toggle takes effect instantly.
+    private var sheetColorScheme: ColorScheme? {
+        switch colorSchemeRaw {
+        case "light": .light
+        case "dark":  .dark
+        default:      nil
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -75,6 +86,7 @@ struct SettingsView: View {
                 AccentPalettePickerSheet(selectedRaw: $accentPaletteRaw)
             }
         }
+        .preferredColorScheme(sheetColorScheme)
     }
 
     // MARK: - Cards

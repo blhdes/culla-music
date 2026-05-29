@@ -124,49 +124,15 @@ struct SourceScopePickerSheet: View {
 
     // MARK: - Sort chip
 
-    /// Compact chip below the segmented control. Shows the active sort at a
-    /// glance ("⇅ Name (A→Z)"), and taps open a flat menu of concrete
-    /// combinations. Collapses the old two-Picker "Sort By + Sort Order"
-    /// menu into one list — no abstraction layer to read past.
+    /// Per-tab sort control. The shared `SortChip` renders the active option
+    /// and the flat menu of concrete (field, direction) combinations; this just
+    /// hands it the right binding for the current tab.
+    @ViewBuilder
     private var sortChip: some View {
-        Menu {
-            switch pickerMode {
-            case .playlists:
-                Picker(selection: playlistSortChoiceBinding) {
-                    ForEach(PlaylistSortChoice.allCases) { choice in
-                        Text(choice.label).tag(choice)
-                    }
-                } label: {
-                    EmptyView()
-                }
-            case .artists:
-                Picker(selection: artistSortChoiceBinding) {
-                    ForEach(ArtistSortChoice.allCases) { choice in
-                        Text(choice.label).tag(choice)
-                    }
-                } label: {
-                    EmptyView()
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.caption2.weight(.bold))
-                Text(currentSortLabel)
-                    .font(.system(.caption, design: .rounded).weight(.medium))
-                    .contentTransition(.opacity)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .opacity(0.6)
-            }
-            // Section headers uppercase their text; keep the chip's own casing.
-            .textCase(nil)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .foregroundStyle(.secondary)
-            .glassSurface(in: Capsule(), interactive: true)
+        switch pickerMode {
+        case .playlists: SortChip(selection: playlistSortChoiceBinding)
+        case .artists:   SortChip(selection: artistSortChoiceBinding)
         }
-        .animation(.snappy(duration: 0.2), value: currentSortLabel)
     }
 
     /// Section header carrying the per-tab sort menu at its trailing edge.
@@ -182,17 +148,6 @@ struct SourceScopePickerSheet: View {
                     .controlSize(.small)
             }
             sortChip
-        }
-    }
-
-    private var currentSortLabel: String {
-        switch pickerMode {
-        case .playlists:
-            let field = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
-            return PlaylistSortChoice(field: field, descending: playlistSortDescending).label
-        case .artists:
-            let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
-            return ArtistSortChoice(field: field, descending: artistSortDescending).label
         }
     }
 
@@ -611,7 +566,7 @@ enum ArtistSortField: String, CaseIterable {
 /// Every (field, direction) pair the playlist tab supports, in menu order.
 /// Lets the Menu render one flat list of human-readable options instead of
 /// two stacked Pickers ("Sort By" + "Sort Order").
-enum PlaylistSortChoice: String, CaseIterable, Identifiable {
+enum PlaylistSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
     case nameAsc
     case nameDesc
     case dateDesc
@@ -659,7 +614,7 @@ enum PlaylistSortChoice: String, CaseIterable, Identifiable {
     }
 }
 
-enum ArtistSortChoice: String, CaseIterable, Identifiable {
+enum ArtistSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
     case nameAsc
     case nameDesc
     case countDesc

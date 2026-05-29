@@ -27,6 +27,12 @@ struct ManagePlaylistsSheet: View {
     /// lockstep without a custom store. See `QueueFilterStore`.
     @AppStorage(QueueFilterStore.defaultsKey) private var rawExcluded: String = ""
 
+    // Each segment persists its own sort choice (stored as the choice's raw
+    // value) so sorting one doesn't reshuffle the other. Sidebar defaults to
+    // its real displayOrder; queue filter to alphabetical.
+    @AppStorage("managePlaylists.sidebarSort") private var sidebarSortRaw = SidebarSortChoice.sidebarOrder.rawValue
+    @AppStorage("managePlaylists.filterSort") private var filterSortRaw = PlaylistSortChoice.nameAsc.rawValue
+
     enum Segment: String, CaseIterable, Identifiable {
         case sidebar
         case filter
@@ -54,15 +60,76 @@ struct ManagePlaylistsSheet: View {
 
     /// Every known playlist, surfaced for the filter list. Apple-generated
     /// playlists (Heavy Rotation Mix, replay, personal mixes) stay in —
-    /// excluding them is a legitimate power-user move. Sorted alphabetically
-    /// because the sidebar's `displayOrder` is meaningless here.
+    /// excluding them is a legitimate power-user move. Ordering is applied by
+    /// the user's sort choice (`sortedFilterablePlaylists`), not here.
     private var filterablePlaylists: [Playlist] {
-        viewModel.playlists
-            .filter { $0.appleMusicPlaylistID != nil }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        viewModel.playlists.filter { $0.appleMusicPlaylistID != nil }
     }
 
     private var excludedSet: Set<String> { QueueFilterStore.decode(rawExcluded) }
+
+    // MARK: - Sorting
+
+    private var sidebarSortChoice: Binding<SidebarSortChoice> {
+        Binding(
+            get: { SidebarSortChoice(rawValue: sidebarSortRaw) ?? .sidebarOrder },
+            set: { sidebarSortRaw = $0.rawValue }
+        )
+    }
+
+    private var filterSortChoice: Binding<PlaylistSortChoice> {
+        Binding(
+            get: { PlaylistSortChoice(rawValue: filterSortRaw) ?? .nameAsc },
+            set: { filterSortRaw = $0.rawValue }
+        )
+    }
+
+    private var sortedEditablePlaylists: [Playlist] {
+        let choice = sidebarSortChoice.wrappedValue
+        return sorted(editablePlaylists, field: choice.field, descending: choice.descending)
+    }
+
+    private var sortedFilterablePlaylists: [Playlist] {
+        let choice = filterSortChoice.wrappedValue
+        return sorted(filterablePlaylists, field: choice.field, descending: choice.descending)
+    }
+
+    /// Orders a list by a sort field. A `nil` field means "keep the source
+    /// order" — for the sidebar that's the real displayOrder, since
+    /// `viewModel.playlists` already arrives sorted by it. Counts come from the
+    /// live `membershipIndex`, dates from the service.
+    private func sorted(_ playlists: [Playlist], field: PlaylistSortField?, descending: Bool) -> [Playlist] {
+        guard let field else { return playlists }
+        var rows = playlists
+        rows.sort { lhs, rhs in
+            switch field {
+            case .alphabetical:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .modifiedDate:
+                // Missing-date rows sort last ascending / first descending —
+                // out of the way regardless of direction.
+                let l = lhs.appleMusicPlaylistID.flatMap {
+                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
+                }
+                let r = rhs.appleMusicPlaylistID.flatMap {
+                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
+                }
+                switch (l, r) {
+                case let (l?, r?): return l < r
+                case (nil, _?):    return false
+                case (_?, nil):    return true
+                case (nil, nil):
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+            case .trackCount:
+                let l = viewModel.membershipIndex.trackCount(forPlaylistAMID: lhs.appleMusicPlaylistID) ?? 0
+                let r = viewModel.membershipIndex.trackCount(forPlaylistAMID: rhs.appleMusicPlaylistID) ?? 0
+                return l < r
+            }
+        }
+        if descending { rows.reverse() }
+        return rows
+    }
 
     private var isAtCapacity: Bool {
         !viewModel.canAddToSidebar && !editablePlaylists.isEmpty
@@ -106,10 +173,11 @@ struct ManagePlaylistsSheet: View {
             .navigationTitle("Playlists")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Always render the leading slot so the nav bar layout stays
-                // identical across segments — conditionally inserting/removing
-                // a ToolbarItem was triggering a NavigationStack reflow that
-                // rippled into the ZStack on every switch.
+                // Create is available in both segments — a new playlist is just
+                // as valid a queue-filter target as a sidebar one. The slot is
+                // always present (never conditionally inserted) so switching
+                // segments doesn't trigger a NavigationStack reflow into the
+                // ZStack below.
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         showCreate = true
@@ -118,8 +186,6 @@ struct ManagePlaylistsSheet: View {
                             .fontWeight(.semibold)
                     }
                     .accessibilityLabel("New playlist")
-                    .opacity(segment == .sidebar ? 1 : 0)
-                    .allowsHitTesting(segment == .sidebar)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -151,17 +217,23 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
-    /// Quiet count line above the slab. The digits tick via
-    /// `.contentTransition(.numericText)` so toggling a row reads as a single
-    /// motion (row bounce + count tick) without needing a floating chip.
+    /// Quiet count line above the slab, with the sort control on its trailing
+    /// edge. The digits tick via `.contentTransition(.numericText)` so toggling
+    /// a row reads as a single motion (row bounce + count tick).
     private var sidebarSubtitle: some View {
-        Text("\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar")
-            .font(.system(.footnote, design: .rounded))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-            .contentTransition(.numericText(countsDown: false))
-            .animation(.snappy, value: viewModel.sidebarCount)
-            .padding(.horizontal, 4)
+        HStack {
+            Text("\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar")
+                .font(.system(.footnote, design: .rounded))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.snappy, value: viewModel.sidebarCount)
+            Spacer()
+            if !editablePlaylists.isEmpty {
+                SortChip(selection: sidebarSortChoice)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     @ViewBuilder
@@ -174,9 +246,10 @@ struct ManagePlaylistsSheet: View {
             )
         } else {
             VStack(spacing: 4) {
-                ForEach(Array(editablePlaylists.enumerated()), id: \.element.id) { index, playlist in
+                let rows = sortedEditablePlaylists
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, playlist in
                     sidebarRow(for: playlist)
-                    if index < editablePlaylists.count - 1 {
+                    if index < rows.count - 1 {
                         Divider().opacity(0.4)
                     }
                 }
@@ -277,13 +350,19 @@ struct ManagePlaylistsSheet: View {
     /// element outside the slab rows.
     private var filterSubtitle: some View {
         let count = excludedSet.count
-        return Text("\(count) playlist\(count == 1 ? "" : "s") filtered")
-            .font(.system(.footnote, design: .rounded))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-            .contentTransition(.numericText(countsDown: false))
-            .animation(.snappy, value: count)
-            .padding(.horizontal, 4)
+        return HStack {
+            Text("\(count) playlist\(count == 1 ? "" : "s") filtered")
+                .font(.system(.footnote, design: .rounded))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.snappy, value: count)
+            Spacer()
+            if !filterablePlaylists.isEmpty {
+                SortChip(selection: filterSortChoice)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     /// Reminder that the filter is library-mode-only. Edits still persist,
@@ -308,9 +387,10 @@ struct ManagePlaylistsSheet: View {
             )
         } else {
             VStack(spacing: 4) {
-                ForEach(Array(filterablePlaylists.enumerated()), id: \.element.id) { index, playlist in
+                let rows = sortedFilterablePlaylists
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, playlist in
                     filterRow(for: playlist)
-                    if index < filterablePlaylists.count - 1 {
+                    if index < rows.count - 1 {
                         Divider().opacity(0.4)
                     }
                 }
@@ -479,6 +559,55 @@ struct ManagePlaylistsSheet: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(.white.opacity(0.06), lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Sidebar sort choices
+
+/// Sort options for the **Sidebar** segment. Adds "Sidebar Order" — the
+/// playlists' real `displayOrder`, i.e. the order they appear in the swipe
+/// sidebar — and defaults to it, so opening the sheet doesn't reshuffle the
+/// list. Kept separate from `PlaylistSortChoice` because displayOrder is
+/// meaningless on the scope picker and queue filter, which share that enum.
+enum SidebarSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
+    case sidebarOrder
+    case nameAsc
+    case nameDesc
+    case dateDesc
+    case dateAsc
+    case countDesc
+    case countAsc
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .sidebarOrder: "Sidebar Order"
+        case .nameAsc:      "Name (A→Z)"
+        case .nameDesc:     "Name (Z→A)"
+        case .dateDesc:     "Recently Modified"
+        case .dateAsc:      "Oldest First"
+        case .countDesc:    "Most Songs"
+        case .countAsc:     "Fewest Songs"
+        }
+    }
+
+    /// `nil` for `sidebarOrder` — the sort helper treats a nil field as "keep
+    /// the source order", which is already displayOrder.
+    var field: PlaylistSortField? {
+        switch self {
+        case .sidebarOrder:         nil
+        case .nameAsc, .nameDesc:   .alphabetical
+        case .dateDesc, .dateAsc:   .modifiedDate
+        case .countDesc, .countAsc: .trackCount
+        }
+    }
+
+    var descending: Bool {
+        switch self {
+        case .nameDesc, .dateDesc, .countDesc:             true
+        case .sidebarOrder, .nameAsc, .dateAsc, .countAsc: false
+        }
     }
 }
 

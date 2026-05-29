@@ -131,8 +131,9 @@ final class CarouselSongFeed {
             return
         }
         let ids = rows.map(\.songID)
+        let catalogIDs = Set(rows.filter(\.isCatalogTrack).map(\.songID))
         do {
-            songs = try await service.resolveSongs(ids: ids)
+            songs = try await service.resolveSongs(orderedIDs: ids, catalogIDs: catalogIDs)
         } catch {
             print("CarouselSongFeed dismissed resolve failed: \(error)")
         }

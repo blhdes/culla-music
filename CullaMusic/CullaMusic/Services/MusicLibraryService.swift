@@ -71,7 +71,7 @@ final class MusicLibraryService {
     // Library paging cursor
     private var pageOffset: Int = 0
     private var libraryExhausted: Bool = false
-    private var playlistSongIDs: [MusicItemID: [String]] = [:]
+    private var playlistSongs: [MusicItemID: [Song]] = [:]
     private var playlistPageOffsets: [MusicItemID: Int] = [:]
     private var playlistExhausted: Set<MusicItemID> = []
 
@@ -117,7 +117,7 @@ final class MusicLibraryService {
     func resetLibraryCursor() {
         pageOffset = 0
         libraryExhausted = false
-        playlistSongIDs.removeAll(keepingCapacity: true)
+        playlistSongs.removeAll(keepingCapacity: true)
         playlistPageOffsets.removeAll(keepingCapacity: true)
         playlistExhausted.removeAll(keepingCapacity: true)
         artistPageOffsets.removeAll(keepingCapacity: true)
@@ -172,36 +172,33 @@ final class MusicLibraryService {
     ) async throws -> [Song] {
         if playlistExhausted.contains(id) { return [] }
 
-        if playlistSongIDs[id] == nil {
-            playlistSongIDs[id] = try await fetchSongIDs(inPlaylistID: id)
+        if playlistSongs[id] == nil {
+            playlistSongs[id] = try await fetchPlaylistSongs(inPlaylistID: id)
         }
 
         // MusicKit returns tracks in playlist position (oldest-added at the
         // top, newly-added at the bottom). For "newest first" we walk the
-        // array in reverse so freshly-loved songs surface first instead of
-        // being buried 100+ pages deep. The previous libraryAddedDate sort
-        // only reshuffled within the 50-song slice — and used the wrong field
-        // (library-add date, not playlist-add date) — so it could never lift
-        // newer playlist entries past older ones.
-        let rawIDs = playlistSongIDs[id] ?? []
-        let ids = ascending ? rawIDs : Array(rawIDs.reversed())
+        // array in reverse so freshly-added songs surface first instead of
+        // being buried 100+ pages deep.
+        let rawSongs = playlistSongs[id] ?? []
+        let songs = ascending ? rawSongs : Array(rawSongs.reversed())
         var offset = playlistPageOffsets[id] ?? 0
-        var selectedIDs: [String] = []
+        var selected: [Song] = []
 
-        while offset < ids.count && selectedIDs.count < desired {
-            let songID = ids[offset]
+        while offset < songs.count && selected.count < desired {
+            let song = songs[offset]
             offset += 1
-            if !excluding.contains(songID) {
-                selectedIDs.append(songID)
+            if !excluding.contains(song.id.rawValue) {
+                selected.append(song)
             }
         }
 
         playlistPageOffsets[id] = offset
-        if offset >= ids.count {
+        if offset >= songs.count {
             playlistExhausted.insert(id)
         }
 
-        return try await resolveSongs(ids: selectedIDs)
+        return selected
     }
 
     // MARK: - Library Artists
@@ -541,13 +538,24 @@ final class MusicLibraryService {
         return playlistCache[id]
     }
 
-    private func fetchSongIDs(inPlaylistID id: MusicItemID) async throws -> [String] {
+    /// Reads a playlist's tracks as `Song` objects straight from the `.tracks`
+    /// relationship. Pulling the songs out directly (instead of mapping to ID
+    /// strings and re-resolving them) is what makes playlist scope work for
+    /// Apple curated playlists: their tracks aren't in the user's library, and
+    /// their IDs live in a different namespace than catalog IDs — so trying to
+    /// re-resolve those IDs landed on unrelated songs. The Track relationship
+    /// already hands us the correct, playable songs. `MusicKit.Track` is an
+    /// enum, so we keep the `.song` cases and drop any `.musicVideo` entries.
+    private func fetchPlaylistSongs(inPlaylistID id: MusicItemID) async throws -> [Song] {
         guard let playlist = try await freshPlaylist(id: id) else {
             throw MusicLibraryError.playlistNotFound
         }
 
         let populated: MusicKit.Playlist = try await playlist.with([.tracks])
-        return (populated.tracks ?? []).map { $0.id.rawValue }
+        return (populated.tracks ?? []).compactMap { track in
+            if case .song(let song) = track { return song }
+            return nil
+        }
     }
 
     private func performPlaylistMutation(
@@ -834,6 +842,66 @@ final class MusicLibraryService {
         }
 
         return ids.compactMap { found[$0] }
+    }
+
+    /// A targeted library lookup for one song ID. Used to classify a dismissed
+    /// track: if its ID isn't in the library it's a catalog-only track (e.g. a
+    /// not-yet-added editorial song). Safe by construction — a library request
+    /// only ever returns an exact match or nothing, so it can never confuse a
+    /// library ID for an unrelated catalog song.
+    func isInLibrary(songID id: MusicItemID) async -> Bool {
+        var request = MusicLibraryRequest<Song>()
+        request.filter(matching: \.id, equalTo: id)
+        let response = try? await request.response()
+        return response?.items.isEmpty == false
+    }
+
+    /// Resolves an ordered list of IDs split across both stores: IDs in
+    /// `catalogIDs` resolve from the Apple Music catalog, the rest from the
+    /// library. The caller must know the split (we persist it on
+    /// `DismissedSong.isCatalogTrack`) — guessing it from the ID string is
+    /// unsafe because library and catalog IDs share the numeric namespace.
+    /// Order follows `orderedIDs` so the caller's sort survives.
+    func resolveSongs(orderedIDs: [String], catalogIDs: Set<String>) async throws -> [Song] {
+        guard !orderedIDs.isEmpty else { return [] }
+        let libraryIDs = orderedIDs.filter { !catalogIDs.contains($0) }
+        let catalogOnly = orderedIDs.filter { catalogIDs.contains($0) }
+
+        var found: [String: Song] = [:]
+        if !libraryIDs.isEmpty {
+            for song in try await resolveSongs(ids: libraryIDs) {
+                found[song.id.rawValue] = song
+            }
+        }
+        if !catalogOnly.isEmpty {
+            for song in await resolveCatalogSongs(ids: catalogOnly) {
+                found[song.id.rawValue] = song
+            }
+        }
+        return orderedIDs.compactMap { found[$0] }
+    }
+
+    /// Batched catalog lookup by song ID, chunked to stay under Apple Music's
+    /// per-request id cap. Non-throwing: a failed chunk is logged and skipped
+    /// so one bad ID can't sink the whole deck. Only ever called with genuine
+    /// catalog IDs (see `resolveSongs(orderedIDs:catalogIDs:)`).
+    private func resolveCatalogSongs(ids: [String]) async -> [Song] {
+        let chunkSize = 25
+        var resolved: [Song] = []
+        var index = 0
+        while index < ids.count {
+            let chunk = Array(ids[index..<min(index + chunkSize, ids.count)])
+            index += chunkSize
+            let itemIDs = chunk.map { MusicItemID($0) }
+            do {
+                let request = MusicCatalogResourceRequest<Song>(matching: \.id, memberOf: itemIDs)
+                let response = try await request.response()
+                resolved.append(contentsOf: response.items)
+            } catch {
+                print("resolveCatalogSongs chunk failed: \(error)")
+            }
+        }
+        return resolved
     }
 
     // MARK: - Playback

@@ -318,6 +318,11 @@ final class MusicSwipeViewModel {
         sessionExclusionSet.insert(songID)
         dismissedStore.set(songID: songID, date: record.dismissedAt)
         sessionDismissedCount += 1
+        // Only a playlist scope can surface a catalog-only track; every other
+        // deck is library-bound, so skip the lookup there.
+        if config.isPlaylistSource {
+            classifyDismissedTrack(recordID: record.id, song: song)
+        }
         setToast("Dismissed")
         advance()
     }
@@ -596,7 +601,7 @@ final class MusicSwipeViewModel {
                 // session — we treat SortedSong membership as "permanently
                 // sorted".
                 rollbackLoved(
-                    songID: songID,
+                    song: song,
                     recordID: recordID,
                     playlistAMID: amID,
                     restoreDismissedAt: originalDismissedAt
@@ -630,11 +635,12 @@ final class MusicSwipeViewModel {
     /// part of the love operation — reinsert the DismissedSong with the
     /// original timestamp so the local state matches what was on disk before.
     private func rollbackLoved(
-        songID: String,
+        song: Song,
         recordID: UUID,
         playlistAMID: MusicItemID,
         restoreDismissedAt: Date? = nil
     ) {
+        let songID = song.id.rawValue
         undoCoordinator.remove { action in
             if case .loved(_, _, let r) = action { return r.id == recordID }
             if case .lovedFromDismissed(_, _, let r, _) = action { return r.id == recordID }
@@ -653,6 +659,7 @@ final class MusicSwipeViewModel {
             restored.dismissedAt = restoreDismissedAt
             modelContext.insert(restored)
             dismissedStore.set(songID: songID, date: restoreDismissedAt)
+            classifyDismissedTrack(recordID: restored.id, song: song)
         }
 
         try? modelContext.save()
@@ -706,6 +713,7 @@ final class MusicSwipeViewModel {
             restored.dismissedAt = originalDismissedAt
             modelContext.insert(restored)
             try? modelContext.save()
+            classifyDismissedTrack(recordID: restored.id, song: song)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
             dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
@@ -727,6 +735,7 @@ final class MusicSwipeViewModel {
             restored.dismissedAt = originalDismissedAt
             modelContext.insert(restored)
             try? modelContext.save()
+            classifyDismissedTrack(recordID: restored.id, song: song)
             sessionExclusionSet.remove(song.id.rawValue)
             sessionSortedCount = max(sessionSortedCount - 1, 0)
             dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
@@ -789,6 +798,7 @@ final class MusicSwipeViewModel {
             restored.dismissedAt = dismissedAt
             modelContext.insert(restored)
             try? modelContext.save()
+            classifyDismissedTrack(recordID: restored.id, song: song)
             sessionExclusionSet.remove(song.id.rawValue)
             dismissedStore.set(songID: song.id.rawValue, date: dismissedAt)
             pushBackToFront(song: song)
@@ -865,10 +875,12 @@ final class MusicSwipeViewModel {
             return
         }
 
-        let remainingIDs = dismissed.map(\.songID).filter { !skipIDs.contains($0) }
+        let remaining = dismissed.filter { !skipIDs.contains($0.songID) }
+        let remainingIDs = remaining.map(\.songID)
+        let catalogIDs = Set(remaining.filter(\.isCatalogTrack).map(\.songID))
         let resolved = remainingIDs.isEmpty
             ? []
-            : try await service.resolveSongs(ids: remainingIDs)
+            : try await service.resolveSongs(orderedIDs: remainingIDs, catalogIDs: catalogIDs)
         populateQueue(with: lead + resolved)
     }
 
@@ -924,6 +936,27 @@ final class MusicSwipeViewModel {
         nextSong = currentSong
         currentSong = song
         isEmpty = false
+    }
+
+    /// Marks a dismissed record as a catalog track when the song isn't in the
+    /// user's library, so the Dismissed deck later resolves it from the catalog
+    /// instead of dropping it. Runs after the optimistic dismiss — the flag
+    /// only affects future Dismissed loads, never the current advance — so the
+    /// swipe stays instant. Re-fetches by id so an undo that deleted the row in
+    /// the meantime is a harmless no-op. The split is decided by a real library
+    /// lookup, never by inspecting the ID string (which risks a catalog/library
+    /// namespace collision).
+    private func classifyDismissedTrack(recordID: UUID, song: Song) {
+        Task { @MainActor in
+            let inLibrary = await service.isInLibrary(songID: song.id)
+            guard !inLibrary else { return }
+            let descriptor = FetchDescriptor<DismissedSong>(
+                predicate: #Predicate { $0.id == recordID }
+            )
+            guard let row = (try? modelContext.fetch(descriptor))?.first else { return }
+            row.isCatalogTrack = true
+            try? modelContext.save()
+        }
     }
 
     private func fetchExcludedIdentifiers() -> Set<String> {

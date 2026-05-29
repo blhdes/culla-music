@@ -982,7 +982,16 @@ private struct ModeTile: View {
     private var countSlot: some View {
         Group {
             if isLoadingCount {
-                LinearLoader()
+                // A shimmering "a number is coming" bone — same SkeletonShape
+                // vocabulary as the hero deck, so the badges and the hero
+                // shimmer in sync on a cold launch. Tinted to the contrast
+                // foreground when the tile is selected (accent-filled) so the
+                // bone stays legible instead of vanishing into the accent.
+                SkeletonShape(
+                    shape: Capsule(),
+                    fill: isSelected ? accentForeground.opacity(0.28) : .primary.opacity(0.10)
+                )
+                .frame(width: 36, height: 15)
             } else if let count {
                 Text(count.formatted())
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))

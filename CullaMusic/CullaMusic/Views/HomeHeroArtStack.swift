@@ -162,8 +162,7 @@ struct HomeHeroArtStack: View {
         // letting ForEach call the computed property per-iteration.
         let cards = combinedArtworks
         if cards.isEmpty {
-            placeholderCard
-                .shadow(color: .black.opacity(0.22), radius: 18, y: 12)
+            skeletonDeck
                 .scaleEffect(pulse ? 1.0 : 0.96)
                 .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
                 .transition(.scale(scale: 0.9).combined(with: .opacity))
@@ -422,8 +421,11 @@ struct HomeHeroArtStack: View {
                             .strokeBorder(.white.opacity(0.16), lineWidth: 1)
                     )
             } else {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.thinMaterial)
+                // Shimmering bone while the track artwork resolves — same
+                // SkeletonShape vocabulary as the hero deck and the artist
+                // sheet, so every loading surface breathes in one language
+                // instead of a dead material rectangle.
+                SkeletonShape(shape: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .frame(width: side, height: side)
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -437,21 +439,50 @@ struct HomeHeroArtStack: View {
         .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
     }
 
-    /// Empty/loading state. Used by the scrub deck before artworks land,
-    /// and visually reused so the hero never goes blank during a swap.
-    private var placeholderCard: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(.thinMaterial)
+    /// Empty/loading state for the source-less deck, shown before the album
+    /// artworks land. Three shimmering bones laid out at the SAME rest slots
+    /// the real covers occupy (`centreSlot` + the two near peeks), so when the
+    /// art arrives it sharpens into this exact pile instead of a single
+    /// placeholder popping into a three-card deck. Reuses `SkeletonShape` — the
+    /// same coordinated shimmer the artist sheet's loading state uses — so
+    /// loading reads identically across the app.
+    private var skeletonDeck: some View {
+        ZStack {
+            skeletonCard(layout: Self.nearLeftSlot, isCentre: false)
+            skeletonCard(layout: Self.nearRightSlot, isCentre: false)
+            skeletonCard(layout: Self.centreSlot, isCentre: true)
+        }
+    }
+
+    /// One bone in `skeletonDeck`, transformed to its rest slot. The centre
+    /// bone keeps the mode's fallback symbol (`music.note` / `tray.full` /
+    /// `archivebox`) as a quiet "what am I loading" hint; the back bones stay
+    /// blank. Side bones are deliberately NOT dimmed to their slot opacity —
+    /// keeping all three at full strength telegraphs the deck, and the real
+    /// covers settle to their slot opacities on reveal.
+    private func skeletonCard(layout: ScrubLayout, isCentre: Bool) -> some View {
+        SkeletonShape(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: frontFallbackKind.symbol)
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(.secondary)
-                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-            )
+            .overlay {
+                if isCentre {
+                    Image(systemName: frontFallbackKind.symbol)
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundStyle(.secondary)
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            )
+            .scaleEffect(layout.scale)
+            .rotationEffect(.degrees(layout.rotation))
+            .offset(layout.offset)
+            // Neutral depth shadow matching `scrubCard` — centre lifts, sides
+            // flatten toward the page. No accent tint.
+            .shadow(
+                color: .black.opacity(isCentre ? 0.22 : 0.16),
+                radius: isCentre ? 16 : 10,
+                y: isCentre ? 10 : 6
             )
     }
 

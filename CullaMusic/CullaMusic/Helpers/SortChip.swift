@@ -12,10 +12,14 @@ protocol SortChoiceProtocol: CaseIterable, Identifiable, Hashable {
 /// active one inline ("⇅ Name (A→Z)"). Shared by the scope picker and the
 /// playlists manager so both sheets sort with the exact same control.
 ///
-/// The `.contentShape(.contextMenuPreview, Capsule())` matches the menu's
-/// press-in "lift" silhouette to the glass capsule — without it iOS lifts the
-/// label on a rectangular platter and the rounded ends render against raw,
-/// unintegrated corners. (Same fix `MusicSwipeView` uses for its card menu.)
+/// `.menuStyle(.button)` + `.buttonStyle(.plain)` are deliberate. A plain
+/// `Menu` draws its own press chrome: a *rounded-rectangle* gray highlight plus
+/// a lifted platter with a drop shadow. Both have square-ish corners that crop
+/// against the capsule glass on touch — the "half-cut, badly integrated"
+/// background. Routing the menu through a plain button style suppresses that
+/// system chrome entirely, leaving only the flat capsule glass underneath. No
+/// `interactive:` glass and no `.contextMenuPreview` reshaping needed once the
+/// platter is gone — the chevron is affordance enough.
 struct SortChip<Choice: SortChoiceProtocol>: View where Choice.AllCases: RandomAccessCollection {
     @Binding var selection: Choice
 
@@ -44,9 +48,10 @@ struct SortChip<Choice: SortChoiceProtocol>: View where Choice.AllCases: RandomA
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
             .foregroundStyle(.secondary)
-            .glassSurface(in: Capsule(), interactive: true)
-            .contentShape(.contextMenuPreview, Capsule())
+            .glassSurface(in: Capsule())
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .animation(.snappy(duration: 0.2), value: selection)
     }
 }

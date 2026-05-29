@@ -421,26 +421,9 @@ private struct ArtistDetailView: View {
 }
 
 // MARK: - Subviews
-
-/// Single branded loading state, shown while the song→artist resolution (root
-/// sheet) and the topSongs/similarArtists fetch (root + every pushed artist)
-/// are in flight. Mirrors the hero footprint with a breathing glyph and the
-/// already-known name, so the reveal crossfades into a fuller sheet instead of
-/// popping from a blank centered spinner.
-private struct ArtistLoadingView: View {
-    let name: String
-
-    var body: some View {
-        VStack(spacing: 16) {
-            HeroIconTile(systemName: "music.mic", size: 220, pulse: true)
-            Text(name)
-                .font(.system(.title2, design: .rounded).weight(.bold))
-                .multilineTextAlignment(.center)
-        }
-        .padding(.horizontal, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
+// `ArtistLoadingView` (the shared loading skeleton) now lives in
+// `ArtistLoadingSkeleton.swift` — both this sheet and the inner detail view
+// call `ArtistLoadingView(name:)` unchanged.
 
 private struct TopSongRow: View {
     let song: Song

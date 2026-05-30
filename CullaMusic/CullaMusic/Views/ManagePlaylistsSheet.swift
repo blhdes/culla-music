@@ -137,37 +137,28 @@ struct ManagePlaylistsSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                LivingMeshBackground()
-
-                VStack(spacing: 12) {
-                    // Animated binding centralizes the segment-change animation
-                    // in one place. Previously the picker drove an implicit
-                    // animation, the inner VStack added `.animation(value:)`,
-                    // and the toolbar reconfigured — three contexts fighting
-                    // produced ~1s of visible flicker on switch.
-                    Picker("Section", selection: $segment.animation(.easeInOut(duration: 0.22))) {
-                        ForEach(Segment.allCases) { seg in
-                            Text(seg.label).tag(seg)
-                        }
+            VStack(spacing: 0) {
+                // Animated binding centralizes the segment-change animation in
+                // one place — previously three contexts (picker, inner VStack,
+                // toolbar) drove it at once and produced visible flicker.
+                Picker("Section", selection: $segment.animation(.easeInOut(duration: 0.22))) {
+                    ForEach(Segment.allCases) { seg in
+                        Text(seg.label).tag(seg)
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 14)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
 
-                    ScrollView {
-                        Group {
-                            switch segment {
-                            case .sidebar: sidebarSection
-                            case .filter:  filterSection
-                            }
-                        }
-                        .id(segment)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 4)
-                        .padding(.bottom, 24)
-                    }
-                    .scrollContentBackground(.hidden)
+                // Plain grouped List — same presentation as `SourceScopePickerSheet`
+                // so the two playlist pickers read as one UI form. No mesh, no
+                // material slabs, no custom borders: the List owns every surface.
+                // That stack of hand-built surfaces (mesh + `.thinMaterial` slab +
+                // stroke) is exactly what flickered on segment switches and over
+                // the animated background; one List has none of it.
+                List {
+                    sections
                 }
             }
             .navigationTitle("Playlists")
@@ -205,84 +196,47 @@ struct ManagePlaylistsSheet: View {
         }
     }
 
+    /// Swaps the active segment's section inside one stable `List`. Switching
+    /// the section (rather than swapping two whole `List`s) keeps the list
+    /// mounted, so a segment change is a content crossfade, not a teardown.
+    @ViewBuilder
+    private var sections: some View {
+        switch segment {
+        case .sidebar: sidebarSection
+        case .filter:  filterSection
+        }
+    }
+
     // MARK: - Sidebar segment
 
+    /// Sidebar list: the count summary + `SortChip` ride in the section header,
+    /// the capacity note in the footer, and rows are plain list rows. Mirrors
+    /// `SourceScopePickerSheet`'s header/footer/rows shape exactly.
     private var sidebarSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sidebarSubtitle
-            sidebarSlab
-            if isAtCapacity {
-                capacityCaption
-            }
-        }
-    }
-
-    /// Quiet count line above the slab, with the sort control on its trailing
-    /// edge. The digits tick via `.contentTransition(.numericText)` so toggling
-    /// a row reads as a single motion (row bounce + count tick).
-    private var sidebarSubtitle: some View {
-        HStack {
-            Text("\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar")
-                .font(.system(.footnote, design: .rounded))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .contentTransition(.numericText(countsDown: false))
-                .animation(.snappy, value: viewModel.sidebarCount)
-            Spacer()
-            if !editablePlaylists.isEmpty {
-                SortChip(selection: sidebarSortChoice)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
-    @ViewBuilder
-    private var sidebarSlab: some View {
-        if editablePlaylists.isEmpty {
-            emptyState(
-                title: "No playlists yet",
-                detail: "Tap + to create your first one.",
-                icon: "music.note.list"
-            )
-        } else {
-            VStack(spacing: 4) {
-                let rows = sortedEditablePlaylists
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, playlist in
+        Section {
+            if editablePlaylists.isEmpty {
+                emptyRow(
+                    title: "No playlists yet",
+                    detail: "Tap + to create your first one.",
+                    icon: "music.note.list"
+                )
+            } else {
+                ForEach(sortedEditablePlaylists, id: \.id) { playlist in
                     sidebarRow(for: playlist)
-                    if index < rows.count - 1 {
-                        Divider().opacity(0.4)
-                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            // `.thinMaterial` instead of `.glassSurface` deliberately. iOS 26's
-            // Liquid Glass effect fails to composite reliably on top of the
-            // animated `LivingMeshBackground` here — the slab renders
-            // transparent at rest and only flashes its rows during scroll.
-            // The bug is compositor-level, so it never shows up in screenshots
-            // or ReplayKit recordings. `.thinMaterial` is the same fallback
-            // `glassSurface` uses on iOS < 26 — reliable, identical between
-            // segments, no glass refraction but the slab actually draws.
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        } header: {
+            sortHeader(
+                "\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar",
+                selection: sidebarSortChoice,
+                showsChip: !editablePlaylists.isEmpty,
+                countValue: viewModel.sidebarCount
             )
+        } footer: {
+            if isAtCapacity {
+                Text("Sidebar full — turn one off to add another.")
+            }
         }
-    }
-
-    /// Soft "you've maxed the sidebar" line below the slab. Replaces silent
-    /// `.opacity` dimming with a sentence so the user understands *why*
-    /// unselected rows are inert.
-    private var capacityCaption: some View {
-        Text("Sidebar full — turn one off to add another.")
-            .font(.system(.footnote, design: .rounded))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -330,87 +284,33 @@ struct ManagePlaylistsSheet: View {
 
     // MARK: - Filter segment
 
-    /// Filter mirrors Sidebar's structure: one-line subtitle, the slab, then
-    /// an optional caption *below* (parallel to Sidebar's `capacityCaption`).
-    /// Keeping the above-slab footprint to a single line in both segments is
-    /// what makes the mesh reveal identical and stops the brightness mismatch.
+    /// Filter list: structurally identical to `sidebarSection` — count + chip in
+    /// the header, the library-mode reminder in the footer, rows below.
     private var filterSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            filterSubtitle
-            filterSlab
-            if viewModel.config.mode != .library {
-                filterModeCaption
-            }
-        }
-    }
-
-    /// One-line count summary. Structurally identical to `sidebarSubtitle` —
-    /// the previous info-popover button was the only `Button` left in the
-    /// scroll area and is gone now, so neither segment ships a tappable
-    /// element outside the slab rows.
-    private var filterSubtitle: some View {
         let count = excludedSet.count
-        return HStack {
-            Text("\(count) playlist\(count == 1 ? "" : "s") filtered")
-                .font(.system(.footnote, design: .rounded))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .contentTransition(.numericText(countsDown: false))
-                .animation(.snappy, value: count)
-            Spacer()
-            if !filterablePlaylists.isEmpty {
-                SortChip(selection: filterSortChoice)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
-    /// Reminder that the filter is library-mode-only. Edits still persist,
-    /// they just won't change the current deck until the user switches modes.
-    /// Plain `Text` to mirror `capacityCaption` — no icon.
-    private var filterModeCaption: some View {
-        Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
-            .font(.system(.footnote, design: .rounded))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
-    }
-
-    @ViewBuilder
-    private var filterSlab: some View {
-        if filterablePlaylists.isEmpty {
-            emptyState(
-                title: "No playlists to filter",
-                detail: "Once you have playlists in your library, you can hide their tracks here.",
-                icon: "line.3.horizontal.decrease.circle"
-            )
-        } else {
-            VStack(spacing: 4) {
-                let rows = sortedFilterablePlaylists
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, playlist in
+        return Section {
+            if filterablePlaylists.isEmpty {
+                emptyRow(
+                    title: "No playlists to filter",
+                    detail: "Once you have playlists in your library, you can hide their tracks here.",
+                    icon: "line.3.horizontal.decrease.circle"
+                )
+            } else {
+                ForEach(sortedFilterablePlaylists, id: \.id) { playlist in
                     filterRow(for: playlist)
-                    if index < rows.count - 1 {
-                        Divider().opacity(0.4)
-                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            // `.thinMaterial` instead of `.glassSurface` deliberately. iOS 26's
-            // Liquid Glass effect fails to composite reliably on top of the
-            // animated `LivingMeshBackground` here — the slab renders
-            // transparent at rest and only flashes its rows during scroll.
-            // The bug is compositor-level, so it never shows up in screenshots
-            // or ReplayKit recordings. `.thinMaterial` is the same fallback
-            // `glassSurface` uses on iOS < 26 — reliable, identical between
-            // segments, no glass refraction but the slab actually draws.
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+        } header: {
+            sortHeader(
+                "\(count) playlist\(count == 1 ? "" : "s") filtered",
+                selection: filterSortChoice,
+                showsChip: !filterablePlaylists.isEmpty,
+                countValue: count
             )
+        } footer: {
+            if viewModel.config.mode != .library {
+                Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
+            }
         }
     }
 
@@ -536,29 +436,41 @@ struct ManagePlaylistsSheet: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: - Shared empty state
+    // MARK: - Shared header + empty state
 
-    private func emptyState(title: String, detail: String, icon: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.secondary)
+    /// Section header carrying the count summary and the per-segment `SortChip`.
+    /// Mirrors `SourceScopePickerSheet.sortHeader` so both pickers anchor sort
+    /// the same way. The chip hides when there's nothing to sort. `countValue`
+    /// drives the numeric tick so toggling a row reads as one motion.
+    private func sortHeader<Choice>(
+        _ title: String,
+        selection: Binding<Choice>,
+        showsChip: Bool,
+        countValue: Int
+    ) -> some View where Choice: SortChoiceProtocol, Choice.AllCases: RandomAccessCollection {
+        HStack {
             Text(title)
-                .font(.system(.body, design: .rounded).weight(.semibold))
-                .foregroundStyle(.primary)
-            Text(detail)
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.snappy, value: countValue)
+            Spacer()
+            if showsChip {
+                SortChip(selection: selection)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 18)
-        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-        )
+        .textCase(nil)
+    }
+
+    /// Native empty state rendered as a clear list row — same vocabulary as
+    /// `SourceScopePickerSheet`'s no-results row, replacing the old custom glass
+    /// card so the sheet keeps no bespoke surfaces.
+    private func emptyRow(title: String, detail: String, icon: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: icon)
+        } description: {
+            Text(detail)
+        }
+        .listRowBackground(Color.clear)
     }
 }
 

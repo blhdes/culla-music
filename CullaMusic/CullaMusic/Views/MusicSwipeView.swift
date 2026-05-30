@@ -232,7 +232,7 @@ struct MusicSwipeView: View {
                 toastCapsule(message: toast)
                     .padding(.top, 12)
                     .opacity(chromeOpacity)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
             }
         }
         .overlay(alignment: .bottom) {
@@ -748,37 +748,25 @@ struct MusicSwipeView: View {
 
     @ViewBuilder
     private func toastCapsule(message: String) -> some View {
-        HStack(spacing: 10) {
-            Text(message)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            if viewModel.toastUndoable, viewModel.canUndo {
-                Divider().frame(height: 14)
-                Button {
-                    Haptics.undo()
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.undo()
-                    }
-                    viewModel.toastMessage = nil
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                        .font(.subheadline.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(maxWidth: 320)
-        .glassSurface(in: Capsule(), interactive: true)
+        // A pure status pill — undo lives in the single bottom Undo button so
+        // it isn't duplicated here. Single line + tail truncation keeps every
+        // toast the same slim height; the long "Added to <playlist>" case just
+        // clips (the playlist was tapped a moment ago, so context is fresh).
+        Text(message)
+            .font(.footnote.weight(.medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .contentTransition(.opacity)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6.5)
+            .frame(maxWidth: 260)
+            .glassSurface(in: Capsule())
+            .animation(.easeInOut(duration: 0.2), value: message)
     }
 
     @ViewBuilder
     private var undoButton: some View {
-        if viewModel.canUndo, showUndo, !viewModel.toastUndoable {
+        if viewModel.canUndo, showUndo {
             Button {
                 Haptics.undo()
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -804,8 +792,11 @@ struct MusicSwipeView: View {
     private func flashUndo() {
         undoHideTask?.cancel()
         withAnimation(.spring) { showUndo = true }
+        // Destructive multi-playlist actions get a longer undo window (matching
+        // the old 6s inline-toast undo); routine actions stay a quick 2.5s.
+        let lingers = viewModel.toastUndoable
         undoHideTask = Task {
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await Task.sleep(for: .seconds(lingers ? 6 : 2.5))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.3)) { showUndo = false }

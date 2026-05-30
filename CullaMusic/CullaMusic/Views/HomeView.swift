@@ -4,6 +4,15 @@ import MusicKit
 
 // MARK: - HomeViewModel
 
+// `@MainActor`: this view model reads and writes the main-actor-bound SwiftData
+// `ModelContext` (handed in from `@Environment`) and mutates `@Observable` state
+// the view renders. Without it, the nonisolated `async` methods below ran on a
+// background thread and touched that context *off* its owning actor — and the
+// heavy first-launch path (inserting every playlist, then `save()`) hung the
+// app there, which is the cold-launch freeze. Main isolation keeps every
+// context access on the context's actor; the library walks inside are
+// await/IO-bound, so they still yield the run loop to the UI between pages.
+@MainActor
 @Observable
 final class HomeViewModel {
     var dismissedCount: Int? = nil  // nil = computing
@@ -147,7 +156,11 @@ final class HomeViewModel {
     /// `recomputeCounts()` directly.
     func triggerRecompute() {
         pendingRecompute?.cancel()
-        pendingRecompute = Task { @MainActor [weak self] in
+        // The class is @MainActor, so this task inherits main isolation. The
+        // old `@MainActor` on the closure *looked* like it pinned the recompute
+        // to main but didn't — calling a then-nonisolated async method hopped
+        // straight back off the actor.
+        pendingRecompute = Task { [weak self] in
             await self?.recomputeCounts()
         }
     }

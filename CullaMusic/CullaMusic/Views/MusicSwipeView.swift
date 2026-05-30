@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import MusicKit
+import LinkPresentation
 
 struct MusicSwipeView: View {
     @Bindable var viewModel: MusicSwipeViewModel
@@ -63,6 +64,11 @@ struct MusicSwipeView: View {
     /// on a different card after dismissal cleanly re-resolves instead of
     /// flashing stale state from the prior song.
     @State private var artistSheetSong: Song?
+
+    /// Share sheet — non-nil presents the system share sheet for the current
+    /// song (swipe DOWN). Mirrors the photo app's swipe-down-to-share, but the
+    /// shared payload is the song's Apple Music link, not an image.
+    @State private var shareItem: SongShareItem?
 
     // Destructive long-press menu in Dismissed mode
     @State private var showRemovalSheet = false
@@ -136,6 +142,9 @@ struct MusicSwipeView: View {
         }
         .sheet(item: $artistSheetSong) { song in
             ArtistDetailSheet(song: song)
+        }
+        .sheet(item: $shareItem) { item in
+            SongShareSheet(url: item.url, title: item.title)
         }
         .task(id: viewModel.currentSong?.id.rawValue) {
             // Autoplay fires first because it's synchronous — audio kicks off
@@ -594,6 +603,16 @@ struct MusicSwipeView: View {
             return
         }
 
+        // Down swipe — Share. Requires vertical to be dominant. The card stays
+        // put (snap back) rather than flying off: sharing isn't a sort action,
+        // so the same song should still be on screen behind the share sheet.
+        if !horizontalDominant, ty > swipeThreshold || pty > swipeThreshold {
+            snapBack()
+            Haptics.share()
+            presentShareForCurrent()
+            return
+        }
+
         // Right swipe — assign to highlighted playlist
         if horizontalDominant, tx > swipeThreshold || ptx > swipeThreshold {
             if let id = highlightedID,
@@ -669,6 +688,30 @@ struct MusicSwipeView: View {
             cardOffset = .zero
         }
         highlightedID = nil
+    }
+
+    // MARK: - Share
+
+    /// Builds the share payload for the current song and triggers the sheet.
+    /// Sharing a song means sharing its Apple Music link — `song.url` when the
+    /// catalog gave us one, otherwise an Apple Music *search* link (the same
+    /// fallback the Artist hub uses), so library-only songs still share a
+    /// link that opens the right place.
+    private func presentShareForCurrent() {
+        guard let song = viewModel.currentSong else { return }
+        shareItem = SongShareItem(
+            url: appleMusicURL(for: song),
+            title: "\(song.title) · \(song.artistName)"
+        )
+    }
+
+    private func appleMusicURL(for song: Song) -> URL {
+        if let url = song.url { return url }
+        var components = URLComponents(string: "https://music.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: "\(song.title) \(song.artistName)")
+        ]
+        return components?.url ?? URL(string: "https://music.apple.com")!
     }
 
     // MARK: - Dynamic accent
@@ -803,4 +846,58 @@ struct MusicSwipeView: View {
             }
         }
     }
+}
+
+// MARK: - Share Sheet
+
+struct SongShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
+    let title: String
+}
+
+/// Feeds the share sheet a song's Apple Music link plus a human title. The
+/// custom item source (rather than handing `UIActivityViewController` the bare
+/// URL) lets us set the message subject and the rich link-preview title, so
+/// shares to Messages/Mail read as "Song · Artist" instead of a raw link.
+final class SongShareSource: NSObject, UIActivityItemSource {
+    let url: URL
+    let title: String
+
+    init(url: URL, title: String) {
+        self.url = url
+        self.title = title
+    }
+
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        url
+    }
+
+    func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        title
+    }
+
+    func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        let metadata = LPLinkMetadata()
+        metadata.title = title
+        metadata.originalURL = url
+        metadata.url = url
+        return metadata
+    }
+}
+
+struct SongShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    let title: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let source = SongShareSource(url: url, title: title)
+        return UIActivityViewController(activityItems: [source], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

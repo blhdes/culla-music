@@ -414,6 +414,20 @@ struct SourceScopePickerSheet: View {
 
     // MARK: - Rows
 
+    /// Trailing "this is the active scope" checkmark. Only laid out when the
+    /// row is selected — an `opacity(0)` checkmark still reserves its width,
+    /// which pushed the track-count badge left and left a dead gap to its
+    /// right on every unselected row. Tapping a row dismisses the sheet, so
+    /// `isSelected` never flips while visible and no insertion animation is lost.
+    @ViewBuilder
+    private func selectionCheckmark(_ isSelected: Bool) -> some View {
+        if isSelected {
+            Image(systemName: "checkmark")
+                .foregroundStyle(.tint)
+                .font(.body.weight(.semibold))
+        }
+    }
+
     private var libraryRow: some View {
         let isSelected = selectedScope == nil
         return Button {
@@ -433,12 +447,7 @@ struct SourceScopePickerSheet: View {
 
                 Spacer()
 
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.tint)
-                    .font(.body.weight(.semibold))
-                    .opacity(isSelected ? 1 : 0)
-                    .scaleEffect(isSelected ? 1 : 0.4)
-                    .animation(.snappy(duration: 0.22), value: isSelected)
+                selectionCheckmark(isSelected)
             }
             .contentShape(Rectangle())
         }
@@ -487,12 +496,7 @@ struct SourceScopePickerSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.tint)
-                    .font(.body.weight(.semibold))
-                    .opacity(isSelected ? 1 : 0)
-                    .scaleEffect(isSelected ? 1 : 0.4)
-                    .animation(.snappy(duration: 0.22), value: isSelected)
+                selectionCheckmark(isSelected)
             }
             .contentShape(Rectangle())
         }
@@ -532,12 +536,7 @@ struct SourceScopePickerSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.tint)
-                    .font(.body.weight(.semibold))
-                    .opacity(isSelected ? 1 : 0)
-                    .scaleEffect(isSelected ? 1 : 0.4)
-                    .animation(.snappy(duration: 0.22), value: isSelected)
+                selectionCheckmark(isSelected)
             }
             .contentShape(Rectangle())
         }

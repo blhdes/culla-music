@@ -881,7 +881,30 @@ final class MusicSwipeViewModel {
         let resolved = remainingIDs.isEmpty
             ? []
             : try await service.resolveSongs(orderedIDs: remainingIDs, catalogIDs: catalogIDs)
+        pruneOrphanedDismissals(rows: remaining, resolved: resolved)
         populateQueue(with: lead + resolved)
+    }
+
+    /// Deletes dismissed rows that resolved to nothing — stale records left
+    /// behind when a previously-dismissed song is later removed from the
+    /// library. They can't surface on any screen, yet they still inflate the
+    /// Dismissed count on Home and leave the hero shimmering over a song that
+    /// never loads (the "phantom dismissed song" carried across sessions).
+    ///
+    /// Only LIBRARY rows are pruned: `resolveSongs` pages the entire library
+    /// when it can't find an ID, so a library row that didn't resolve is
+    /// authoritatively gone. Catalog rows are left intact — a failed catalog
+    /// lookup may be a transient network error, not a dead record. Safe to run
+    /// on every deck load: when nothing is orphaned it's a no-op.
+    private func pruneOrphanedDismissals(rows: [DismissedSong], resolved: [Song]) {
+        let resolvedIDs = Set(resolved.map { $0.id.rawValue })
+        let orphans = rows.filter { !$0.isCatalogTrack && !resolvedIDs.contains($0.songID) }
+        guard !orphans.isEmpty else { return }
+        for row in orphans {
+            modelContext.delete(row)
+            dismissedStore.remove(songID: row.songID)
+        }
+        try? modelContext.save()
     }
 
     private func populateQueue(with songs: [Song]) {

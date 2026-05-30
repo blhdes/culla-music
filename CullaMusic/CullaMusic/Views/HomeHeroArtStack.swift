@@ -63,6 +63,12 @@ struct HomeHeroArtStack: View {
     /// lead refetches.
     @State private var leadArtwork: Artwork? = nil
     @State private var frontFallbackKind: FallbackKind = .library
+    /// Flips true once `loadDeck` finishes a pass for the current `deckKey`.
+    /// Without it, an empty result is indistinguishable from "still loading",
+    /// so a mode whose deck resolves to zero covers (e.g. a Dismissed mode left
+    /// holding only a stale, unresolvable row) shimmers its skeleton forever.
+    /// Reset at the start of every load so a mode swap re-shows the skeleton.
+    @State private var hasLoadedDeck: Bool = false
     @State private var pulse: Bool = false
     /// Live horizontal drag translation for the scrub gesture (source == nil
     /// only). Negative values pull the deck leftwards to reveal later covers;
@@ -162,10 +168,19 @@ struct HomeHeroArtStack: View {
         // letting ForEach call the computed property per-iteration.
         let cards = combinedArtworks
         if cards.isEmpty {
-            skeletonDeck
-                .scaleEffect(pulse ? 1.0 : 0.96)
-                .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
-                .transition(.scale(scale: 0.9).combined(with: .opacity))
+            // Skeleton only while a load is genuinely in flight. Once the load
+            // settles with nothing to show, fall through to a quiet empty card
+            // so the hero stops shimmering over a deck that will never fill.
+            Group {
+                if hasLoadedDeck {
+                    emptyDeckCard
+                } else {
+                    skeletonDeck
+                }
+            }
+            .scaleEffect(pulse ? 1.0 : 0.96)
+            .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
         } else {
             ZStack {
                 ForEach(0..<min(cards.count, 5), id: \.self) { idx in
@@ -454,6 +469,28 @@ struct HomeHeroArtStack: View {
         }
     }
 
+    /// Shown when a deck finished loading but resolved to nothing — e.g. the
+    /// only Dismissed row left is a stale record that no longer resolves to a
+    /// song. A single quiet glass card with the mode's fallback symbol,
+    /// deliberately NOT shimmering, so the hero reads as "nothing to preview"
+    /// instead of looping a load that will never finish. Same glass-fallback
+    /// vocabulary as `sourcedBackCard` so it sits naturally next to the deck.
+    private var emptyDeckCard: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: frontFallbackKind.symbol)
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+    }
+
     /// One bone in `skeletonDeck`, transformed to its rest slot. The centre
     /// bone keeps the mode's fallback symbol (`music.note` / `tray.full` /
     /// `archivebox`) as a quiet "what am I loading" hint; the back bones stay
@@ -549,6 +586,9 @@ struct HomeHeroArtStack: View {
     /// via `onPrimaryArtworkResolved`).
     private func loadDeck() async {
         frontFallbackKind = fallbackKind(for: mode, source: source)
+        // Treat this deckKey as loading until the pass below settles, so an
+        // empty result reads as "loading then empty", not "empty forever".
+        hasLoadedDeck = false
 
         switch source {
         case .playlist(let id, _, _):
@@ -557,6 +597,7 @@ struct HomeHeroArtStack: View {
             let result = await fetchPlaylistTrackArtworks(id: id, limit: 2)
             if Task.isCancelled { return }
             withAnimation(.smooth(duration: 0.3)) { deckArtworks = result }
+            hasLoadedDeck = true
             publishPrimaryArtwork()
             return
         case .artist:
@@ -565,6 +606,7 @@ struct HomeHeroArtStack: View {
             // artwork via `publishPrimaryArtwork`.
             if Task.isCancelled { return }
             withAnimation(.smooth(duration: 0.3)) { deckArtworks = [] }
+            hasLoadedDeck = true
             publishPrimaryArtwork()
             return
         case .none:
@@ -586,6 +628,7 @@ struct HomeHeroArtStack: View {
         if Task.isCancelled { return }
 
         withAnimation(.smooth(duration: 0.3)) { deckArtworks = result }
+        hasLoadedDeck = true
         publishPrimaryArtwork()
     }
 

@@ -8,18 +8,24 @@ protocol SortChoiceProtocol: CaseIterable, Identifiable, Hashable {
     var label: String { get }
 }
 
-/// Compact glass capsule that opens a flat menu of sort options and shows the
-/// active one inline ("⇅ Name (A→Z)"). Shared by the scope picker and the
-/// playlists manager so both sheets sort with the exact same control.
+/// Compact glass icon button that opens a flat menu of sort options. Shared by
+/// the scope picker and the playlists manager so both sheets sort with the
+/// exact same control.
 ///
-/// `.menuStyle(.button)` + `.buttonStyle(.plain)` are deliberate. A plain
-/// `Menu` draws its own press chrome: a *rounded-rectangle* gray highlight plus
-/// a lifted platter with a drop shadow. Both have square-ish corners that crop
-/// against the capsule glass on touch — the "half-cut, badly integrated"
-/// background. Routing the menu through a plain button style suppresses that
-/// system chrome entirely, leaving only the flat capsule glass underneath. No
-/// `interactive:` glass and no `.contextMenuPreview` reshaping needed once the
-/// platter is gone — the chevron is affordance enough.
+/// **Icon-only on purpose.** The chip used to show the active label inline
+/// ("⇅ Name (A→Z)"), but the labels are different lengths, so picking a new
+/// sort resized the chip — and that width change flickered. A fixed-size icon
+/// can't resize, so the flicker is gone. The current selection still reaches
+/// VoiceOver via `accessibilityValue`, and the open menu shows a checkmark on
+/// the active row, so nothing is actually lost.
+///
+/// **Press chrome.** A `Menu` with a custom label makes iOS draw its own lift
+/// platter on touch (a rounded-rectangle + shadow that morphs into the menu).
+/// Under a non-rectangular shape it crops at the corners. The fix is to let the
+/// system own the glass: on iOS 26 the native `.glass` button style + a
+/// `.circle` border shape means the button *is* the glass, so iOS morphs that
+/// exact circle into the menu — no separate platter to crop. Pre-26 falls back
+/// to a flat `.thinMaterial` circle.
 struct SortChip<Choice: SortChoiceProtocol>: View where Choice.AllCases: RandomAccessCollection {
     @Binding var selection: Choice
 
@@ -33,25 +39,36 @@ struct SortChip<Choice: SortChoiceProtocol>: View where Choice.AllCases: RandomA
                 EmptyView()
             }
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.caption2.weight(.bold))
-                Text(selection.label)
-                    .font(.system(.caption, design: .rounded).weight(.medium))
-                    .contentTransition(.opacity)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .opacity(0.6)
-            }
-            // Section headers uppercase their text; keep the chip's own casing.
-            .textCase(nil)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .foregroundStyle(.secondary)
-            .glassSurface(in: Capsule())
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .animation(.snappy(duration: 0.2), value: selection)
+        .modifier(SortChipChrome())
+        .accessibilityLabel("Sort")
+        .accessibilityValue(selection.label)
+    }
+}
+
+/// Applies the menu/button chrome that suppresses iOS's lift platter, branching
+/// on OS so the iOS 26 glass morph is used where available and a flat circle
+/// fallback elsewhere.
+private struct SortChipChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .menuStyle(.button)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.small)
+                // Keep the interactive glass neutral, not accent-tinted —
+                // matches the app's restrained-accent treatment on chrome.
+                .tint(.secondary)
+        } else {
+            content
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .padding(8)
+                .background(.thinMaterial, in: Circle())
+        }
     }
 }

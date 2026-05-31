@@ -17,6 +17,12 @@ struct CullaMusicApp: App {
         }
     }()
 
+    init() {
+        // Carry saved sorts from the old combined keys to the new
+        // (field, direction) pair before any view reads them.
+        SortPreferenceMigration.run()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

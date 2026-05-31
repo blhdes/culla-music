@@ -28,6 +28,13 @@ struct MusicSwipeView: View {
     /// taps the banner's close button).
     @AppStorage("hasSeenDismissedLongPressTip") private var hasSeenDismissedLongPressTip: Bool = false
 
+    /// The swipe sidebar inherits whatever sort the user picked for the Sidebar
+    /// segment in `ManagePlaylistsSheet` — same `@AppStorage` keys, read here so
+    /// changing the sort there reorders the live sidebar. Default `sidebarOrder`
+    /// keeps the as-added `displayOrder`, so nothing reshuffles out of the box.
+    @AppStorage("managePlaylists.sidebarSortField") private var sidebarSortFieldRaw = SidebarSortField.sidebarOrder.rawValue
+    @AppStorage("managePlaylists.sidebarSortDescending") private var sidebarSortDescending = false
+
     @Environment(\.appAccent) private var paletteAccent
 
     // Dynamic accent pair sampled from the current song's artwork. Nil → fall
@@ -207,6 +214,19 @@ struct MusicSwipeView: View {
 
     // MARK: - Content
 
+    /// `viewModel.sidebarPlaylists` (the in-sidebar set, in `displayOrder`)
+    /// reordered by the user's saved Sidebar sort. `.sidebarOrder` maps to a nil
+    /// field, so the shared sorter returns that displayOrder untouched.
+    private var orderedSidebarPlaylists: [Playlist] {
+        let field = SidebarSortField(rawValue: sidebarSortFieldRaw) ?? .sidebarOrder
+        return viewModel.sidebarPlaylists.sortedBy(
+            field: field.playlistField,
+            descending: sidebarSortDescending
+        ) {
+            viewModel.membershipIndex.trackCount(forPlaylistAMID: $0.appleMusicPlaylistID) ?? 0
+        }
+    }
+
     @ViewBuilder
     private var swipeContent: some View {
         GeometryReader { geo in
@@ -216,7 +236,7 @@ struct MusicSwipeView: View {
                     HStack(spacing: 0) {
                         Spacer()
                         PlaylistSidebarView(
-                            playlists: viewModel.sidebarPlaylists,
+                            playlists: orderedSidebarPlaylists,
                             highlightedID: highlightedID,
                             dragProgress: progress
                         )

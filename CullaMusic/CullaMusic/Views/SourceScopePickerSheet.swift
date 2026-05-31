@@ -120,8 +120,8 @@ struct SourceScopePickerSheet: View {
     @ViewBuilder
     private var sortChip: some View {
         switch pickerMode {
-        case .playlists: SortChip(selection: playlistSortChoiceBinding)
-        case .artists:   SortChip(selection: artistSortChoiceBinding)
+        case .playlists: SortChip(field: playlistSortFieldBinding, descending: $playlistSortDescending)
+        case .artists:   SortChip(field: artistSortFieldBinding, descending: $artistSortDescending)
         }
     }
 
@@ -141,33 +141,20 @@ struct SourceScopePickerSheet: View {
         }
     }
 
-    /// Concrete-choice bindings collapse (field, direction) into a single
-    /// enum tag so the Menu Picker can render one flat list with a
-    /// system-drawn checkmark on the active row. Storage stays the two
-    /// `@AppStorage` keys — no migration needed.
-    private var playlistSortChoiceBinding: Binding<PlaylistSortChoice> {
+    /// Bridges the raw-string `@AppStorage` field to the typed enum the chip
+    /// wants; the sibling `…Descending` bool is bound directly. Storage is
+    /// unchanged — already (field, direction), so no migration here.
+    private var playlistSortFieldBinding: Binding<PlaylistSortField> {
         Binding(
-            get: {
-                let field = PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical
-                return PlaylistSortChoice(field: field, descending: playlistSortDescending)
-            },
-            set: { choice in
-                playlistSortFieldRaw = choice.field.rawValue
-                playlistSortDescending = choice.descending
-            }
+            get: { PlaylistSortField(rawValue: playlistSortFieldRaw) ?? .alphabetical },
+            set: { playlistSortFieldRaw = $0.rawValue }
         )
     }
 
-    private var artistSortChoiceBinding: Binding<ArtistSortChoice> {
+    private var artistSortFieldBinding: Binding<ArtistSortField> {
         Binding(
-            get: {
-                let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
-                return ArtistSortChoice(field: field, descending: artistSortDescending)
-            },
-            set: { choice in
-                artistSortFieldRaw = choice.field.rawValue
-                artistSortDescending = choice.descending
-            }
+            get: { ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical },
+            set: { artistSortFieldRaw = $0.rawValue }
         )
     }
 
@@ -190,33 +177,9 @@ struct SourceScopePickerSheet: View {
         if !trimmedQuery.isEmpty {
             rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
         }
-        rows.sort { lhs, rhs in
-            switch field {
-            case .alphabetical:
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            case .modifiedDate:
-                // Missing-date rows sort last in ascending, first in descending —
-                // keeping them out of the way regardless of direction.
-                let l = lhs.appleMusicPlaylistID.flatMap {
-                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
-                }
-                let r = rhs.appleMusicPlaylistID.flatMap {
-                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
-                }
-                switch (l, r) {
-                case let (l?, r?): return l < r
-                case (nil, _?):    return false
-                case (_?, nil):    return true
-                case (nil, nil):
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                }
-            case .trackCount:
-                let l = (lhs.appleMusicPlaylistID.flatMap { trackCounts[$0] }) ?? 0
-                let r = (rhs.appleMusicPlaylistID.flatMap { trackCounts[$0] }) ?? 0
-                return l < r
-            }
+        rows = rows.sortedBy(field: field, descending: playlistSortDescending) {
+            ($0.appleMusicPlaylistID.flatMap { trackCounts[$0] }) ?? 0
         }
-        if playlistSortDescending { rows.reverse() }
         // Read-only (editorial / replay / shared) playlists always sink to the
         // bottom regardless of the user's sort — the user's own playlists are
         // what they're usually hunting for. `filter` is stable, so the user's
@@ -461,110 +424,50 @@ struct SourceScopePickerSheet: View {
 
 // MARK: - Sort fields
 
-/// Underlying sort field — persisted via `@AppStorage` as a string. The
-/// concrete-choice enums (`PlaylistSortChoice`, `ArtistSortChoice`) layer
-/// direction on top so the menu can render one flat list per tab.
-enum PlaylistSortField: String, CaseIterable {
+/// Underlying sort field — persisted via `@AppStorage` as a string, with a
+/// sibling `…Descending` bool for direction. The `SortChip` lists these fields
+/// once and flips the bool when you re-pick the active one.
+enum PlaylistSortField: String, CaseIterable, Identifiable, SortFieldProtocol {
     case alphabetical
     case modifiedDate
     case trackCount
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .alphabetical: "Name"
+        case .modifiedDate: "Date Modified"
+        case .trackCount:   "Song Count"
+        }
+    }
+
+    var defaultDescending: Bool? {
+        switch self {
+        case .alphabetical: false  // A→Z
+        case .modifiedDate: true   // newest first
+        case .trackCount:   true   // most first
+        }
+    }
 }
 
-enum ArtistSortField: String, CaseIterable {
+enum ArtistSortField: String, CaseIterable, Identifiable, SortFieldProtocol {
     case alphabetical
     case trackCount
-}
-
-// MARK: - Concrete sort choices
-
-/// Every (field, direction) pair the playlist tab supports, in menu order.
-/// Lets the Menu render one flat list of human-readable options instead of
-/// two stacked Pickers ("Sort By" + "Sort Order").
-enum PlaylistSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
-    case nameAsc
-    case nameDesc
-    case dateDesc
-    case dateAsc
-    case countDesc
-    case countAsc
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .nameAsc:   "Name (A→Z)"
-        case .nameDesc:  "Name (Z→A)"
-        case .dateDesc:  "Recently Modified"
-        case .dateAsc:   "Oldest First"
-        case .countDesc: "Most Songs"
-        case .countAsc:  "Fewest Songs"
+        case .alphabetical: "Name"
+        case .trackCount:   "Song Count"
         }
     }
 
-    var field: PlaylistSortField {
+    var defaultDescending: Bool? {
         switch self {
-        case .nameAsc, .nameDesc:   .alphabetical
-        case .dateDesc, .dateAsc:   .modifiedDate
-        case .countDesc, .countAsc: .trackCount
-        }
-    }
-
-    var descending: Bool {
-        switch self {
-        case .nameDesc, .dateDesc, .countDesc: true
-        case .nameAsc, .dateAsc, .countAsc:    false
-        }
-    }
-
-    init(field: PlaylistSortField, descending: Bool) {
-        switch (field, descending) {
-        case (.alphabetical, false): self = .nameAsc
-        case (.alphabetical, true):  self = .nameDesc
-        case (.modifiedDate, true):  self = .dateDesc
-        case (.modifiedDate, false): self = .dateAsc
-        case (.trackCount, true):    self = .countDesc
-        case (.trackCount, false):   self = .countAsc
-        }
-    }
-}
-
-enum ArtistSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
-    case nameAsc
-    case nameDesc
-    case countDesc
-    case countAsc
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .nameAsc:   "Name (A→Z)"
-        case .nameDesc:  "Name (Z→A)"
-        case .countDesc: "Most Songs"
-        case .countAsc:  "Fewest Songs"
-        }
-    }
-
-    var field: ArtistSortField {
-        switch self {
-        case .nameAsc, .nameDesc:   .alphabetical
-        case .countDesc, .countAsc: .trackCount
-        }
-    }
-
-    var descending: Bool {
-        switch self {
-        case .nameDesc, .countDesc: true
-        case .nameAsc, .countAsc:   false
-        }
-    }
-
-    init(field: ArtistSortField, descending: Bool) {
-        switch (field, descending) {
-        case (.alphabetical, false): self = .nameAsc
-        case (.alphabetical, true):  self = .nameDesc
-        case (.trackCount, true):    self = .countDesc
-        case (.trackCount, false):   self = .countAsc
+        case .alphabetical: false  // A→Z
+        case .trackCount:   true   // most first
         }
     }
 }

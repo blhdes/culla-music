@@ -46,12 +46,16 @@ struct ManagePlaylistsSheet: View {
     /// rule. See `QueueFilterStore.readArtists`.
     @AppStorage(QueueFilterStore.artistDefaultsKey) private var rawExcludedArtists: String = ""
 
-    // Each segment persists its own sort choice (stored as the choice's raw
-    // value) so sorting one doesn't reshuffle the other. Sidebar defaults to
-    // its real displayOrder; queue filter to alphabetical.
-    @AppStorage("managePlaylists.sidebarSort") private var sidebarSortRaw = SidebarSortChoice.sidebarOrder.rawValue
-    @AppStorage("managePlaylists.filterSort") private var filterSortRaw = PlaylistSortChoice.nameAsc.rawValue
-    @AppStorage("managePlaylists.artistFilterSort") private var artistFilterSortRaw = ArtistSortChoice.nameAsc.rawValue
+    // Each segment persists its own sort as a (field, direction) pair so sorting
+    // one doesn't reshuffle the other. Sidebar defaults to its real displayOrder;
+    // queue filters to Name A→Z. `SortPreferenceMigration` carries the old
+    // combined keys ("nameAsc", …) into these on first launch.
+    @AppStorage("managePlaylists.sidebarSortField") private var sidebarSortFieldRaw = SidebarSortField.sidebarOrder.rawValue
+    @AppStorage("managePlaylists.sidebarSortDescending") private var sidebarSortDescending = false
+    @AppStorage("managePlaylists.filterSortField") private var filterSortFieldRaw = PlaylistSortField.alphabetical.rawValue
+    @AppStorage("managePlaylists.filterSortDescending") private var filterSortDescending = false
+    @AppStorage("managePlaylists.artistFilterSortField") private var artistFilterSortFieldRaw = ArtistSortField.alphabetical.rawValue
+    @AppStorage("managePlaylists.artistFilterSortDescending") private var artistFilterSortDescending = false
     /// Which list the Filter queue shows — playlists or artists. Persisted so
     /// re-opening the sheet keeps the user on their last sub-tab.
     @AppStorage("managePlaylists.filterScope") private var filterScopeRaw = FilterScope.playlists.rawValue
@@ -75,6 +79,7 @@ struct ManagePlaylistsSheet: View {
         case artists
         var id: String { rawValue }
         var label: String { self == .playlists ? "Playlists" : "Artists" }
+        var icon: String { self == .playlists ? "music.note.list" : "music.mic" }
     }
 
     private var filterScope: Binding<FilterScope> {
@@ -121,47 +126,49 @@ struct ManagePlaylistsSheet: View {
 
     // MARK: - Sorting
 
-    private var sidebarSortChoice: Binding<SidebarSortChoice> {
+    private var sidebarSortField: Binding<SidebarSortField> {
         Binding(
-            get: { SidebarSortChoice(rawValue: sidebarSortRaw) ?? .sidebarOrder },
-            set: { sidebarSortRaw = $0.rawValue }
+            get: { SidebarSortField(rawValue: sidebarSortFieldRaw) ?? .sidebarOrder },
+            set: { sidebarSortFieldRaw = $0.rawValue }
         )
     }
 
-    private var filterSortChoice: Binding<PlaylistSortChoice> {
+    private var filterSortField: Binding<PlaylistSortField> {
         Binding(
-            get: { PlaylistSortChoice(rawValue: filterSortRaw) ?? .nameAsc },
-            set: { filterSortRaw = $0.rawValue }
+            get: { PlaylistSortField(rawValue: filterSortFieldRaw) ?? .alphabetical },
+            set: { filterSortFieldRaw = $0.rawValue }
         )
     }
 
-    private var artistFilterSortChoice: Binding<ArtistSortChoice> {
+    private var artistFilterSortField: Binding<ArtistSortField> {
         Binding(
-            get: { ArtistSortChoice(rawValue: artistFilterSortRaw) ?? .nameAsc },
-            set: { artistFilterSortRaw = $0.rawValue }
+            get: { ArtistSortField(rawValue: artistFilterSortFieldRaw) ?? .alphabetical },
+            set: { artistFilterSortFieldRaw = $0.rawValue }
         )
     }
 
     private var sortedEditablePlaylists: [Playlist] {
-        let choice = sidebarSortChoice.wrappedValue
-        return searchFiltered(sorted(editablePlaylists, field: choice.field, descending: choice.descending))
+        searchFiltered(sorted(editablePlaylists,
+                              field: sidebarSortField.wrappedValue.playlistField,
+                              descending: sidebarSortDescending))
     }
 
     private var sortedFilterablePlaylists: [Playlist] {
-        let choice = filterSortChoice.wrappedValue
-        return searchFiltered(sorted(filterablePlaylists, field: choice.field, descending: choice.descending))
+        searchFiltered(sorted(filterablePlaylists,
+                              field: filterSortField.wrappedValue,
+                              descending: filterSortDescending))
     }
 
     /// Search + sort for the artist filter list. Mirrors the Sort-From picker's
     /// artist sort (alphabetical / track count) so both browse identically.
     private func computeFilteredSortedArtists() -> [Artist] {
-        let choice = artistFilterSortChoice.wrappedValue
+        let field = artistFilterSortField.wrappedValue
         var rows = artistStore.artists
         if !trimmedQuery.isEmpty {
             rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
         }
         rows.sort { lhs, rhs in
-            switch choice.field {
+            switch field {
             case .alphabetical:
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             case .trackCount:
@@ -170,45 +177,18 @@ struct ManagePlaylistsSheet: View {
                 return l < r
             }
         }
-        if choice.descending { rows.reverse() }
+        if artistFilterSortDescending { rows.reverse() }
         return rows
     }
 
-    /// Orders a list by a sort field. A `nil` field means "keep the source
-    /// order" — for the sidebar that's the real displayOrder, since
-    /// `viewModel.playlists` already arrives sorted by it. Counts come from the
-    /// live `membershipIndex`, dates from the service.
+    /// Orders a list by a sort field via the shared `sortedBy` helper, injecting
+    /// counts from the live `membershipIndex`. A `nil` field means "keep the
+    /// source order" — for the sidebar that's the real displayOrder, since
+    /// `viewModel.playlists` already arrives sorted by it.
     private func sorted(_ playlists: [Playlist], field: PlaylistSortField?, descending: Bool) -> [Playlist] {
-        guard let field else { return playlists }
-        var rows = playlists
-        rows.sort { lhs, rhs in
-            switch field {
-            case .alphabetical:
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            case .modifiedDate:
-                // Missing-date rows sort last ascending / first descending —
-                // out of the way regardless of direction.
-                let l = lhs.appleMusicPlaylistID.flatMap {
-                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
-                }
-                let r = rhs.appleMusicPlaylistID.flatMap {
-                    MusicLibraryService.shared.lastModifiedDate(forPlaylistID: $0)
-                }
-                switch (l, r) {
-                case let (l?, r?): return l < r
-                case (nil, _?):    return false
-                case (_?, nil):    return true
-                case (nil, nil):
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                }
-            case .trackCount:
-                let l = viewModel.membershipIndex.trackCount(forPlaylistAMID: lhs.appleMusicPlaylistID) ?? 0
-                let r = viewModel.membershipIndex.trackCount(forPlaylistAMID: rhs.appleMusicPlaylistID) ?? 0
-                return l < r
-            }
+        playlists.sortedBy(field: field, descending: descending) {
+            viewModel.membershipIndex.trackCount(forPlaylistAMID: $0.appleMusicPlaylistID) ?? 0
         }
-        if descending { rows.reverse() }
-        return rows
     }
 
     private var isAtCapacity: Bool {
@@ -231,20 +211,11 @@ struct ManagePlaylistsSheet: View {
                 .padding(.top, 10)
                 .padding(.bottom, 4)
 
-                // Sub-tab: only the Filter queue splits into Playlists / Artists.
-                // Inset further than the top control so it reads as a nested
-                // refinement, not a second top-level switch.
-                if segment == .filter {
-                    Picker("Filter scope", selection: filterScope.animation(.easeInOut(duration: 0.22))) {
-                        ForEach(FilterScope.allCases) { scope in
-                            Text(scope.label).tag(scope)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 36)
-                    .padding(.bottom, 6)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                // The Filter queue's Playlists/Artists split no longer rides a
+                // second segmented control here — switching scope now lives in
+                // the list's section header (`filterScopeChip`), so the sheet
+                // never stacks two pickers and the filter stops reading as a
+                // bolted-on sub-sheet.
 
                 // Plain grouped List — same presentation as `SourceScopePickerSheet`
                 // so the two playlist pickers read as one UI form. No mesh, no
@@ -264,7 +235,8 @@ struct ManagePlaylistsSheet: View {
             // changes, never per body render.
             .onAppear { visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: searchQuery) { _, _ in visibleArtists = computeFilteredSortedArtists() }
-            .onChange(of: artistFilterSortRaw) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: artistFilterSortFieldRaw) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: artistFilterSortDescending) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistStore.artists) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistStore.trackCounts) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .toolbar {
@@ -339,7 +311,8 @@ struct ManagePlaylistsSheet: View {
         } header: {
             sortHeader(
                 "\(viewModel.sidebarCount) of \(maxSidebar) in your sidebar",
-                selection: sidebarSortChoice,
+                field: sidebarSortField,
+                descending: $sidebarSortDescending,
                 showsChip: !editablePlaylists.isEmpty,
                 countValue: viewModel.sidebarCount
             )
@@ -414,16 +387,13 @@ struct ManagePlaylistsSheet: View {
                 }
             }
         } header: {
-            sortHeader(
-                "\(count) playlist\(count == 1 ? "" : "s") filtered",
-                selection: filterSortChoice,
-                showsChip: !filterablePlaylists.isEmpty,
-                countValue: count
+            filterScopeHeader(
+                field: filterSortField,
+                descending: $filterSortDescending,
+                showsChip: !filterablePlaylists.isEmpty
             )
         } footer: {
-            if viewModel.config.mode != .library {
-                Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
-            }
+            filterFooter(count: count, noun: "playlist")
         }
     }
 
@@ -496,16 +466,13 @@ struct ManagePlaylistsSheet: View {
                 noMatchesRow
             }
         } header: {
-            sortHeader(
-                "\(count) artist\(count == 1 ? "" : "s") filtered",
-                selection: artistFilterSortChoice,
-                showsChip: !artistStore.artists.isEmpty,
-                countValue: count
+            filterScopeHeader(
+                field: artistFilterSortField,
+                descending: $artistFilterSortDescending,
+                showsChip: !artistStore.artists.isEmpty
             )
         } footer: {
-            if viewModel.config.mode != .library {
-                Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
-            }
+            filterFooter(count: count, noun: "artist")
         }
         .task { await artistStore.prime() }
     }
@@ -678,12 +645,13 @@ struct ManagePlaylistsSheet: View {
     /// Mirrors `SourceScopePickerSheet.sortHeader` so both pickers anchor sort
     /// the same way. The chip hides when there's nothing to sort. `countValue`
     /// drives the numeric tick so toggling a row reads as one motion.
-    private func sortHeader<Choice>(
+    private func sortHeader<Field>(
         _ title: String,
-        selection: Binding<Choice>,
+        field: Binding<Field>,
+        descending: Binding<Bool>,
         showsChip: Bool,
         countValue: Int
-    ) -> some View where Choice: SortChoiceProtocol, Choice.AllCases: RandomAccessCollection {
+    ) -> some View where Field: SortFieldProtocol, Field.AllCases: RandomAccessCollection {
         HStack {
             Text(title)
                 .monospacedDigit()
@@ -691,10 +659,80 @@ struct ManagePlaylistsSheet: View {
                 .animation(.snappy, value: countValue)
             Spacer()
             if showsChip {
-                SortChip(selection: selection)
+                SortChip(field: field, descending: descending)
             }
         }
         .textCase(nil)
+    }
+
+    // MARK: - Filter scope control
+
+    /// Compact glass menu chip that switches the Filter queue between its
+    /// Playlists and Artists lists. Replaces the full-width segmented control
+    /// that used to stack beneath the top mode switch and read as a bolted-on
+    /// sub-sheet. Mirrors `SortChip`'s glass-capsule chrome so the scope switcher
+    /// and the sort control read as one matched pair of header chips. The label
+    /// crossfades on switch so the change reads as one motion, not a hard cut.
+    private var filterScopeChip: some View {
+        Menu {
+            Picker("Filter scope", selection: filterScope.animation(.easeInOut(duration: 0.22))) {
+                ForEach(FilterScope.allCases) { scope in
+                    Label(scope.label, systemImage: scope.icon).tag(scope)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: filterScope.wrappedValue.icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(filterScope.wrappedValue.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .contentTransition(.opacity)
+            .animation(.easeInOut(duration: 0.22), value: filterScope.wrappedValue)
+        }
+        .modifier(FilterScopeChipChrome())
+        .accessibilityLabel("Filter scope")
+        .accessibilityValue(filterScope.wrappedValue.label)
+        .accessibilityHint("Switches between filtering playlists and artists")
+    }
+
+    /// Filter-queue section header: the scope switcher on the leading edge, the
+    /// per-scope `SortChip` on the trailing edge. The two glass chips replace the
+    /// old stacked segmented control; the filtered count moves to the footer so
+    /// the header stays a clean two-chip row.
+    private func filterScopeHeader<Field>(
+        field: Binding<Field>,
+        descending: Binding<Bool>,
+        showsChip: Bool
+    ) -> some View where Field: SortFieldProtocol, Field.AllCases: RandomAccessCollection {
+        HStack {
+            filterScopeChip
+            Spacer()
+            if showsChip {
+                SortChip(field: field, descending: descending)
+            }
+        }
+        .textCase(nil)
+    }
+
+    /// Filter-queue footer: the live filtered count (numeric tick on toggle) plus
+    /// the "filter is paused outside Library mode" note. Folding the count down
+    /// here keeps the header to its two chips.
+    private func filterFooter(count: Int, noun: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(count) \(noun)\(count == 1 ? "" : "s") hidden in Library mode")
+                .monospacedDigit()
+                .contentTransition(.numericText(countsDown: false))
+                .animation(.snappy, value: count)
+            if viewModel.config.mode != .library {
+                Text("Current session is \(viewModel.config.mode.title).")
+            }
+        }
     }
 
     /// Native empty state rendered as a clear list row — same vocabulary as
@@ -710,51 +748,30 @@ struct ManagePlaylistsSheet: View {
     }
 }
 
-// MARK: - Sidebar sort choices
+// MARK: - Filter scope chip chrome
 
-/// Sort options for the **Sidebar** segment. Adds "Sidebar Order" — the
-/// playlists' real `displayOrder`, i.e. the order they appear in the swipe
-/// sidebar — and defaults to it, so opening the sheet doesn't reshuffle the
-/// list. Kept separate from `PlaylistSortChoice` because displayOrder is
-/// meaningless on the scope picker and queue filter, which share that enum.
-enum SidebarSortChoice: String, CaseIterable, Identifiable, SortChoiceProtocol {
-    case sidebarOrder
-    case nameAsc
-    case nameDesc
-    case dateDesc
-    case dateAsc
-    case countDesc
-    case countAsc
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .sidebarOrder: "Sidebar Order"
-        case .nameAsc:      "Name (A→Z)"
-        case .nameDesc:     "Name (Z→A)"
-        case .dateDesc:     "Recently Modified"
-        case .dateAsc:      "Oldest First"
-        case .countDesc:    "Most Songs"
-        case .countAsc:     "Fewest Songs"
-        }
-    }
-
-    /// `nil` for `sidebarOrder` — the sort helper treats a nil field as "keep
-    /// the source order", which is already displayOrder.
-    var field: PlaylistSortField? {
-        switch self {
-        case .sidebarOrder:         nil
-        case .nameAsc, .nameDesc:   .alphabetical
-        case .dateDesc, .dateAsc:   .modifiedDate
-        case .countDesc, .countAsc: .trackCount
-        }
-    }
-
-    var descending: Bool {
-        switch self {
-        case .nameDesc, .dateDesc, .countDesc:             true
-        case .sidebarOrder, .nameAsc, .dateAsc, .countAsc: false
+/// Press/menu chrome for the Filter queue's scope chip — the capsule sibling of
+/// `SortChipChrome`. On iOS 26 the native `.glass` button means the system
+/// morphs that exact capsule into the menu (no separate lift platter to crop);
+/// pre-26 falls back to a flat `.thinMaterial` capsule. Kept neutral
+/// (`.tint(.secondary)`) to match the app's restrained-accent treatment on
+/// chrome.
+private struct FilterScopeChipChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .menuStyle(.button)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .tint(.secondary)
+        } else {
+            content
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.thinMaterial, in: Capsule())
         }
     }
 }

@@ -576,14 +576,12 @@ struct ManagePlaylistsSheet: View {
         rawExcludedArtists = QueueFilterStore.encode(set)
     }
 
-    /// Centered spinner row used while the artist list / counts load.
+    /// Skeleton artist rows shown while the artist list / counts load — the
+    /// placeholder fills the same geometry as the real rows, so the reveal
+    /// reads as the list sharpening into focus instead of a spinner on empty
+    /// space. Shared `SkeletonRows` keeps every sheet's loading state identical.
     private var loadingRow: some View {
-        HStack {
-            Spacer()
-            ProgressView()
-            Spacer()
-        }
-        .listRowBackground(Color.clear)
+        SkeletonRows(count: 8, lead: .circle, leadSize: 40, subtitle: false, showsTrailing: true)
     }
 
     /// Native "no results" row for the shared search box — same vocabulary as

@@ -298,12 +298,7 @@ struct SourceScopePickerSheet: View {
 
             if (artistStore.isLoadingArtists && artistStore.artists.isEmpty) || artistStore.isAwaitingFirstCounts {
                 Section {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
+                    SkeletonRows(count: 8, lead: .circle, leadSize: 44, subtitle: false, showsTrailing: true)
                 }
             } else if !rows.isEmpty {
                 Section {

@@ -66,19 +66,104 @@ private struct SweepHighlight: View {
     }
 }
 
+// MARK: - SkeletonRow
+
+/// A minimal list-row skeleton: a leading thumbnail/avatar bone plus stacked
+/// title/subtitle bones, sized to match the app's standard song / playlist /
+/// artist rows. Compose a loading state by stacking a few of these (see
+/// `SkeletonRows`) so the reveal reads as the list *sharpening into focus*
+/// rather than a spinner sitting on empty space.
+///
+/// Every bone is its own `SkeletonShape`, so they all read the same shared
+/// clock and shimmer in phase — the row looks like one coordinated sweep.
+struct SkeletonRow: View {
+    /// Leading bone shape — square-ish cover (`rounded`) or circular avatar.
+    enum Lead {
+        case rounded(CGFloat)
+        case circle
+    }
+
+    var lead: Lead = .rounded(10)
+    var leadSize: CGFloat = 52
+    var titleWidth: CGFloat = 150
+    /// `nil` collapses the row to a single line (artist rows have no subtitle).
+    var subtitleWidth: CGFloat? = 90
+    /// A short bone pinned to the trailing edge — e.g. a track-count badge.
+    var showsTrailing: Bool = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            leadBone
+
+            VStack(alignment: .leading, spacing: 7) {
+                SkeletonShape(shape: Capsule())
+                    .frame(width: titleWidth, height: 11)
+                if let subtitleWidth {
+                    SkeletonShape(shape: Capsule())
+                        .frame(width: subtitleWidth, height: 9)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if showsTrailing {
+                SkeletonShape(shape: Capsule())
+                    .frame(width: 24, height: 11)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var leadBone: some View {
+        switch lead {
+        case .rounded(let radius):
+            SkeletonShape(shape: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .frame(width: leadSize, height: leadSize)
+        case .circle:
+            SkeletonShape(shape: Circle())
+                .frame(width: leadSize, height: leadSize)
+        }
+    }
+}
+
+// MARK: - SkeletonRows
+
+/// A short run of `SkeletonRow`s with gently varied title widths so the
+/// placeholder reads as real, uneven content instead of a repeated stamp.
+/// Drop it straight inside a `List` section (or `ManagePlaylistsSheet`'s
+/// loading row) — it emits the rows, the caller owns the surrounding `List`.
+struct SkeletonRows: View {
+    var count: Int = 6
+    var lead: SkeletonRow.Lead = .rounded(10)
+    var leadSize: CGFloat = 52
+    var subtitle: Bool = true
+    var showsTrailing: Bool = false
+
+    // Deterministic width jitter keyed by index — stable across frames so the
+    // rows never reflow while shimmering.
+    private let titleWidths: [CGFloat] = [168, 132, 184, 120, 150, 142, 176, 128]
+    private let subtitleWidths: [CGFloat] = [96, 78, 110, 70, 90, 84, 102, 74]
+
+    var body: some View {
+        ForEach(0..<count, id: \.self) { index in
+            SkeletonRow(
+                lead: lead,
+                leadSize: leadSize,
+                titleWidth: titleWidths[index % titleWidths.count],
+                subtitleWidth: subtitle ? subtitleWidths[index % subtitleWidths.count] : nil,
+                showsTrailing: showsTrailing
+            )
+        }
+    }
+}
+
 #Preview {
     VStack(spacing: 20) {
         SkeletonShape(shape: RoundedRectangle(cornerRadius: 28, style: .continuous))
             .frame(width: 220, height: 220)
-        HStack(spacing: 12) {
-            SkeletonShape(shape: RoundedRectangle(cornerRadius: 6))
-                .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 6) {
-                SkeletonShape(shape: Capsule()).frame(width: 160, height: 11)
-                SkeletonShape(shape: Capsule()).frame(width: 100, height: 9)
-            }
-            Spacer()
-        }
+        SkeletonRow()
+        SkeletonRow(lead: .circle, leadSize: 44, subtitleWidth: nil, showsTrailing: true)
     }
     .padding(40)
 }

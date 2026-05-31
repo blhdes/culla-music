@@ -262,6 +262,7 @@ struct HomeView: View {
     @State private var homeVM: HomeViewModel?
     @State private var showSourcePicker = false
     @State private var showSettings = false
+    @State private var showHistory = false
     /// Per-playlist track counts read from the persisted membership index.
     /// Used to display a meaningful count on the Library card when the user
     /// picks a source playlist — otherwise the card would show the total
@@ -454,6 +455,26 @@ struct HomeView: View {
             .opacity(showCarousel ? 0 : 1)
             .allowsHitTesting(!showCarousel)
         }
+        .overlay(alignment: .topLeading) {
+            // History button — mirror image of the settings gear, flanking the
+            // centered wordmark. Same carousel gating so it doesn't poke through
+            // the exploration overlay.
+            Button {
+                showHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+                    .glassSurface(in: Circle(), interactive: true)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 14)
+            .padding(.top, 16)
+            .opacity(showCarousel ? 0 : 1)
+            .allowsHitTesting(!showCarousel)
+        }
         .task {
             let vm = HomeViewModel(modelContext: modelContext)
             homeVM = vm
@@ -517,6 +538,13 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $showHistory) {
+            HistorySheet()
+                // Undoing a movement deletes a SortedSong/DismissedSong row,
+                // which changes the count fingerprints. Recompute on close so
+                // Home's badges reflect the reversal without a cold relaunch.
+                .onDisappear { homeVM?.triggerRecompute() }
         }
         .animation(.easeInOut(duration: 0.18), value: selectedMode)
         // Source changes ripple across several children (mode tiles, source

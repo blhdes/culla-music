@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sheet for picking the app accent. The rainbow of 13 swatches lives here
+/// Sheet for picking the app accent. The rainbow of 33 swatches lives here
 /// instead of always-on in Settings so the Settings page can stay calm — the
 /// grid is meaningful as a destination, not as decoration.
 ///

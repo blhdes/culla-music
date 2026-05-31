@@ -57,7 +57,7 @@ struct PlaylistMembershipChips: View {
     /// and disappeared. Deriving the label from the tint's perceived luminance
     /// is scheme-independent — it flips correctly for dark *and* pale accents.
     private var accentLabelColor: Color {
-        UIColor(appAccent).contrastingLabel
+        appAccent.contrastingLabel
     }
 
     private func dismissedChip(date: Date) -> some View {
@@ -140,23 +140,6 @@ struct PlaylistMembershipChips: View {
                 value: placeholderPulse
             )
             .onAppear { placeholderPulse = true }
-    }
-}
-
-private extension UIColor {
-    /// `.white` or `.black`, whichever has the higher WCAG contrast ratio
-    /// against this color used as a background. Contrast vs white is
-    /// `1.05 / (L + 0.05)`; vs black is `(L + 0.05) / 0.05`. They cross at a
-    /// relative luminance of ≈0.179 — above it black wins, below it white.
-    var contrastingLabel: Color {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        getRed(&r, green: &g, blue: &b, alpha: &a)
-
-        func linear(_ c: CGFloat) -> CGFloat {
-            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
-        }
-        let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-        return luminance > 0.179 ? .black : .white
     }
 }
 

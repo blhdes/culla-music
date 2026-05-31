@@ -29,6 +29,12 @@ struct ManagePlaylistsSheet: View {
     /// re-sort 500+ artists on every keystroke.
     @State private var visibleArtists: [Artist] = []
 
+    /// The playlist a swipe-to-rename is targeting. Non-nil drives the rename
+    /// alert; `renameText` holds the in-flight edited name (seeded from the
+    /// playlist's current name when the swipe action fires).
+    @State private var renameTarget: Playlist?
+    @State private var renameText: String = ""
+
     /// The up-swipe loved target. Hidden from the sidebar list below since the
     /// up-swipe already covers that playlist and double-listing it implies a
     /// toggle that wouldn't add anything. Configured in Settings.
@@ -269,6 +275,19 @@ struct ManagePlaylistsSheet: View {
                     }
                 }
             }
+            // Native rename alert — the standard iOS rename idiom (Files, Notes).
+            // The text field is seeded with the current name by the swipe action;
+            // an empty/unchanged name no-ops inside `renamePlaylist`.
+            .alert("Rename Playlist", isPresented: renameAlertPresented) {
+                TextField("Playlist name", text: $renameText)
+                    .textInputAutocapitalization(.words)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    guard let target = renameTarget else { return }
+                    let newName = renameText
+                    Task { await viewModel.renamePlaylist(target, to: newName) }
+                }
+            }
         }
     }
 
@@ -364,6 +383,32 @@ struct ManagePlaylistsSheet: View {
         .accessibilityLabel(playlist.name)
         .accessibilityValue(isOn ? "In sidebar" : "Not in sidebar")
         .accessibilityHint(isTappable ? "Toggles sidebar membership" : "Sidebar is full")
+        // Swipe left to rename — but only on playlists Culla created. Apple's
+        // `edit` API rejects every other library playlist, so gating to
+        // `createdByApp` means the swipe reveals nothing (a clean no-op) on
+        // imported / Apple Music playlists instead of offering a doomed action.
+        // `allowsFullSwipe: false`: rename needs the name field, so a long swipe
+        // shouldn't commit on its own — the user taps the revealed button.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if playlist.createdByApp {
+                Button {
+                    renameText = playlist.name
+                    renameTarget = playlist
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(appAccent)
+            }
+        }
+    }
+
+    /// Drives the rename alert off `renameTarget`: presented while a target is
+    /// set, dismissed (target cleared) when the alert closes.
+    private var renameAlertPresented: Binding<Bool> {
+        Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )
     }
 
     // MARK: - Filter segment

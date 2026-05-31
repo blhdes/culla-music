@@ -530,6 +530,29 @@ final class MusicSwipeViewModel {
         }
     }
 
+    /// Renames a playlist in Apple Music and, on success, the local row.
+    /// Optimistic like `createPlaylist`/`loveCurrent`: we only persist the new
+    /// local name once Apple accepts the edit, so a SwiftData row never diverges
+    /// from the playlist's real name. Apple rejects edits to playlists this app
+    /// didn't create, so those surface a toast instead of a silent failure.
+    func renamePlaylist(_ playlist: Playlist, to newName: String) async {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != playlist.name else { return }
+        guard let amIDString = playlist.appleMusicPlaylistID else {
+            setToast("Playlist not synced — try again")
+            return
+        }
+        do {
+            try await service.renamePlaylist(id: MusicItemID(amIDString), to: trimmed)
+            playlist.name = trimmed
+            try? modelContext.save()
+            refreshLocalPlaylists()
+            setToast("Renamed to \(trimmed)")
+        } catch {
+            setToast("Apple only lets Culla rename playlists it made")
+        }
+    }
+
     // MARK: - Loved (up-swipe)
 
     /// Up-swipe target. Mirrors `assignToPlaylist` but resolves the destination

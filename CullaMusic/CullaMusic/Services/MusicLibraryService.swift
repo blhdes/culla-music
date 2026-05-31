@@ -461,6 +461,25 @@ final class MusicLibraryService {
         return playlist
     }
 
+    /// Renames a playlist via `MusicLibrary.shared.edit`. Same Apple constraint
+    /// as `removeSong`'s `edit`: it only succeeds on playlists THIS app created.
+    /// Every other library playlist — including the user's own Music-app ones —
+    /// is rejected with `ICPlaylistUpdateErrorDomain`, so callers attempt this
+    /// optimistically and surface a toast on failure (we don't pre-gate it,
+    /// matching the app's no-sticky-read-only stance).
+    func renamePlaylist(id: MusicItemID, to newName: String) async throws {
+        try await performPlaylistMutation(for: id) { [self] in
+            guard let playlist = try await freshPlaylist(id: id) else {
+                throw MusicLibraryError.playlistNotFound
+            }
+            // Use the metadata-only `edit` overload (no `items:`) so the track
+            // list is left untouched — the `items:` overload would require us to
+            // hand back the full track sequence just to keep it.
+            let updated = try await MusicLibrary.shared.edit(playlist, name: newName)
+            playlistCache[updated.id] = updated
+        }
+    }
+
     func addSong(_ song: Song, toPlaylistID id: MusicItemID) async throws {
         try await performPlaylistMutation(for: id) { [self] in
             try await addSongAttempt(song, toPlaylistID: id, allowRetry: true)

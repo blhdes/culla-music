@@ -144,6 +144,7 @@ struct MusicSwipeView: View {
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
         .environment(\.appAccent, effectiveAccent.primary)
         .environment(\.appAccentSecondary, effectiveAccent.secondary)
+        .environment(\.appAccentNeutral, effectiveAccent.neutralTint)
         .sheet(isPresented: $showManageSheet) {
             ManagePlaylistsSheet(viewModel: viewModel)
         }

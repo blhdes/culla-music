@@ -8,6 +8,12 @@ import MusicKit
 struct ArtworkAccent: Sendable, Equatable {
     let primary: Color
     let secondary: Color
+    /// Pure-grey tint (no hue) keyed to the cover's overall lightness, set
+    /// only when the artwork is essentially monochrome. The playlist chips
+    /// read this so B&W covers tint their pills white → grey → black instead
+    /// of the steel/sand slate carried by `primary`/`secondary`. Nil for any
+    /// cover with real color.
+    var neutralTint: Color? = nil
 
     static func flat(_ color: Color) -> ArtworkAccent {
         ArtworkAccent(primary: color, secondary: color)
@@ -230,7 +236,16 @@ final class AccentExtractor {
         let secondHue = (hue + 40.0 / 360.0).truncatingRemainder(dividingBy: 1.0)
         let (r2, g2, b2) = hslToRGB(h: secondHue, s: s, l: l)
         let secondary = Color(red: r2, green: g2, blue: b2)
-        return ArtworkAccent(primary: primary, secondary: secondary)
+
+        // Neutral grey keyed to the cover's overall lightness. The playlist
+        // chips use this (not the slate above) so monochrome artwork tints
+        // their pills white → grey → black with the cover, which reads more
+        // minimal than a synthetic steel/sand hue. Wider lightness band than
+        // the `l` used for the slate so dark and light covers pull apart; the
+        // chip's label color is still derived from this via `contrastingLabel`.
+        let neutralL = min(max(avgL, 0.22), 0.82)
+        let neutral = Color(red: neutralL, green: neutralL, blue: neutralL)
+        return ArtworkAccent(primary: primary, secondary: secondary, neutralTint: neutral)
     }
 
     /// Reads the bucket's pre-aggregated centroid + clamps into the

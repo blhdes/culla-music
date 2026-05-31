@@ -16,6 +16,11 @@ struct PlaylistMembershipChips: View {
     /// Album-derived tint when dynamic accent is on, palette accent otherwise —
     /// resolved upstream in `MusicSwipeView`, so the chips just read it.
     @Environment(\.appAccent) private var appAccent
+    /// Non-nil only when the album-derived accent came from a monochrome cover:
+    /// a pure-grey tint keyed to the cover's lightness. We prefer it over the
+    /// colored accent so B&W artwork tints the pills white/grey/black, which
+    /// reads more minimal than the steel/sand slate `appAccent` would carry.
+    @Environment(\.appAccentNeutral) private var appAccentNeutral
     @State private var placeholderPulse: Bool = false
 
     var body: some View {
@@ -50,14 +55,21 @@ struct PlaylistMembershipChips: View {
         max(playlists.count - maxVisible, 0)
     }
 
-    /// Black or white — whichever contrasts the tinted pill better. The album
-    /// accent washing the glass can land genuinely dark: `AccentExtractor`
-    /// clamps HSL *lightness* to [0.40, 0.58], but a saturated hue at L=0.40
-    /// is still dark to the eye, so the old `.primary` label went black-on-dark
-    /// and disappeared. Deriving the label from the tint's perceived luminance
-    /// is scheme-independent — it flips correctly for dark *and* pale accents.
+    /// The tint actually painted on the pills: the neutral grey for monochrome
+    /// covers, the colored accent otherwise.
+    private var chipTint: Color {
+        appAccentNeutral ?? appAccent
+    }
+
+    /// Black or white — whichever contrasts the tinted pill better. The tint
+    /// washing the glass can land genuinely dark: `AccentExtractor` clamps HSL
+    /// *lightness* to [0.40, 0.58] for colored accents (and down to ~0.22 for
+    /// the neutral grey), but a saturated hue at L=0.40 is still dark to the
+    /// eye, so the old `.primary` label went black-on-dark and disappeared.
+    /// Deriving the label from the tint's perceived luminance is scheme-
+    /// independent — it flips correctly for dark *and* pale tints.
     private var accentLabelColor: Color {
-        appAccent.contrastingLabel
+        chipTint.contrastingLabel
     }
 
     private func dismissedChip(date: Date) -> some View {
@@ -106,10 +118,10 @@ struct PlaylistMembershipChips: View {
         .padding(.vertical, 3)
         // Accent rides on the tint + hairline border. The label color is
         // derived from the tint's luminance (see `accentLabelColor`) so it
-        // stays legible whether the album accent lands pale or dark.
-        .glassSurface(in: Capsule(), tint: appAccent)
+        // stays legible whether the tint lands pale or dark.
+        .glassSurface(in: Capsule(), tint: chipTint)
         .overlay(
-            Capsule().strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
+            Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -120,9 +132,9 @@ struct PlaylistMembershipChips: View {
             .foregroundStyle(accentLabelColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .glassSurface(in: Capsule(), tint: appAccent)
+            .glassSurface(in: Capsule(), tint: chipTint)
             .overlay(
-                Capsule().strokeBorder(appAccent.opacity(0.35), lineWidth: 1)
+                Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
             )
     }
 

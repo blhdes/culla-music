@@ -15,19 +15,9 @@ struct SourceScopePickerSheet: View {
     /// HomeView has no live `MembershipIndex`, so we read the on-disk snapshot
     /// the swipe screen writes after each rebuild/swipe.
     @State private var trackCounts: [String: Int] = [:]
-    @State private var libraryArtists: [Artist] = []
-    @State private var isLoadingArtists: Bool = false
-    /// Per-artist library track counts. Loaded from disk on open (instant if
-    /// previously persisted), then refreshed via a parallel batch when the
-    /// disk snapshot doesn't cover the current library.
-    @State private var artistTrackCounts: [String: Int] = [:]
-    /// Artist IDs we've attempted to count this session (or in a prior session
-    /// loaded from disk). Used so we don't re-fetch artists whose count came
-    /// back as "0" — `MusicLibraryService.safeCountLibrarySongs` deliberately
-    /// returns nil for those, but we still know we tried. Refetch only fires
-    /// when the current library has artists not in this set.
-    @State private var attemptedArtistIDs: Set<String> = []
-    @State private var isLoadingCounts: Bool = false
+    /// Shared artist list + per-artist count cache. Owns the load/hydrate/refresh
+    /// logic that the Playlists manager's artist filter reuses too.
+    @State private var artistStore = ArtistLibraryStore()
     @State private var pickerMode: PickerMode = .playlists
     @State private var searchQuery: String = ""
     /// Memoized filter+sort results. Recomputed only when an input changes
@@ -113,10 +103,10 @@ struct SourceScopePickerSheet: View {
             .onChange(of: artistSortDescending) { _, _ in
                 visibleArtists = computeFilteredSortedArtists()
             }
-            .onChange(of: libraryArtists) { _, _ in
+            .onChange(of: artistStore.artists) { _, _ in
                 visibleArtists = computeFilteredSortedArtists()
             }
-            .onChange(of: artistTrackCounts) { _, _ in
+            .onChange(of: artistStore.trackCounts) { _, _ in
                 visibleArtists = computeFilteredSortedArtists()
             }
         }
@@ -238,7 +228,7 @@ struct SourceScopePickerSheet: View {
 
     private func computeFilteredSortedArtists() -> [Artist] {
         let field = ArtistSortField(rawValue: artistSortFieldRaw) ?? .alphabetical
-        var rows = libraryArtists
+        var rows = artistStore.artists
         if !trimmedQuery.isEmpty {
             rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
         }
@@ -247,8 +237,8 @@ struct SourceScopePickerSheet: View {
             case .alphabetical:
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             case .trackCount:
-                let l = artistTrackCounts[lhs.id.rawValue] ?? 0
-                let r = artistTrackCounts[rhs.id.rawValue] ?? 0
+                let l = artistStore.trackCounts[lhs.id.rawValue] ?? 0
+                let r = artistStore.trackCounts[rhs.id.rawValue] ?? 0
                 return l < r
             }
         }
@@ -306,7 +296,7 @@ struct SourceScopePickerSheet: View {
                 }
             }
 
-            if (isLoadingArtists && libraryArtists.isEmpty) || isAwaitingFirstCounts {
+            if (artistStore.isLoadingArtists && artistStore.artists.isEmpty) || artistStore.isAwaitingFirstCounts {
                 Section {
                     HStack {
                         Spacer()
@@ -321,21 +311,17 @@ struct SourceScopePickerSheet: View {
                         artistRow(artist)
                     }
                 } header: {
-                    sortHeader("Artists", showsSpinner: isLoadingCounts && artistTrackCounts.isEmpty)
+                    sortHeader("Artists", showsSpinner: artistStore.isLoadingCounts && artistStore.trackCounts.isEmpty)
                 }
             } else if !trimmedQuery.isEmpty {
                 noMatchesRow
             }
         }
         .task {
-            // Disk-cached counts MUST land before `libraryArtists`, otherwise
-            // the first list render sorts with every count treated as 0 (ties
-            // broken arbitrarily) and the user sees the deck snap into its
-            // real order a frame later. Disk read is a single small file —
-            // fast enough that the ProgressView still covers the wait.
-            await hydrateArtistCountsFromDisk()
-            await loadArtistsIfNeeded()
-            await refreshArtistCountsIfStale()
+            // The store runs disk-hydrate → list-load → stale-refresh in the
+            // order that keeps the first sort stable (counts before the list,
+            // so it doesn't snap into its real order a frame later).
+            await artistStore.prime()
         }
     }
 
@@ -343,72 +329,6 @@ struct SourceScopePickerSheet: View {
         Section {
             ContentUnavailableView.search(text: trimmedQuery)
                 .listRowBackground(Color.clear)
-        }
-    }
-
-    /// True on the first-ever open of the picker, while the network walk that
-    /// produces the initial counts is still in flight. Holds the artist list
-    /// back so the user doesn't see a count-sorted list snap into its final
-    /// order. Once the walk finishes (success OR failure) `attemptedArtistIDs`
-    /// is populated and the gate drops; on failure the list renders without
-    /// real counts, which is stable even if not ideally sorted.
-    private var isAwaitingFirstCounts: Bool {
-        attemptedArtistIDs.isEmpty && isLoadingCounts
-    }
-
-    private func loadArtistsIfNeeded() async {
-        guard libraryArtists.isEmpty, !isLoadingArtists else { return }
-        isLoadingArtists = true
-        defer { isLoadingArtists = false }
-        do {
-            // Sort happens in `filteredSortedArtists` based on user prefs —
-            // just hold the unordered list here.
-            libraryArtists = try await MusicLibraryService.shared.refreshLibraryArtists()
-        } catch {
-            print("SourceScopePickerSheet.loadArtists failed: \(error)")
-        }
-    }
-
-    /// Loads any prior count snapshot from disk before the artist list lands,
-    /// so the first sort pass already has real numbers to compare. Split off
-    /// from the network refresh so the `.task` can run it ahead of
-    /// `loadArtistsIfNeeded` — the order matters for visual stability.
-    private func hydrateArtistCountsFromDisk() async {
-        guard artistTrackCounts.isEmpty && attemptedArtistIDs.isEmpty else { return }
-        let disk = await Task.detached(priority: .userInitiated) {
-            MembershipIndex.diskArtistCountsSnapshot()
-        }.value
-        artistTrackCounts = disk.counts
-        attemptedArtistIDs = Set(disk.attemptedIDs)
-    }
-
-    /// Refetch only when the disk snapshot doesn't cover every current
-    /// library artist. "Covered" = we tried to count them, even if the
-    /// attempt came back as nil (uploaded tracks, fuzzy metadata, etc.).
-    /// Previously this used `counts.count < libraryArtists.count`, which
-    /// ALWAYS fired because nil-result artists are omitted from `counts` —
-    /// defeating the cache and re-walking the library every picker open.
-    /// On success, persists both the counts AND the attempted-IDs list so
-    /// subsequent opens skip the fetch entirely.
-    private func refreshArtistCountsIfStale() async {
-        let currentIDs = Set(libraryArtists.map { $0.id.rawValue })
-        let needsRefresh = !currentIDs.isSubset(of: attemptedArtistIDs)
-
-        guard needsRefresh, !isLoadingCounts else { return }
-        isLoadingCounts = true
-        defer { isLoadingCounts = false }
-        do {
-            // Pass our already-loaded artist list so the service skips a second
-            // full library walk. loadArtistsIfNeeded ran first; libraryArtists
-            // is the fresh result of that fetch.
-            let fresh = try await MusicLibraryService.shared.fetchAllArtistTrackCounts(
-                artists: libraryArtists
-            )
-            artistTrackCounts = fresh.counts
-            attemptedArtistIDs = Set(fresh.attemptedIDs)
-            MembershipIndex.writeArtistCounts(fresh)
-        } catch {
-            print("SourceScopePickerSheet.loadArtistCounts failed: \(error)")
         }
     }
 
@@ -529,7 +449,7 @@ struct SourceScopePickerSheet: View {
 
                 Spacer()
 
-                if let count = artistTrackCounts[artist.id.rawValue] {
+                if let count = artistStore.trackCounts[artist.id.rawValue] {
                     Text(count, format: .number)
                         .font(.caption)
                         .monospacedDigit()

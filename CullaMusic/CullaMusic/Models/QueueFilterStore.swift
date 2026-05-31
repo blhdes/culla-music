@@ -9,9 +9,21 @@ import Foundation
 /// `ManagePlaylistsSheet`.
 enum QueueFilterStore {
     static let defaultsKey = "queueFilterPlaylistAMIDs"
+    /// Sibling key for the artist filter — same comma-joined `String` shape, so
+    /// it shares `decode`/`encode` below. Apple Music artist IDs never contain
+    /// commas either. Read by `MusicLibraryService.deckExclusionSet`, read +
+    /// written by `ManagePlaylistsSheet`'s Artists sub-tab.
+    static let artistDefaultsKey = "queueFilterArtistAMIDs"
 
     static func read() -> Set<String> {
         decode(UserDefaults.standard.string(forKey: defaultsKey) ?? "")
+    }
+
+    /// Artist IDs whose tracks are filtered out of `.library` sessions. Unlike
+    /// the playlist filter's lenient rule, this is a hard exclude: any library
+    /// track crediting a listed artist is hidden (see `deckExclusionSet`).
+    static func readArtists() -> Set<String> {
+        decode(UserDefaults.standard.string(forKey: artistDefaultsKey) ?? "")
     }
 
     static func decode(_ raw: String) -> Set<String> {

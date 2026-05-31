@@ -4,17 +4,30 @@ import MusicKit
 /// Two-segment "Playlists" sheet:
 ///   • **Sidebar** — which playlists appear in the right-swipe sidebar
 ///     (capped to `MusicSwipeViewModel.maxSidebar`). The original behavior.
-///   • **Filter queue** — which playlists' tracks should disappear from a
-///     `.library` swipe session. Persisted in `QueueFilterStore` and consumed
-///     by `MusicLibraryService.deckExclusionSet`. Lenient: a song hides only
-///     when *every* playlist it belongs to is selected here, so excluding one
-///     playlist never silently culls cross-listed tracks.
+///   • **Filter queue** — what disappears from a `.library` swipe session.
+///     Splits into two combinable sub-tabs, both consumed by
+///     `MusicLibraryService.deckExclusionSet`:
+///       – **Playlists** (`QueueFilterStore`) — lenient: a song hides only when
+///         *every* playlist it belongs to is selected, so excluding one never
+///         silently culls cross-listed tracks.
+///       – **Artists** (`QueueFilterStore` artist key) — hard: any library
+///         track crediting a selected artist is hidden outright.
+///     The two unite, so each independently removes its matches.
 struct ManagePlaylistsSheet: View {
     @Bindable var viewModel: MusicSwipeViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
     @State private var showCreate = false
     @State private var segment: Segment = .sidebar
+    /// Shared artist list + per-artist count cache for the Artists filter
+    /// sub-tab. Same store the Sort-From picker uses, primed lazily the first
+    /// time the user opens the sub-tab.
+    @State private var artistStore = ArtistLibraryStore()
+    @State private var searchQuery = ""
+    /// Memoized filter+sort of the artist list — recomputed only when an input
+    /// changes (search, sort, store data), not per render, so typing doesn't
+    /// re-sort 500+ artists on every keystroke.
+    @State private var visibleArtists: [Artist] = []
 
     /// The up-swipe loved target. Hidden from the sidebar list below since the
     /// up-swipe already covers that playlist and double-listing it implies a
@@ -27,11 +40,21 @@ struct ManagePlaylistsSheet: View {
     /// lockstep without a custom store. See `QueueFilterStore`.
     @AppStorage(QueueFilterStore.defaultsKey) private var rawExcluded: String = ""
 
+    /// Comma-joined artist IDs whose tracks are hidden from `.library` sessions.
+    /// Sibling of `rawExcluded`; consumed by the same `deckExclusionSet`. Hard
+    /// exclude (any track by the artist), unlike the playlist filter's lenient
+    /// rule. See `QueueFilterStore.readArtists`.
+    @AppStorage(QueueFilterStore.artistDefaultsKey) private var rawExcludedArtists: String = ""
+
     // Each segment persists its own sort choice (stored as the choice's raw
     // value) so sorting one doesn't reshuffle the other. Sidebar defaults to
     // its real displayOrder; queue filter to alphabetical.
     @AppStorage("managePlaylists.sidebarSort") private var sidebarSortRaw = SidebarSortChoice.sidebarOrder.rawValue
     @AppStorage("managePlaylists.filterSort") private var filterSortRaw = PlaylistSortChoice.nameAsc.rawValue
+    @AppStorage("managePlaylists.artistFilterSort") private var artistFilterSortRaw = ArtistSortChoice.nameAsc.rawValue
+    /// Which list the Filter queue shows — playlists or artists. Persisted so
+    /// re-opening the sheet keeps the user on their last sub-tab.
+    @AppStorage("managePlaylists.filterScope") private var filterScopeRaw = FilterScope.playlists.rawValue
 
     enum Segment: String, CaseIterable, Identifiable {
         case sidebar
@@ -43,6 +66,22 @@ struct ManagePlaylistsSheet: View {
             case .filter:  "Filter queue"
             }
         }
+    }
+
+    /// The Filter queue's two sub-tabs. Mirrors the Sort-From picker's
+    /// `[Playlists | Artists]` vocabulary so the two sheets read as one family.
+    enum FilterScope: String, CaseIterable, Identifiable {
+        case playlists
+        case artists
+        var id: String { rawValue }
+        var label: String { self == .playlists ? "Playlists" : "Artists" }
+    }
+
+    private var filterScope: Binding<FilterScope> {
+        Binding(
+            get: { FilterScope(rawValue: filterScopeRaw) ?? .playlists },
+            set: { filterScopeRaw = $0.rawValue }
+        )
     }
 
     private var maxSidebar: Int { MusicSwipeViewModel.maxSidebar }
@@ -67,6 +106,18 @@ struct ManagePlaylistsSheet: View {
     }
 
     private var excludedSet: Set<String> { QueueFilterStore.decode(rawExcluded) }
+    private var excludedArtistSet: Set<String> { QueueFilterStore.decode(rawExcludedArtists) }
+
+    private var trimmedQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Applies the shared search box to a playlist list. No-op when the query is
+    /// empty so the sorted order is untouched.
+    private func searchFiltered(_ playlists: [Playlist]) -> [Playlist] {
+        guard !trimmedQuery.isEmpty else { return playlists }
+        return playlists.filter { $0.name.localizedStandardContains(trimmedQuery) }
+    }
 
     // MARK: - Sorting
 
@@ -84,14 +135,43 @@ struct ManagePlaylistsSheet: View {
         )
     }
 
+    private var artistFilterSortChoice: Binding<ArtistSortChoice> {
+        Binding(
+            get: { ArtistSortChoice(rawValue: artistFilterSortRaw) ?? .nameAsc },
+            set: { artistFilterSortRaw = $0.rawValue }
+        )
+    }
+
     private var sortedEditablePlaylists: [Playlist] {
         let choice = sidebarSortChoice.wrappedValue
-        return sorted(editablePlaylists, field: choice.field, descending: choice.descending)
+        return searchFiltered(sorted(editablePlaylists, field: choice.field, descending: choice.descending))
     }
 
     private var sortedFilterablePlaylists: [Playlist] {
         let choice = filterSortChoice.wrappedValue
-        return sorted(filterablePlaylists, field: choice.field, descending: choice.descending)
+        return searchFiltered(sorted(filterablePlaylists, field: choice.field, descending: choice.descending))
+    }
+
+    /// Search + sort for the artist filter list. Mirrors the Sort-From picker's
+    /// artist sort (alphabetical / track count) so both browse identically.
+    private func computeFilteredSortedArtists() -> [Artist] {
+        let choice = artistFilterSortChoice.wrappedValue
+        var rows = artistStore.artists
+        if !trimmedQuery.isEmpty {
+            rows = rows.filter { $0.name.localizedStandardContains(trimmedQuery) }
+        }
+        rows.sort { lhs, rhs in
+            switch choice.field {
+            case .alphabetical:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .trackCount:
+                let l = artistStore.trackCounts[lhs.id.rawValue] ?? 0
+                let r = artistStore.trackCounts[rhs.id.rawValue] ?? 0
+                return l < r
+            }
+        }
+        if choice.descending { rows.reverse() }
+        return rows
     }
 
     /// Orders a list by a sort field. A `nil` field means "keep the source
@@ -151,6 +231,21 @@ struct ManagePlaylistsSheet: View {
                 .padding(.top, 10)
                 .padding(.bottom, 4)
 
+                // Sub-tab: only the Filter queue splits into Playlists / Artists.
+                // Inset further than the top control so it reads as a nested
+                // refinement, not a second top-level switch.
+                if segment == .filter {
+                    Picker("Filter scope", selection: filterScope.animation(.easeInOut(duration: 0.22))) {
+                        ForEach(FilterScope.allCases) { scope in
+                            Text(scope.label).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 36)
+                    .padding(.bottom, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 // Plain grouped List — same presentation as `SourceScopePickerSheet`
                 // so the two playlist pickers read as one UI form. No mesh, no
                 // material slabs, no custom borders: the List owns every surface.
@@ -163,6 +258,15 @@ struct ManagePlaylistsSheet: View {
             }
             .navigationTitle("Playlists")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic))
+            // Seed + keep the memoized artist list in sync. Same explicit-trigger
+            // approach as the Sort-From picker: recompute only on real input
+            // changes, never per body render.
+            .onAppear { visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: searchQuery) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: artistFilterSortRaw) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: artistStore.artists) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            .onChange(of: artistStore.trackCounts) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .toolbar {
                 // Create is available in both segments — a new playlist is just
                 // as valid a queue-filter target as a sidebar one. The slot is
@@ -202,8 +306,13 @@ struct ManagePlaylistsSheet: View {
     @ViewBuilder
     private var sections: some View {
         switch segment {
-        case .sidebar: sidebarSection
-        case .filter:  filterSection
+        case .sidebar:
+            sidebarSection
+        case .filter:
+            switch filterScope.wrappedValue {
+            case .playlists: filterSection
+            case .artists:   artistFilterSection
+            }
         }
     }
 
@@ -220,6 +329,8 @@ struct ManagePlaylistsSheet: View {
                     detail: "Tap + to create your first one.",
                     icon: "music.note.list"
                 )
+            } else if sortedEditablePlaylists.isEmpty {
+                noMatchesRow
             } else {
                 ForEach(sortedEditablePlaylists, id: \.id) { playlist in
                     sidebarRow(for: playlist)
@@ -295,6 +406,8 @@ struct ManagePlaylistsSheet: View {
                     detail: "Once you have playlists in your library, you can hide their tracks here.",
                     icon: "line.3.horizontal.decrease.circle"
                 )
+            } else if sortedFilterablePlaylists.isEmpty {
+                noMatchesRow
             } else {
                 ForEach(sortedFilterablePlaylists, id: \.id) { playlist in
                     filterRow(for: playlist)
@@ -353,6 +466,131 @@ struct ManagePlaylistsSheet: View {
             set.insert(amID)
         }
         rawExcluded = QueueFilterStore.encode(set)
+    }
+
+    // MARK: - Artist filter segment
+
+    /// Artist filter list — structurally mirrors `filterSection`. Lazily primes
+    /// the shared artist store the first time the user opens this sub-tab, so we
+    /// don't walk the library for artists they may never filter. Loading /
+    /// empty / no-matches states match the Sort-From picker's artist tab.
+    private var artistFilterSection: some View {
+        let count = excludedArtistSet.count
+        return Section {
+            if (artistStore.isLoadingArtists && artistStore.artists.isEmpty) || artistStore.isAwaitingFirstCounts {
+                loadingRow
+            } else if artistStore.artists.isEmpty {
+                emptyRow(
+                    title: "No artists to filter",
+                    detail: "Once your library has artists, you can hide their tracks here.",
+                    icon: "music.mic"
+                )
+            } else if !visibleArtists.isEmpty {
+                ForEach(visibleArtists, id: \.id) { artist in
+                    artistFilterRow(for: artist)
+                }
+            } else if !trimmedQuery.isEmpty {
+                // Only "no results" when actually searching. An empty memo with
+                // no query is the one-frame gap before `onChange` reseeds it
+                // after the list lands — render nothing rather than flash this.
+                noMatchesRow
+            }
+        } header: {
+            sortHeader(
+                "\(count) artist\(count == 1 ? "" : "s") filtered",
+                selection: artistFilterSortChoice,
+                showsChip: !artistStore.artists.isEmpty,
+                countValue: count
+            )
+        } footer: {
+            if viewModel.config.mode != .library {
+                Text("Filter applies in Library mode — current session is \(viewModel.config.mode.title).")
+            }
+        }
+        .task { await artistStore.prime() }
+    }
+
+    @ViewBuilder
+    private func artistFilterRow(for artist: Artist) -> some View {
+        let amID = artist.id.rawValue
+        let isFiltered = excludedArtistSet.contains(amID)
+
+        // Tap gesture instead of `Button` — see `sidebarRow` for the iOS 26
+        // Liquid Glass press-highlight rationale.
+        HStack(spacing: 12) {
+            Group {
+                if let artwork = artist.artwork {
+                    ArtworkImage(artwork, width: 40, height: 40)
+                } else {
+                    ArtistPlaceholder(name: artist.name, size: 40)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(Circle())
+
+            Text(artist.name)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Reserved width keeps the Spacer from twitching as counts resolve.
+            // Artists with a nil count (uploaded-only, fuzzy metadata) show no
+            // badge — same as the Sort-From picker.
+            if let trackCount = artistStore.trackCounts[amID] {
+                Text(trackCount, format: .number)
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 28, alignment: .trailing)
+            }
+
+            Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isFiltered ? appAccent : Color.secondary.opacity(0.4))
+                .font(.title3)
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.bounce, value: isFiltered)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 6)
+        .animation(.snappy(duration: 0.22), value: isFiltered)
+        .onTapGesture {
+            toggleArtistFilter(amID: amID)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(artist.name)
+        .accessibilityValue(isFiltered ? "Filtered out" : "Visible")
+        .accessibilityHint("Toggles filter for this artist")
+    }
+
+    private func toggleArtistFilter(amID: String) {
+        guard !amID.isEmpty else { return }
+        var set = excludedArtistSet
+        if set.contains(amID) {
+            set.remove(amID)
+        } else {
+            set.insert(amID)
+        }
+        rawExcludedArtists = QueueFilterStore.encode(set)
+    }
+
+    /// Centered spinner row used while the artist list / counts load.
+    private var loadingRow: some View {
+        HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+        }
+        .listRowBackground(Color.clear)
+    }
+
+    /// Native "no results" row for the shared search box — same vocabulary as
+    /// `SourceScopePickerSheet`.
+    private var noMatchesRow: some View {
+        ContentUnavailableView.search(text: trimmedQuery)
+            .listRowBackground(Color.clear)
     }
 
     // MARK: - Shared row layout

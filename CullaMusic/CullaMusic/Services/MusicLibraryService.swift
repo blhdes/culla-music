@@ -694,17 +694,22 @@ final class MusicLibraryService {
     /// existed, the hero ran an unfiltered library request and could surface a
     /// song the carousel had already excluded — first-cover mismatch.
     ///
-    /// - `.library`:   sorted ∪ dismissed ∪ filtered  (already acted on, plus
-    ///                 the user's per-playlist exclude list — see
-    ///                 `QueueFilterStore` and the lenient rule below)
+    /// - `.library`:   sorted ∪ dismissed ∪ playlistFiltered ∪ artistFiltered
+    ///                 (already acted on, plus the user's two optional exclude
+    ///                 lists — see `QueueFilterStore` and the rules below)
     /// - `.unsorted`:  playlists ∪ sorted ∪ dismissed  (everything that "has a home")
     /// - `.dismissed`: empty (dismissed mode *shows* dismissed songs, doesn't filter them)
     ///
-    /// `.library` filter — lenient policy: a song is added to the exclusion
-    /// set only when *every* playlist it belongs to is in the user's
-    /// excluded set. Songs in zero playlists are never filtered. This
-    /// preserves the ability to encounter a song from a non-excluded
-    /// playlist even if it also lives in an excluded one.
+    /// `.library` playlist filter — lenient policy: a song is added to the
+    /// exclusion set only when *every* playlist it belongs to is in the user's
+    /// excluded set. Songs in zero playlists are never filtered. This preserves
+    /// the ability to encounter a song from a non-excluded playlist even if it
+    /// also lives in an excluded one.
+    ///
+    /// `.library` artist filter — hard policy: every library track crediting a
+    /// filtered artist is excluded outright (collabs included — that's the
+    /// natural meaning of "don't show me this artist"). The two filters union,
+    /// so each independently hides its matches.
     ///
     /// On a playlist-fetch failure in `.unsorted`, returns `[]` to match
     /// `CarouselSongFeed.buildExclusionSet`'s prior behavior — without this,
@@ -727,20 +732,41 @@ final class MusicLibraryService {
         case .library:
             let base = sortedIDs.union(dismissedIDs)
             let excludedPlaylists = QueueFilterStore.read()
-            guard !excludedPlaylists.isEmpty else { return base }
-            do {
-                let membership = try await fetchPlaylistMembershipIndex(includeCurated: true)
-                var filtered = base
-                for (songID, playlistAMIDs) in membership where !playlistAMIDs.isEmpty {
-                    if playlistAMIDs.allSatisfy({ excludedPlaylists.contains($0.rawValue) }) {
-                        filtered.insert(songID)
+            let excludedArtists = QueueFilterStore.readArtists()
+            guard !excludedPlaylists.isEmpty || !excludedArtists.isEmpty else { return base }
+
+            var filtered = base
+
+            // Playlist filter (lenient: only when ALL of a song's playlists are
+            // excluded). On a membership-fetch failure we keep what we have
+            // rather than dropping sort/dismiss — losing the optional filter is
+            // the lesser harm.
+            if !excludedPlaylists.isEmpty {
+                do {
+                    let membership = try await fetchPlaylistMembershipIndex(includeCurated: true)
+                    for (songID, playlistAMIDs) in membership where !playlistAMIDs.isEmpty {
+                        if playlistAMIDs.allSatisfy({ excludedPlaylists.contains($0.rawValue) }) {
+                            filtered.insert(songID)
+                        }
                     }
+                } catch {
+                    print("deckExclusionSet library playlist filter failed: \(error)")
                 }
-                return filtered
-            } catch {
-                print("deckExclusionSet library filter failed: \(error)")
-                return base
             }
+
+            // Artist filter (hard: any track by a filtered artist). Each lookup
+            // is cached per-artist, so re-walks are cheap; a single artist
+            // failure is logged and skipped so the rest still apply.
+            for artistID in excludedArtists {
+                do {
+                    let ids = try await artistLibrarySongIDs(artistID: MusicItemID(artistID))
+                    filtered.formUnion(ids)
+                } catch {
+                    print("deckExclusionSet library artist filter failed for \(artistID): \(error)")
+                }
+            }
+
+            return filtered
         case .unsorted:
             do {
                 let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: true)

@@ -214,15 +214,20 @@ final class MusicLibraryService {
     func libraryAddedDateSpan() async -> (oldest: Date, newest: Date)? {
         if let cachedAddedDateSpan { return cachedAddedDateSpan }
         do {
+            // Configure each request, then snapshot into a `let` — the
+            // concurrent `async let .response()` closures capture by reference,
+            // and capturing the mutable `var` is an error in Swift 6 mode.
             var oldestReq = MusicLibraryRequest<Song>()
             oldestReq.limit = 1
             oldestReq.sort(by: \.libraryAddedDate, ascending: true)
+            let oldestRequest = oldestReq
             var newestReq = MusicLibraryRequest<Song>()
             newestReq.limit = 1
             newestReq.sort(by: \.libraryAddedDate, ascending: false)
+            let newestRequest = newestReq
 
-            async let oldestResp = oldestReq.response()
-            async let newestResp = newestReq.response()
+            async let oldestResp = oldestRequest.response()
+            async let newestResp = newestRequest.response()
             let oldest = (try await oldestResp).items.first?.libraryAddedDate
             let newest = (try await newestResp).items.first?.libraryAddedDate
 

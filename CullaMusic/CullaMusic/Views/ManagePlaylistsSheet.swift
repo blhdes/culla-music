@@ -214,8 +214,12 @@ struct ManagePlaylistsSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+                // Hug the search bar above it. The search field sits in the
+                // nav-bar drawer; the only gap we control here is the picker's
+                // top inset, so keep it small so the toggle reads as part of
+                // the same header block instead of a floating control.
+                .padding(.top, 4)
+                .padding(.bottom, 6)
 
                 // The Filter queue's Playlists/Artists split no longer rides a
                 // second segmented control here — switching scope now lives in

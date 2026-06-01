@@ -16,8 +16,8 @@ import SwiftUI
 /// - `CarouselDateJumpControl` — the capsule (icon + short date + chevron).
 /// - `CarouselDateJumpSheet` — a minimalist wheel picker (no calendar grid).
 struct CarouselDateJumpControl: View {
-    /// The date currently in effect — the picked jump date, or the centred
-    /// cover's add-date as a sensible default. Shown short ("Jun 1, 2024").
+    /// Add-date of the cover currently centred in the carousel — tracks the
+    /// scroll live, and is where the session starts. Shown short ("Jun 1, 2024").
     let displayDate: Date
     /// True while `loadUntil` pages toward a far date — swaps the calendar
     /// glyph for a spinner so a multi-second jump reads as working.

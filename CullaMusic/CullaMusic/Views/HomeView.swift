@@ -295,11 +295,6 @@ struct HomeView: View {
     /// changes (mode / source / sort) so a stale id from one deck
     /// doesn't leak into another.
     @State private var lastCenteredCarouselSongID: String?
-    /// Library-add date picked inside the carousel's date control. Folded into
-    /// the SwipeConfig on Start so the whole session sorts from that date.
-    /// Cleared whenever the deck source changes (mode / source / sort) — those
-    /// reorder or rescope the timeline, so a stale date must not leak.
-    @State private var jumpDate: Date?
     @AppStorage("music.sortOrder") private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") private var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     /// Scoped-only opt-in: when on, dismissed tracks also surface inside
@@ -410,12 +405,19 @@ struct HomeView: View {
             if showCarousel {
                 HomeArtCarouselView(
                     mode: $selectedMode,
-                    jumpDate: $jumpDate,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
                     modelContext: modelContext,
                     totalCount: count(for: selectedMode),
                     onStart: { anchor in
-                        let config = buildSwipeConfig()
+                        var config = buildSwipeConfig()
+                        // Start the session from the cover the user is centred
+                        // on in the carousel — its add-date anchors the whole
+                        // library walk. Add-date timelines only (Library /
+                        // Unsorted); Dismissed is sorted by dismissal date, so a
+                        // library-add-date anchor doesn't apply there.
+                        if config.source == nil, config.mode != .dismissed {
+                            config.startFromDate = anchor.first?.libraryAddedDate
+                        }
                         // Dismiss the carousel synchronously so Home's
                         // startButton re-renders before RootView's startSession
                         // kicks off the Home → Swipe morph. The CTA's screen
@@ -521,9 +523,6 @@ struct HomeView: View {
             // mode swaps the deck, so the stale id from the prior mode must
             // not leak into the new hero — clear it before the next render.
             lastCenteredCarouselSongID = nil
-            // The date anchor is per-timeline too — a date picked in one mode
-            // is meaningless in another (and Dismissed has no date control).
-            jumpDate = nil
         }
         .onChange(of: source) { _, newValue in
             if case .artist(let id, _) = newValue {
@@ -531,15 +530,11 @@ struct HomeView: View {
             }
             // Same as mode: picking / clearing a source changes the deck.
             lastCenteredCarouselSongID = nil
-            jumpDate = nil
         }
         .onChange(of: sortOrderRaw) { _, _ in
             // Flipping newest/oldest reorders the deck — the carousel-anchor
             // song from the previous order would land at a meaningless slot.
             lastCenteredCarouselSongID = nil
-            // ...and the date jump's direction is order-dependent, so a date
-            // picked under the old order would scrub the wrong way now.
-            jumpDate = nil
         }
         .sheet(isPresented: $showSourcePicker) {
             SourceScopePickerSheet(
@@ -794,23 +789,15 @@ struct HomeView: View {
         // The flag is only meaningful in scoped sessions — gate it here
         // so an unrelated stored value can't leak into an All-Library run.
         let includeDismissed = activeScope != nil && includeDismissedInScope
-        // The date anchor only applies to the unscoped add-date timelines —
-        // playlist/artist scopes walk by playlist position and Dismissed by
-        // dismissal date, so a library-add-date start has no meaning there.
-        let startFromDate: Date? = {
-            switch selectedMode {
-            case .library:   return source == nil ? jumpDate : nil
-            case .unsorted:  return jumpDate
-            case .dismissed: return nil
-            }
-        }()
+        // `startFromDate` is left at its default (nil) here. The plain Start
+        // button reviews the whole timeline; only a carousel launch sets it,
+        // from the centred cover's add-date (see the carousel's `onStart`).
         return SwipeConfig(
             mode: selectedMode,
             order: order,
             source: activeScope,
             sourceTransferMode: transferMode,
-            includeDismissedInScope: includeDismissed,
-            startFromDate: startFromDate
+            includeDismissedInScope: includeDismissed
         )
     }
 

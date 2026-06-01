@@ -23,11 +23,6 @@ import MusicKit
 /// sources are deferred — those screens have their own portrait vocabulary.
 struct HomeArtCarouselView: View {
     @Binding var mode: ReviewMode
-    /// Library-add date the user picked to scrub to. Owned by HomeView so it
-    /// can fold into the swipe session config when the user starts. The date
-    /// control sets it; clearing resets it. Bound (not local) so HomeView can
-    /// also clear it when mode/source/sort change out from under the carousel.
-    @Binding var jumpDate: Date?
     let sortOrder: SortOrder
     let modelContext: ModelContext
     /// Real total for the current mode, sourced from `HomeView.count(for:)`.
@@ -180,7 +175,7 @@ struct HomeArtCarouselView: View {
                 CarouselDateJumpSheet(
                     lowerBound: dateSpan.oldest,
                     upperBound: dateSpan.newest,
-                    initialDate: jumpDate ?? currentCenteredSong?.libraryAddedDate ?? dateSpan.newest,
+                    initialDate: currentCenteredSong?.libraryAddedDate ?? dateSpan.newest,
                     onConfirm: performDateJump(to:)
                 )
             }
@@ -586,21 +581,22 @@ struct HomeArtCarouselView: View {
             && !(feed?.songs.isEmpty ?? true)
     }
 
-    /// Date shown on the control: the picked jump date, falling back to the
-    /// centred cover's add-date (and finally the newest add-date) so the pill
-    /// always reads a meaningful "current" date.
+    /// Date shown on the control — the add-date of the cover currently centred
+    /// in the carousel, so the pill tracks the scroll live (falling back to the
+    /// newest add-date before the first cover settles). The centred cover is
+    /// also where the session starts, so the pill always reads "where you'll
+    /// begin."
     private var dateControlDate: Date? {
-        jumpDate ?? currentCenteredSong?.libraryAddedDate ?? dateSpan?.newest
+        currentCenteredSong?.libraryAddedDate ?? dateSpan?.newest
     }
 
-    /// Sets the jump date and scrubs the carousel to the first cover added
-    /// on/around it. The timeline isn't re-seeded — `loadUntil` only pages far
-    /// enough forward to reach the boundary cover, then we snap the scroll
-    /// there (the rest of the strip stays browsable). The date rides up to
-    /// HomeView via `$jumpDate`, so tapping Start afterwards sorts the whole
-    /// session from this point.
+    /// Scrubs the carousel to the first cover added on/around `date`. The
+    /// timeline isn't re-seeded — `loadUntil` only pages far enough forward to
+    /// reach the boundary cover, then we snap the scroll there (the rest of the
+    /// strip stays browsable). Snapping the scroll moves the centred cover,
+    /// which is what the pill reads and what the session starts from — so the
+    /// jump, the pill, and the eventual start point all stay in lockstep.
     private func performDateJump(to date: Date) {
-        jumpDate = date
         guard let feed else { return }
         isJumping = true
         Task {

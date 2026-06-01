@@ -9,6 +9,14 @@ struct SwipeConfig {
     /// previously-dismissed tracks — "audit this collection" intent. Ignored
     /// when `source == nil`; All-Library walks always hide dismissals.
     var includeDismissedInScope: Bool = false
+    /// Library-addition date the session should start sorting from, picked in
+    /// the expanded carousel. When set, the library walk skips everything
+    /// "before" this day in the current sort direction (newest-first → added
+    /// after this day; oldest-first → added before it) so the whole session
+    /// reviews from this point onward. Only meaningful for unscoped Library /
+    /// Unsorted walks (the only modes the date control surfaces in); `nil`
+    /// keeps the default full-timeline walk.
+    var startFromDate: Date? = nil
 
     var isPlaylistSource: Bool {
         if case .playlist = source { return true }

@@ -23,6 +23,11 @@ import MusicKit
 /// sources are deferred — those screens have their own portrait vocabulary.
 struct HomeArtCarouselView: View {
     @Binding var mode: ReviewMode
+    /// Library-add date the user picked to scrub to. Owned by HomeView so it
+    /// can fold into the swipe session config when the user starts. The date
+    /// control sets it; clearing resets it. Bound (not local) so HomeView can
+    /// also clear it when mode/source/sort change out from under the carousel.
+    @Binding var jumpDate: Date?
     let sortOrder: SortOrder
     let modelContext: ModelContext
     /// Real total for the current mode, sourced from `HomeView.count(for:)`.
@@ -52,6 +57,15 @@ struct HomeArtCarouselView: View {
     /// or jumped straight to 4 when reduce-motion is on. Held as @State so
     /// each remount of the carousel plays a fresh entrance.
     @State private var revealStage: Int = 0
+    /// Presents the date-jump picker sheet.
+    @State private var showDatePicker = false
+    /// Oldest/newest library-add dates, bounding the picker. Loaded once on
+    /// appear; nil while loading or when the library exposes no add-dates (the
+    /// date control stays hidden in that case).
+    @State private var dateSpan: (oldest: Date, newest: Date)?
+    /// True while `loadUntil` pages toward the picked date — drives the pill's
+    /// spinner so a far jump reads as working rather than frozen.
+    @State private var isJumping = false
 
     private let coverSize: CGFloat = 280
     private let coverSpacing: CGFloat = 18
@@ -100,6 +114,17 @@ struct HomeArtCarouselView: View {
                     .opacity(revealStage >= 1 ? 1 : 0)
                     .offset(y: revealStage >= 1 ? 0 : -10)
 
+                if showsDateControl, let displayDate = dateControlDate {
+                    CarouselDateJumpControl(
+                        displayDate: displayDate,
+                        isJumping: isJumping,
+                        onOpen: { showDatePicker = true }
+                    )
+                    .padding(.top, 8)
+                    .opacity(revealStage >= 1 ? 1 : 0)
+                    .offset(y: revealStage >= 1 ? 0 : -10)
+                }
+
                 Spacer(minLength: 16)
 
                 carouselBand
@@ -143,6 +168,22 @@ struct HomeArtCarouselView: View {
         }
         .task {
             await loadFeedIfNeeded()
+        }
+        .task {
+            // Span is library-wide (independent of mode), so load it once.
+            if dateSpan == nil {
+                dateSpan = await service.libraryAddedDateSpan()
+            }
+        }
+        .sheet(isPresented: $showDatePicker) {
+            if let dateSpan {
+                CarouselDateJumpSheet(
+                    lowerBound: dateSpan.oldest,
+                    upperBound: dateSpan.newest,
+                    initialDate: jumpDate ?? currentCenteredSong?.libraryAddedDate ?? dateSpan.newest,
+                    onConfirm: performDateJump(to:)
+                )
+            }
         }
         .onAppear { runEntranceChoreography() }
         .onChange(of: mode) { _, _ in
@@ -531,6 +572,49 @@ struct HomeArtCarouselView: View {
         let windowEnd = min(feed.songs.count, centeredIdx + 20)
         let anchor = Array(feed.songs[centeredIdx..<windowEnd])
         onStart(anchor)
+    }
+
+    // MARK: - Date jump
+
+    /// The date control only makes sense for the add-date-sorted timelines
+    /// (Library / Unsorted), once we know the library's date span and have
+    /// covers to scrub. Dismissed is sorted by dismissal date, so a
+    /// library-add-date jump doesn't map — hide it there.
+    private var showsDateControl: Bool {
+        (mode == .library || mode == .unsorted)
+            && dateSpan != nil
+            && !(feed?.songs.isEmpty ?? true)
+    }
+
+    /// Date shown on the control: the picked jump date, falling back to the
+    /// centred cover's add-date (and finally the newest add-date) so the pill
+    /// always reads a meaningful "current" date.
+    private var dateControlDate: Date? {
+        jumpDate ?? currentCenteredSong?.libraryAddedDate ?? dateSpan?.newest
+    }
+
+    /// Sets the jump date and scrubs the carousel to the first cover added
+    /// on/around it. The timeline isn't re-seeded — `loadUntil` only pages far
+    /// enough forward to reach the boundary cover, then we snap the scroll
+    /// there (the rest of the strip stays browsable). The date rides up to
+    /// HomeView via `$jumpDate`, so tapping Start afterwards sorts the whole
+    /// session from this point.
+    private func performDateJump(to date: Date) {
+        jumpDate = date
+        guard let feed else { return }
+        isJumping = true
+        Task {
+            let id = await feed.loadUntil(date: date)
+            isJumping = false
+            guard let id else { return }
+            if reduceMotion {
+                scrollPositionID = id
+            } else {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) {
+                    scrollPositionID = id
+                }
+            }
+        }
     }
 
     private func dismiss() {

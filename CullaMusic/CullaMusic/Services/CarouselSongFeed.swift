@@ -116,6 +116,35 @@ final class CarouselSongFeed {
         songs.append(contentsOf: collected)
     }
 
+    /// Pages forward until a loaded cover reaches the date boundary, then
+    /// returns its id for the carousel to snap to. The timeline is never
+    /// re-seeded — pre-date covers stay loaded and browsable; this just scrubs
+    /// the scroll position to the first cover added on/around `date`. The
+    /// boundary is the first eligible song that is NOT in the pre-date prefix
+    /// (newest-first → first added on/before the day; oldest-first → first
+    /// added on/after it), using the same `libraryAddDateIsPrefix` rule the
+    /// swipe session walks by. Returns the last loaded id if the library
+    /// exhausts before the date is reached. Only called for library/unsorted
+    /// feeds — the date control is hidden in Dismissed.
+    func loadUntil(date: Date) async -> String? {
+        // Drain any scroll-triggered page so the cursor isn't advanced from
+        // two places at once.
+        await pagingTask?.value
+
+        func boundaryID() -> String? {
+            songs.first {
+                !libraryAddDateIsPrefix($0.libraryAddedDate, day: date, ascending: sortOrder.ascending)
+            }?.id.rawValue
+        }
+
+        if let id = boundaryID() { return id }
+        while !isExhausted {
+            await loadNextLibraryPage()
+            if let id = boundaryID() { return id }
+        }
+        return songs.last?.id.rawValue
+    }
+
     // MARK: - Dismissed (bounded, one-shot load)
 
     private func loadAllDismissed() async {

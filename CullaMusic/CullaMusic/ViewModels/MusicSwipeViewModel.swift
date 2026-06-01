@@ -177,7 +177,8 @@ final class MusicSwipeViewModel {
                 let fetched = try await service.fetchNextLibrarySongs(
                     excluding: sessionExclusionSet,
                     desired: batchSize,
-                    ascending: config.order.ascending
+                    ascending: config.order.ascending,
+                    startFromDate: config.startFromDate
                 )
                 populateQueue(with: anchorSongs + fetched)
 
@@ -1087,7 +1088,8 @@ final class MusicSwipeViewModel {
         return try await service.fetchNextLibrarySongs(
             excluding: sessionExclusionSet,
             desired: batchSize,
-            ascending: config.order.ascending
+            ascending: config.order.ascending,
+            startFromDate: config.startFromDate
         )
     }
 

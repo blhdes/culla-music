@@ -56,6 +56,31 @@ let smartFavoritesNames: Set<String> = [
     "Favoriete nummers",      // nl
 ]
 
+/// True when a song added on `added` falls *before* the picked `day` in the
+/// given sort direction — i.e. it belongs to the pre-date "prefix" that a
+/// date-anchored walk skips (and that the carousel scrubs past). Newest-first
+/// (`ascending == false`) treats songs added AFTER the picked day as prefix;
+/// oldest-first treats songs added BEFORE its start as prefix. The whole
+/// picked day is inclusive on both ends. A `nil` date is never prefix — undated
+/// songs are kept in their sort position rather than silently dropped.
+///
+/// Shared by `MusicLibraryService.fetchNextLibrarySongs` (the swipe session's
+/// skip-prefix) and `CarouselSongFeed.loadUntil` (the carousel's scrub target)
+/// so the two surfaces agree on exactly where a date lands.
+func libraryAddDateIsPrefix(_ added: Date?, day: Date, ascending: Bool) -> Bool {
+    guard let added else { return false }
+    let cal = Calendar.current
+    let startOfDay = cal.startOfDay(for: day)
+    if ascending {
+        return added < startOfDay
+    }
+    // End of the picked day == start of the next day; "added after" means >=.
+    guard let nextDay = cal.date(byAdding: .day, value: 1, to: startOfDay) else {
+        return false
+    }
+    return added >= nextDay
+}
+
 @Observable
 @MainActor
 final class MusicLibraryService {
@@ -81,6 +106,11 @@ final class MusicLibraryService {
     private var artistSongCache: [MusicItemID: [Song]] = [:]
     private var artistPageOffsets: [MusicItemID: Int] = [:]
     private var artistExhausted: Set<MusicItemID> = []
+
+    /// Oldest & newest library-add dates, memoized for the carousel's date
+    /// picker bounds. Only shifts when the library grows; the picker reads it
+    /// on every open, so a cache avoids two round-trips each time.
+    private var cachedAddedDateSpan: (oldest: Date, newest: Date)?
 
     // Cached MusicKit.Playlist refs
     private var playlistCache: [MusicItemID: MusicKit.Playlist] = [:]
@@ -128,10 +158,18 @@ final class MusicLibraryService {
 
     /// Pages through the user's library, returning up to `desired` songs not in `excluding`.
     /// Pass `ascending: true` for oldest-first order.
+    ///
+    /// `startFromDate` anchors the walk to a point in the add-date timeline:
+    /// songs in the pre-date "prefix" (added after the picked day in newest-first,
+    /// before it in oldest-first — see `libraryAddDateIsPrefix`) are skipped so
+    /// the whole session reviews from that date onward. The skip cost is paid
+    /// once: `pageOffset` advances past the prefix on the first call, so later
+    /// paging starts already beyond it and the check is a no-op.
     func fetchNextLibrarySongs(
         excluding: Set<String>,
         desired: Int,
-        ascending: Bool = false
+        ascending: Bool = false,
+        startFromDate: Date? = nil
     ) async throws -> [Song] {
         var collected: [Song] = []
         let pageSize = 100
@@ -151,6 +189,10 @@ final class MusicLibraryService {
             }
 
             for song in page {
+                if let startFromDate,
+                   libraryAddDateIsPrefix(song.libraryAddedDate, day: startFromDate, ascending: ascending) {
+                    continue   // still in the pre-date prefix — skip past it
+                }
                 if !excluding.contains(song.id.rawValue) {
                     collected.append(song)
                     if collected.count >= desired { break }
@@ -162,6 +204,36 @@ final class MusicLibraryService {
         }
 
         return collected
+    }
+
+    /// Oldest & newest library-addition dates, for bounding the carousel's
+    /// date-jump picker. Two single-item requests (cheap) run concurrently;
+    /// cached after the first read. Returns nil when the library exposes no
+    /// add-dates at all (no songs, or `libraryAddedDate` unavailable) — the
+    /// caller hides the date control in that case.
+    func libraryAddedDateSpan() async -> (oldest: Date, newest: Date)? {
+        if let cachedAddedDateSpan { return cachedAddedDateSpan }
+        do {
+            var oldestReq = MusicLibraryRequest<Song>()
+            oldestReq.limit = 1
+            oldestReq.sort(by: \.libraryAddedDate, ascending: true)
+            var newestReq = MusicLibraryRequest<Song>()
+            newestReq.limit = 1
+            newestReq.sort(by: \.libraryAddedDate, ascending: false)
+
+            async let oldestResp = oldestReq.response()
+            async let newestResp = newestReq.response()
+            let oldest = (try await oldestResp).items.first?.libraryAddedDate
+            let newest = (try await newestResp).items.first?.libraryAddedDate
+
+            guard let oldest, let newest else { return nil }
+            let span = (oldest: oldest, newest: newest)
+            cachedAddedDateSpan = span
+            return span
+        } catch {
+            print("libraryAddedDateSpan failed: \(error)")
+            return nil
+        }
     }
 
     func fetchNextPlaylistSongs(

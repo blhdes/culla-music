@@ -146,10 +146,15 @@ final class MusicSwipeViewModel {
                 let fetched = try await fetchNextSessionSongs()
                 populateQueue(with: anchorSongs + fetched)
                 // Membership chips fill in once the index lands — the card is
-                // already on screen by then.
+                // already on screen by then. Reconcile off the SAME fetch
+                // `rebuild` just did (its return value), so we don't walk the
+                // playlists twice; a nil return means the fetch failed, so we
+                // reconcile nothing rather than void live sorts against an
+                // empty map.
                 Task { @MainActor in
-                    await membershipIndex.rebuild()
-                    await reconcileVoidedSorts()
+                    if let index = await membershipIndex.rebuild() {
+                        applyReconcile(membership: index)
+                    }
                 }
 
             case .unsorted:
@@ -186,8 +191,9 @@ final class MusicSwipeViewModel {
                 dismissedStore.loadAll()
                 try await loadDismissedDeck(skipping: anchorIDs, leadingWith: anchorSongs)
                 Task { @MainActor in
-                    await membershipIndex.rebuild()
-                    await reconcileVoidedSorts()
+                    if let index = await membershipIndex.rebuild() {
+                        applyReconcile(membership: index)
+                    }
                 }
             }
         } catch {
@@ -1125,16 +1131,10 @@ final class MusicSwipeViewModel {
         return Set((try? modelContext.fetch(descriptor))?.map(\.songID) ?? [])
     }
 
-    /// Re-derives `SortedSong.voidedAt` from a freshly-fetched playlist
-    /// membership map (cheap — playlist tracks are `lastModifiedDate`-cached),
-    /// so songs the user pulled from a playlist in Apple Music become
-    /// re-sortable. A failed fetch reconciles nothing, so a transient error
-    /// can never dump live sorts back into the deck.
-    private func reconcileVoidedSorts() async {
-        guard let data = try? await service.fetchAllPlaylistData(includeCurated: false) else { return }
-        applyReconcile(membership: data.membershipIndex)
-    }
-
+    /// Re-derives `SortedSong.voidedAt` from a playlist membership map, so songs
+    /// the user pulled from a playlist in Apple Music become re-sortable. Call
+    /// only with a *successfully* fetched map — reconciling against a stale or
+    /// empty one would falsely void live sorts (the callers gate on that).
     private func applyReconcile(membership: [String: [MusicItemID]]) {
         let byID = membership.reduce(into: [String: Set<String>]()) { acc, pair in
             acc[pair.key] = Set(pair.value.map(\.rawValue))

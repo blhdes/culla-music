@@ -192,7 +192,13 @@ final class MembershipIndex {
     /// Scoped to user-controlled playlists only — editorial / replay /
     /// personalMix are intentionally excluded so the membership chips on
     /// song cards stay readable.
-    func rebuild() async {
+    /// Returns the freshly-fetched index on success, `nil` on failure — so a
+    /// caller can reconcile against the SAME data without a second fetch, and
+    /// safely skip reconciling when the fetch failed (reconciling against a
+    /// stale/empty map would falsely void live sorts). Discardable for the
+    /// callers that only want the side effect.
+    @discardableResult
+    func rebuild() async -> [String: [MusicItemID]]? {
         isRebuilding = true
         defer { isRebuilding = false }
 
@@ -201,8 +207,10 @@ final class MembershipIndex {
                 includeCurated: false
             )
             setIndex(newIndex)
+            return newIndex
         } catch {
             print("MembershipIndex.rebuild failed: \(error)")
+            return nil
         }
     }
 

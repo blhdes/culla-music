@@ -35,6 +35,15 @@ final class CarouselSongFeed {
     /// pages in parallel against MusicKit.
     private var pagingTask: Task<Void, Never>?
 
+    /// Reentrancy guard for `loadNextLibraryPage`. `loadUntil` pages by calling
+    /// it directly in a loop (bypassing the `pagingTask` single-flight gate), so
+    /// without this a scroll-triggered `loadMoreIfNeeded` firing during a jump's
+    /// `await` could run a second page against the same `libraryOffset` —
+    /// appending the same page twice (duplicate ids in the carousel's ForEach)
+    /// and skipping the next offset. The flag makes any overlapping call a
+    /// no-op; the in-progress paging covers the work.
+    private var isPagingPage = false
+
     private var libraryOffset: Int = 0
     private var exclusionSet: Set<String> = []
 
@@ -86,6 +95,10 @@ final class CarouselSongFeed {
     // MARK: - Library / Unsorted paging
 
     private func loadNextLibraryPage() async {
+        guard !isPagingPage else { return }
+        isPagingPage = true
+        defer { isPagingPage = false }
+
         var collected: [Song] = []
         let batchSize = 100
         while collected.count < pageSize && !isExhausted {

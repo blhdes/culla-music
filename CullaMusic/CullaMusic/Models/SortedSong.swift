@@ -8,10 +8,51 @@ final class SortedSong {
     var sortedAt: Date
     var playlist: Playlist?
 
+    /// Set when the song is no longer in `playlist` — the user removed it
+    /// directly in Apple Music, so this sort no longer reflects reality. Nil =
+    /// active sort. Re-derived from live membership by `SortedSongReconciler`:
+    /// the swipe decks skip voided records (so the song becomes re-sortable),
+    /// and History renders them as dimmed phantoms. Adding an optional attribute
+    /// is a safe lightweight SwiftData migration.
+    var voidedAt: Date?
+
     init(songID: String, playlist: Playlist) {
         self.id = UUID()
         self.songID = songID
         self.sortedAt = .now
         self.playlist = playlist
+    }
+}
+
+/// Single source of truth for keeping `SortedSong.voidedAt` in step with what's
+/// actually in each playlist. Both the swipe deck (at session start) and the
+/// History sheet (on open) call this with a freshly-fetched membership map, so
+/// the deck's exclusion and History's phantom rows can never disagree.
+enum SortedSongReconciler {
+    /// Voids sort records whose song has left its playlist and un-voids any
+    /// whose song is back (self-healing both ways). `membership` maps a song ID
+    /// to the set of playlist Apple-Music IDs it currently belongs to. Returns
+    /// the row ids that are voided after the pass, so a caller can drive UI off
+    /// it without re-deriving. Pass only a *successfully* fetched membership —
+    /// reconciling against a stale/empty map would falsely void live sorts.
+    @discardableResult
+    static func reconcile(
+        membership: [String: Set<String>],
+        in context: ModelContext
+    ) -> Set<UUID> {
+        let rows = (try? context.fetch(FetchDescriptor<SortedSong>())) ?? []
+        var voidedRowIDs = Set<UUID>()
+        var changed = false
+        for row in rows {
+            guard let amID = row.playlist?.appleMusicPlaylistID else { continue }
+            if membership[row.songID]?.contains(amID) == true {
+                if row.voidedAt != nil { row.voidedAt = nil; changed = true }
+            } else {
+                voidedRowIDs.insert(row.id)
+                if row.voidedAt == nil { row.voidedAt = .now; changed = true }
+            }
+        }
+        if changed { try? context.save() }
+        return voidedRowIDs
     }
 }

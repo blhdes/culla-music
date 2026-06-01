@@ -457,6 +457,7 @@ struct MusicSwipeView: View {
         if let url = song.url {
             openURL(url)
         } else {
+            viewModel.toastKind = .error
             viewModel.toastMessage = "Couldn't open in Apple Music"
         }
     }
@@ -813,19 +814,10 @@ struct MusicSwipeView: View {
     @ViewBuilder
     private func toastCapsule(message: String) -> some View {
         // A pure status pill — undo lives in the single bottom Undo button so
-        // it isn't duplicated here. Single line + tail truncation keeps every
-        // toast the same slim height; the long "Added to <playlist>" case just
-        // clips (the playlist was tapped a moment ago, so context is fresh).
-        Text(message)
-            .font(.footnote.weight(.medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .contentTransition(.opacity)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6.5)
-            .frame(maxWidth: 260)
-            .glassSurface(in: Capsule())
-            .animation(.easeInOut(duration: 0.2), value: message)
+        // it isn't duplicated here. The trailing glass dot signs each toast
+        // with an action icon + role color; layout/glass/motion live in
+        // `SwipeToastView`. Reads `toastKind` set alongside the message.
+        SwipeToastView(message: message, kind: viewModel.toastKind)
     }
 
     @ViewBuilder

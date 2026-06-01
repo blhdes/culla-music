@@ -15,12 +15,15 @@ import SwiftData
 @MainActor
 final class HistoryStore {
 
-    /// What kind of movement a row represents. The playlist name is captured as
-    /// a plain string (not the `Playlist` model) so the entry doesn't hold a
-    /// SwiftData reference across the async song-resolve; `undo` refetches the
-    /// row fresh by id when it needs the live relationship.
+    /// What kind of movement a row represents. Playlist details are captured as
+    /// plain values (name, app-created flag) — never the live `Playlist` model —
+    /// so the entry doesn't hold a SwiftData reference across the async
+    /// song-resolve. `undo` refetches the row fresh by id when it needs the live
+    /// relationship; `createdByApp` lets the row pick its swipe action: a real
+    /// Undo for Culla-created playlists, an "Open in Music" hand-off for the
+    /// user's own (which Apple won't let Culla remove from).
     enum Movement {
-        case sorted(playlistName: String, loved: Bool)
+        case sorted(playlistName: String, loved: Bool, createdByApp: Bool)
         case dismissed
     }
 
@@ -31,6 +34,12 @@ final class HistoryStore {
         let movement: Movement
         let isCatalogTrack: Bool
         var song: Song?         // filled in lazily by `resolveSongs`
+        /// Set by `reconcileSortedMemberships` when a sort's song is no longer
+        /// in its playlist — i.e. the user removed it directly in the Music app,
+        /// so Culla's saved record and reality have drifted. The row stays as a
+        /// dimmed, action-less phantom (a log of what happened) rather than
+        /// vanishing. Recomputed every open, so re-adding the song un-greys it.
+        var isStale = false
     }
 
     /// One day's worth of entries, used to render the sectioned list.
@@ -101,7 +110,11 @@ final class HistoryStore {
                 id: row.id,
                 songID: row.songID,
                 date: row.sortedAt,
-                movement: .sorted(playlistName: playlist.name, loved: loved),
+                movement: .sorted(
+                    playlistName: playlist.name,
+                    loved: loved,
+                    createdByApp: playlist.createdByApp
+                ),
                 isCatalogTrack: false,
                 song: nil
             ))
@@ -123,6 +136,33 @@ final class HistoryStore {
         isLoading = false
 
         await resolveSongs()
+        await reconcileSortedMemberships()
+    }
+
+    /// Greys out sort entries whose song is no longer in the playlist — the
+    /// user removed it directly in the Music app, so the saved record and
+    /// reality have drifted. We deliberately DON'T delete the record: the row
+    /// stays as a dimmed, action-less phantom in the log. Runs after the list
+    /// is already on screen, so rows fade to phantom a beat later (the
+    /// membership map is `lastModifiedDate`-cached, so it's usually instant).
+    /// Conservative: a failed membership walk marks nothing, so a transient
+    /// network error can never turn live rows into false phantoms.
+    private func reconcileSortedMemberships() async {
+        guard !entries.isEmpty else { return }
+        guard let data = try? await service.fetchAllPlaylistData(includeCurated: false) else { return }
+        let membership = data.membershipIndex.reduce(into: [String: Set<String>]()) { acc, pair in
+            acc[pair.key] = Set(pair.value.map(\.rawValue))
+        }
+        // Shared reconciler persists `voidedAt` across ALL sort records — same
+        // call the swipe deck makes — so the deck stops excluding songs that
+        // left their playlist. Its returned ids drive the phantom greying here.
+        let voidedRowIDs = SortedSongReconciler.reconcile(membership: membership, in: modelContext)
+        entries = entries.map { entry in
+            guard case .sorted = entry.movement else { return entry }
+            var copy = entry
+            copy.isStale = voidedRowIDs.contains(entry.id)
+            return copy
+        }
     }
 
     /// Fills in each entry's `song` (artwork + title + artist). Splits IDs
@@ -170,18 +210,33 @@ final class HistoryStore {
             deleteDismissedRow(id: entry.id)
             toast = "Dismissal undone"
 
-        case .sorted(let playlistName, let loved):
-            let playlistAMID = deleteSortedRow(id: entry.id)
-            toast = loved ? "Removed from Loved" : "Removed from \(playlistName)"
+        case .sorted(let playlistName, let loved, _):
+            let removal = deleteSortedRow(id: entry.id)
+            let displayName = loved ? "Loved" : playlistName
+
+            // Apple only permits track removal on playlists Culla created
+            // (`MusicLibrary.shared.edit` rejects every other library playlist
+            // with ICPlaylistUpdateErrorDomain). The local record is already
+            // gone; for non-Culla playlists, skip the doomed removal and be
+            // honest — the song stays in the playlist — instead of flashing a
+            // false "Couldn't remove" error. Mirrors the swipe-deck undo.
+            guard let removal, removal.createdByApp else {
+                toast = removal == nil
+                    ? "Removed from \(displayName)"
+                    : "Undone — still in \(displayName)"
+                return
+            }
+
+            toast = "Removed from \(displayName)"
             // Pull it from the Apple Music playlist too. Needs the resolved
             // Song; if the song is gone from the library we can only delete the
             // local record (the playlist keeps the track, but that's an orphan
             // edge case the user can't see in Culla anyway).
-            if let playlistAMID, let song = entry.song {
+            if let song = entry.song {
                 do {
-                    try await service.removeSong(song, fromPlaylistID: MusicItemID(playlistAMID))
+                    try await service.removeSong(song, fromPlaylistID: MusicItemID(removal.amID))
                 } catch {
-                    toast = "Couldn't remove from \(playlistName)"
+                    toast = "Couldn't remove from \(displayName)"
                 }
             }
         }
@@ -195,15 +250,19 @@ final class HistoryStore {
         }
     }
 
-    /// Deletes the `SortedSong` row, returning its playlist's Apple Music id (if
-    /// any) so the caller can issue the matching Apple Music removal.
-    private func deleteSortedRow(id: UUID) -> String? {
+    /// Deletes the `SortedSong` row, returning its playlist's Apple Music id and
+    /// whether Culla created that playlist (if the row has one) so the caller can
+    /// issue the matching Apple Music removal — but only when it's actually
+    /// permitted (see `Playlist.createdByApp`).
+    private func deleteSortedRow(id: UUID) -> (amID: String, createdByApp: Bool)? {
         let descriptor = FetchDescriptor<SortedSong>(predicate: #Predicate { $0.id == id })
         guard let row = try? modelContext.fetch(descriptor).first else { return nil }
-        let playlistAMID = row.playlist?.appleMusicPlaylistID
+        let removal = row.playlist.flatMap { playlist in
+            playlist.appleMusicPlaylistID.map { (amID: $0, createdByApp: playlist.createdByApp) }
+        }
         modelContext.delete(row)
         try? modelContext.save()
-        return playlistAMID
+        return removal
     }
 
     // MARK: - Day formatting

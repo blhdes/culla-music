@@ -15,6 +15,7 @@ struct HistorySheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
+    @Environment(\.openURL) private var openURL
 
     @State private var store: HistoryStore?
     @State private var toastTimer: Task<Void, Never>?
@@ -65,13 +66,7 @@ struct HistorySheet: View {
                     ForEach(section.entries) { entry in
                         HistoryRow(entry: entry, isResolving: store.isResolving)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button {
-                                    Haptics.undo()
-                                    Task { await store.undo(entry) }
-                                } label: {
-                                    Label("Undo", systemImage: "arrow.uturn.backward")
-                                }
-                                .tint(appAccent)
+                                rowAction(for: entry, store: store)
                             }
                     }
                 } header: {
@@ -102,6 +97,48 @@ struct HistorySheet: View {
             }
         }
     }
+
+    /// The trailing swipe action for a row. Culla-created sorts (and every
+    /// dismissal) get a true "Undo" — it reverses locally *and* removes the
+    /// track from Apple Music. Sorts into the user's OWN playlists can't be
+    /// removed via the API (`MusicLibrary.shared.edit` only edits app-created
+    /// playlists), so rather than a half-true undo we hand off to the Music app,
+    /// where the user can remove the track themselves. A row with no playlist id
+    /// falls back to the honest undo so the action is never a dead button.
+    @ViewBuilder
+    private func rowAction(for entry: HistoryStore.Entry, store: HistoryStore) -> some View {
+        if entry.isStale {
+            // Phantom log entry — the song already left the playlist (removed in
+            // Music). Nothing to undo or open; the row stays purely as a record.
+            EmptyView()
+        } else if case .sorted(_, _, let createdByApp) = entry.movement, !createdByApp {
+            // Culla can't remove from the user's own playlists, and Apple exposes
+            // no deep link to a private playlist — so we just open the Music app
+            // and let them remove the track there. Reconciliation then greys this
+            // row and frees the song to re-sort.
+            Button {
+                Haptics.tap()
+                openURL(Self.appleMusicAppURL)
+            } label: {
+                Label("Open in Music", systemImage: "arrow.up.right.square")
+            }
+            .tint(appAccent)
+        } else {
+            Button {
+                Haptics.undo()
+                Task { await store.undo(entry) }
+            } label: {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+            }
+            .tint(appAccent)
+        }
+    }
+
+    /// Apple exposes no public URL for a user's private library playlist (a
+    /// catalog-style link just errors with "not available in your region"), so
+    /// "Open in Music" only launches the Music app — the user navigates to the
+    /// playlist themselves.
+    private static let appleMusicAppURL = URL(string: "music://")!
 
     // MARK: - States
 
@@ -182,6 +219,9 @@ private struct HistoryRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        // Phantom log entry — the song left the playlist (removed in Music), so
+        // the row recedes but stays as a record of what once happened.
+        .opacity(entry.isStale ? 0.5 : 1)
     }
 
     @ViewBuilder
@@ -214,7 +254,7 @@ private struct HistoryRow: View {
     @ViewBuilder
     private var movementLabel: some View {
         switch entry.movement {
-        case .sorted(let playlistName, let loved):
+        case .sorted(let playlistName, let loved, _):
             if loved {
                 label(icon: "heart.fill", text: "Loved", color: .pink)
             } else {
@@ -231,6 +271,7 @@ private struct HistoryRow: View {
                 .font(.caption2.weight(.bold))
             Text(text)
                 .font(.caption.weight(.medium))
+                .strikethrough(entry.isStale)
                 .lineLimit(1)
         }
         .foregroundStyle(color)

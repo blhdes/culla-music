@@ -71,7 +71,11 @@ struct HomeArtCarouselView: View {
     private let bandGutter: CGFloat = 18
 
     var body: some View {
-        ZStack {
+        // Resolve the centred cover once per body pass — both the metadata
+        // strip and the date pill derive from it, and `feed.songs` grows as the
+        // user pages, so a single linear scan here beats one per consumer.
+        let centered = currentCenteredSong
+        return ZStack {
             // Pure backdrop — flat `Color(.systemBackground)` so nothing
             // competes with the cover. An earlier draft used
             // `HomeAmbientBackground` here for continuity with Home, but its
@@ -109,7 +113,7 @@ struct HomeArtCarouselView: View {
                     .opacity(revealStage >= 1 ? 1 : 0)
                     .offset(y: revealStage >= 1 ? 0 : -10)
 
-                if showsDateControl, let displayDate = dateControlDate {
+                if showsDateControl, let displayDate = dateControlDate(for: centered) {
                     CarouselDateJumpControl(
                         displayDate: displayDate,
                         isJumping: isJumping,
@@ -126,7 +130,7 @@ struct HomeArtCarouselView: View {
                     .opacity(revealStage >= 2 ? 1 : 0)
                     .scaleEffect(revealStage >= 2 ? 1 : 0.94)
 
-                centeredMetadata
+                centeredMetadata(for: centered)
                     .padding(.horizontal, 24)
                     .padding(.top, 18)
                     .opacity(revealStage >= 3 ? 1 : 0)
@@ -251,8 +255,7 @@ struct HomeArtCarouselView: View {
     /// fades the strings as the user scrubs, instead of hard-cutting.
     /// Reduce-motion drops the animation so the swap is instant.
     @ViewBuilder
-    private var centeredMetadata: some View {
-        let song = currentCenteredSong
+    private func centeredMetadata(for song: Song?) -> some View {
         VStack(spacing: 4) {
             Text(song?.title ?? " ")
                 .font(.system(.title3, design: .rounded).weight(.semibold))
@@ -585,9 +588,10 @@ struct HomeArtCarouselView: View {
     /// in the carousel, so the pill tracks the scroll live (falling back to the
     /// newest add-date before the first cover settles). The centred cover is
     /// also where the session starts, so the pill always reads "where you'll
-    /// begin."
-    private var dateControlDate: Date? {
-        currentCenteredSong?.libraryAddedDate ?? dateSpan?.newest
+    /// begin." Takes the already-resolved centred song so `body` only scans
+    /// `feed.songs` once.
+    private func dateControlDate(for centered: Song?) -> Date? {
+        centered?.libraryAddedDate ?? dateSpan?.newest
     }
 
     /// Scrubs the carousel to the first cover added on/around `date`. The

@@ -88,6 +88,12 @@ final class MusicSwipeViewModel {
     /// reappear.
     private var anchorSongs: [Song] = []
 
+    /// Add-date the library walk starts from. Seeded from `config.startFromDate`
+    /// at launch, then re-pointed by `jumpTo(startDate:)` when the user scrubs
+    /// the date control mid-session. Only meaningful for unscoped Library /
+    /// Unsorted walks (see `supportsDateJump`); ignored otherwise.
+    private var startFromDate: Date?
+
     // MARK: - Init
 
     // Explicit @MainActor on the init (not the class) avoids the macro/isolation
@@ -98,6 +104,7 @@ final class MusicSwipeViewModel {
     init(config: SwipeConfig, modelContext: ModelContext, anchorSongs: [Song] = []) {
         self.config = config
         self.anchorSongs = anchorSongs
+        self.startFromDate = config.startFromDate
         let service = MusicLibraryService.shared
         self.service = service
         self.modelContext = modelContext
@@ -183,7 +190,7 @@ final class MusicSwipeViewModel {
                     excluding: sessionExclusionSet,
                     desired: batchSize,
                     ascending: config.order.ascending,
-                    startFromDate: config.startFromDate
+                    startFromDate: startFromDate
                 )
                 populateQueue(with: anchorSongs + fetched)
 
@@ -213,6 +220,66 @@ final class MusicSwipeViewModel {
         dismissedStore.reset()
         isEmpty = false
         await loadInitial()
+    }
+
+    // MARK: - Date Jump
+
+    /// Whether the date control maps onto this session. It needs an add-date
+    /// timeline to scrub: the whole library (unscoped Library / Unsorted) or a
+    /// single artist (every card a library song with a real add-date). Hidden
+    /// for Dismissed (ordered by dismissal date) and for playlists (ordered by
+    /// playlist position — MusicKit exposes no per-playlist add-date, and a
+    /// playlist can hold catalog tracks with no library add-date at all).
+    var supportsDateJump: Bool {
+        if config.mode == .dismissed { return false }
+        if case .playlist = config.source { return false }
+        return true
+    }
+
+    /// Oldest/newest add-date bounds for the date-jump wheel, scoped to what the
+    /// session actually walks: the whole library for an unscoped walk, or just
+    /// this artist's songs for an artist session (computed from the already-
+    /// cached list, so it only spans dates that have cards). Nil when no add-
+    /// dates are available — the view hides the control. Dismissed/playlist
+    /// never reach here (`supportsDateJump` is false).
+    func dateJumpSpan() async -> (oldest: Date, newest: Date)? {
+        guard supportsDateJump else { return nil }
+        if case .artist(let id, _) = config.source {
+            let songs = (try? await service.artistLibrarySongs(artistID: MusicItemID(id))) ?? []
+            let dates = songs.compactMap(\.libraryAddedDate)
+            guard let oldest = dates.min(), let newest = dates.max() else { return nil }
+            return (oldest, newest)
+        }
+        return await service.libraryAddedDateSpan()
+    }
+
+    /// Re-anchors the deck to `date`: the library walk restarts and skips
+    /// everything before that day (in the session's sort direction), so the
+    /// next card is the first song added around then. Lighter than `reload()` —
+    /// the already-built exclusion set, membership index, and dismissed store
+    /// stay put (no playlist re-sync), so a jump only pays for the library page.
+    /// `isLoading` is deliberately left alone so the swipe content (and the
+    /// pill's own spinner) stays on screen during the jump instead of blanking
+    /// to the loading state. Undo history is cleared — the deck those actions
+    /// belonged to is gone.
+    @MainActor
+    func jumpTo(startDate date: Date) async {
+        guard supportsDateJump else { return }
+        startFromDate = date
+        service.stopPreview()
+        service.resetLibraryCursor()
+        undoCoordinator.clear()
+        currentSong = nil
+        nextSong = nil
+        songQueue.removeAll()
+        isEmpty = false
+        do {
+            let fetched = try await fetchNextSessionSongs()
+            populateQueue(with: fetched)
+        } catch {
+            print("jumpTo(startDate:) failed: \(error)")
+        }
+        if currentSong == nil { isEmpty = true }
     }
 
     // MARK: - Playlist Membership Index
@@ -1086,7 +1153,8 @@ final class MusicSwipeViewModel {
                     artistID: MusicItemID(id),
                     excluding: sessionExclusionSet,
                     desired: batchSize,
-                    ascending: config.order.ascending
+                    ascending: config.order.ascending,
+                    startFromDate: startFromDate
                 )
             }
         }
@@ -1095,7 +1163,7 @@ final class MusicSwipeViewModel {
             excluding: sessionExclusionSet,
             desired: batchSize,
             ascending: config.order.ascending,
-            startFromDate: config.startFromDate
+            startFromDate: startFromDate
         )
     }
 

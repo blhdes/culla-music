@@ -114,7 +114,7 @@ struct HomeArtCarouselView: View {
                     .offset(y: revealStage >= 1 ? 0 : -10)
 
                 if showsDateControl, let displayDate = dateControlDate(for: centered) {
-                    CarouselDateJumpControl(
+                    DateJumpControl(
                         displayDate: displayDate,
                         isJumping: isJumping,
                         onOpen: { showDatePicker = true }
@@ -176,7 +176,7 @@ struct HomeArtCarouselView: View {
         }
         .sheet(isPresented: $showDatePicker) {
             if let dateSpan {
-                CarouselDateJumpSheet(
+                DateJumpSheet(
                     lowerBound: dateSpan.oldest,
                     upperBound: dateSpan.newest,
                     initialDate: currentCenteredSong?.libraryAddedDate ?? dateSpan.newest,

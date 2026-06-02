@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
+    @AppStorage("dateJumpInSession") private var dateJumpEnabled: Bool = false
     @AppStorage("authorDisplayName") private var authorDisplayName: String = ""
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
 
@@ -110,6 +111,8 @@ struct SettingsView: View {
             SettingsToggleRow(title: "Auto play", isOn: $autoplayOnSwipe)
             rowDivider
             SettingsToggleRow(title: "Hot Preview", isOn: $useHotPreview)
+            rowDivider
+            SettingsToggleRow(title: "Date jump", isOn: $dateJumpEnabled)
         }
     }
 

@@ -354,7 +354,8 @@ final class MusicLibraryService {
         artistID id: MusicItemID,
         excluding: Set<String>,
         desired: Int,
-        ascending: Bool = false
+        ascending: Bool = false,
+        startFromDate: Date? = nil
     ) async throws -> [Song] {
         if artistExhausted.contains(id) { return [] }
 
@@ -369,6 +370,16 @@ final class MusicLibraryService {
         while offset < ordered.count && selected.count < desired {
             let song = ordered[offset]
             offset += 1
+            // Date-jump anchors an artist session to a point in its add-date
+            // timeline: songs in the pre-date prefix are skipped so the deck
+            // resumes from there. These are library songs with real add-dates,
+            // so the same shared helper the library walk uses applies; the rough
+            // ordering is fine because we scan the whole list and keep every
+            // non-prefix song regardless of its exact position.
+            if let startFromDate,
+               libraryAddDateIsPrefix(song.libraryAddedDate, day: startFromDate, ascending: ascending) {
+                continue
+            }
             if !excluding.contains(song.id.rawValue) {
                 selected.append(song)
             }

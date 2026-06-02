@@ -1,26 +1,32 @@
 import SwiftUI
 
-/// Date-jump affordance shown directly under the carousel's method selector
-/// (`CarouselIdentityStrip`) for the Library / Unsorted timelines. The carousel
-/// IS the add-date timeline, so this is a fast scrubber: pick a month and the
-/// carousel snaps to a cover you added around then (nothing is removed — you
-/// can still flick before/after it). The picked date then flows into the swipe
-/// session so the whole session sorts from there. Hidden in Dismissed and when
-/// no add-dates are available.
+/// Date-jump affordance for add-date timelines. It's a fast scrubber: pick a
+/// month and the surface it lives on snaps to that point in your add-date
+/// history. Shown in two places, with the same look and copy:
+/// - On the **expanded carousel** (`HomeArtCarouselView`), under the method
+///   selector — picking a date scrolls the carousel and the session starts there
+///   (Library / Unsorted only).
+/// - In the **swipe session** (`MusicSwipeView`), as a top-center pill (opt-in
+///   via Settings) — picking a date rebuilds the deck from that point, for the
+///   Library, Unsorted, or an artist session (scoped to that artist's add-dates).
+/// Hidden in Dismissed (sorted by dismissal date) and for playlist sessions
+/// (ordered by playlist position, no usable per-track add-date), and when no
+/// add-dates are available.
 ///
 /// Deliberately mirrors `CarouselIdentityStrip`'s vocabulary — same glass
-/// capsule, icon → short label → chevron, same paddings and stroke — so the two
-/// read as a stacked, aligned pair (method on top, date beneath it).
+/// capsule, icon → short label → chevron, same paddings and stroke — so on the
+/// carousel the two read as a stacked, aligned pair (method on top, date beneath).
 ///
 /// Two pieces:
-/// - `CarouselDateJumpControl` — the capsule (icon + short date + chevron).
-/// - `CarouselDateJumpSheet` — a minimalist wheel picker (no calendar grid).
-struct CarouselDateJumpControl: View {
-    /// Add-date of the cover currently centred in the carousel — tracks the
-    /// scroll live, and is where the session starts. Shown short ("Jun 1, 2024").
+/// - `DateJumpControl` — the capsule (icon + short date + chevron).
+/// - `DateJumpSheet` — a minimalist wheel picker (no calendar grid).
+struct DateJumpControl: View {
+    /// Add-date currently anchored — the centred carousel cover, or the current
+    /// swipe card. Tracks live, and is where the session starts/continues.
+    /// Shown short ("Jun 1, 2024").
     let displayDate: Date
-    /// True while `loadUntil` pages toward a far date — swaps the calendar
-    /// glyph for a spinner so a multi-second jump reads as working.
+    /// True while a far jump pages toward its target — swaps the calendar glyph
+    /// for a spinner so a multi-second jump reads as working.
     let isJumping: Bool
     let onOpen: () -> Void
 
@@ -71,7 +77,7 @@ struct CarouselDateJumpControl: View {
 /// spinning month/day/year wheel rather than a full graphical calendar, kept
 /// in a short sheet. Same glass-sheet family (NavigationStack + inline title +
 /// Cancel/confirm toolbar) as `SourceScopePickerSheet`.
-struct CarouselDateJumpSheet: View {
+struct DateJumpSheet: View {
     let lowerBound: Date
     let upperBound: Date
     let initialDate: Date

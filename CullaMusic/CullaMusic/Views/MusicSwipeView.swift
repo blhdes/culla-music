@@ -23,6 +23,13 @@ struct MusicSwipeView: View {
     /// applies to *future* card changes.
     @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
 
+    /// Opt-in (Settings → Playback, off by default): surfaces a top-center date
+    /// pill that re-anchors the deck to a chosen add-date mid-session. Same
+    /// control the expanded carousel uses; only shows where there's an add-date
+    /// timeline to scrub — Library, Unsorted, or an artist session
+    /// (`viewModel.supportsDateJump`).
+    @AppStorage("dateJumpInSession") private var dateJumpEnabled: Bool = false
+
     /// One-time discovery hint for the long-press cleanup menu. Flips to true
     /// the first time the user successfully long-presses in Dismissed mode (or
     /// taps the banner's close button).
@@ -79,6 +86,14 @@ struct MusicSwipeView: View {
 
     // Destructive long-press menu in Dismissed mode
     @State private var showRemovalSheet = false
+
+    // Date-jump (opt-in) — top-center pill + wheel sheet that re-seeds the deck.
+    // `dateSpan` bounds the picker (oldest/newest library add-dates, cached in
+    // the service); nil until loaded or when the library exposes no add-dates.
+    // `isJumping` drives the pill's spinner while a far jump pages to its target.
+    @State private var showDatePicker = false
+    @State private var dateSpan: (oldest: Date, newest: Date)?
+    @State private var isJumping = false
 
     @Environment(\.openURL) private var openURL
 
@@ -154,6 +169,16 @@ struct MusicSwipeView: View {
         .sheet(item: $shareItem) { item in
             SongShareSheet(url: item.url, title: item.title)
         }
+        .sheet(isPresented: $showDatePicker) {
+            if let span = dateSpan {
+                DateJumpSheet(
+                    lowerBound: span.oldest,
+                    upperBound: span.newest,
+                    initialDate: viewModel.currentSong?.libraryAddedDate ?? span.newest,
+                    onConfirm: performDateJump(to:)
+                )
+            }
+        }
         .task(id: viewModel.currentSong?.id.rawValue) {
             // Autoplay fires first because it's synchronous — audio kicks off
             // the same frame the new card is presented, then the accent
@@ -161,6 +186,14 @@ struct MusicSwipeView: View {
             // current-song change (session entry, swipe, undo).
             autoplayCurrentIfEnabled()
             await refreshDynamicAccent()
+        }
+        .task(id: dateJumpEnabled) {
+            // Load the add-date bounds for the picker once the feature is on for
+            // an eligible session. The VM scopes the span to what this session
+            // walks (whole library, or just this artist); both are cached, so a
+            // re-run after warm-up is effectively free.
+            guard dateJumpEnabled, viewModel.supportsDateJump, dateSpan == nil else { return }
+            dateSpan = await viewModel.dateJumpSpan()
         }
         .task(id: viewModel.nextSong?.id.rawValue) {
             // Warm the accent cache for the upcoming card so its color
@@ -258,9 +291,23 @@ struct MusicSwipeView: View {
                 }
         }
         .overlay(alignment: .top) {
+            if showsDateJumpPill, let span = dateSpan {
+                DateJumpControl(
+                    displayDate: viewModel.currentSong?.libraryAddedDate ?? span.newest,
+                    isJumping: isJumping,
+                    onOpen: { showDatePicker = true }
+                )
+                .padding(.top, 8)
+                .opacity(chromeOpacity)
+                .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .top) {
             if let toast = viewModel.toastMessage {
                 toastCapsule(message: toast)
-                    .padding(.top, 12)
+                    // Slide the toast below the date pill when it's showing so
+                    // the two don't stack on top of each other at the top edge.
+                    .padding(.top, showsDateJumpPill ? 56 : 12)
                     .opacity(chromeOpacity)
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
             }
@@ -766,6 +813,28 @@ struct MusicSwipeView: View {
             return
         }
         service.playPreview(for: song)
+    }
+
+    // MARK: - Date jump
+
+    /// Whether to surface the top-center date pill: opted in, an eligible
+    /// (unscoped Library/Unsorted) session, and the add-date bounds have loaded.
+    /// Lives inside `swipeContent`, which only renders once the deck is past
+    /// loading and non-empty, so no extra isLoading/isEmpty guards are needed.
+    private var showsDateJumpPill: Bool {
+        dateJumpEnabled && viewModel.supportsDateJump && dateSpan != nil
+    }
+
+    /// Confirms a picked date: spin the pill, ask the VM to rebuild the deck
+    /// from that add-date, then settle with a light tap. The spinner covers a
+    /// far jump that has to page through the library to reach the boundary.
+    private func performDateJump(to date: Date) {
+        isJumping = true
+        Task { @MainActor in
+            await viewModel.jumpTo(startDate: date)
+            isJumping = false
+            Haptics.tap()
+        }
     }
 
     // MARK: - Helpers

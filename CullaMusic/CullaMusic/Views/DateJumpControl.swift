@@ -30,6 +30,13 @@ struct DateJumpControl: View {
     let isJumping: Bool
     let onOpen: () -> Void
 
+    /// Built once rather than per body pass — the pill re-renders on every
+    /// carousel scroll tick (it live-tracks the centred cover), so rebuilding
+    /// the format style each time would allocate on a hot path. Locale stays
+    /// dynamic: `.formatted` resolves it at call time.
+    private static let dateLabelStyle = Date.FormatStyle.dateTime
+        .day().month(.abbreviated).year()
+
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 10) {
@@ -41,10 +48,9 @@ struct DateJumpControl: View {
                     Image(systemName: "calendar")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .contentTransition(.symbolEffect(.replace))
                 }
 
-                Text(displayDate.formatted(.dateTime.day().month(.abbreviated).year()))
+                Text(displayDate.formatted(Self.dateLabelStyle))
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .tracking(1.0)
                     .textCase(.uppercase)
@@ -70,31 +76,37 @@ struct DateJumpControl: View {
         .buttonStyle(.plain)
         .disabled(isJumping)
         .animation(.snappy(duration: 0.2), value: isJumping)
+        // Override the composed icon/chevron readout with one clear control
+        // label; the value carries the anchored date (or the jump state).
+        .accessibilityLabel("Jump to a date")
+        .accessibilityValue(isJumping ? "Jumping" : displayDate.formatted(Self.dateLabelStyle))
     }
 }
 
-/// Minimalist wheel date picker bounded to the library's add-date span — a
-/// spinning month/day/year wheel rather than a full graphical calendar, kept
-/// in a short sheet. Same glass-sheet family (NavigationStack + inline title +
-/// Cancel/confirm toolbar) as `SourceScopePickerSheet`.
+/// Minimalist wheel date picker bounded to the session's add-date span (the
+/// whole library, or a single artist) — a spinning month/day/year wheel rather
+/// than a full graphical calendar, kept in a short sheet. Same glass-sheet
+/// family (NavigationStack + inline title + Cancel/confirm toolbar) as
+/// `SourceScopePickerSheet`.
 struct DateJumpSheet: View {
-    let lowerBound: Date
-    let upperBound: Date
-    let initialDate: Date
     let onConfirm: (Date) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
+    /// Normalised once in `init` so an inverted span can't crash the
+    /// `DatePicker(in:)` ClosedRange downstream.
+    private let dateRange: ClosedRange<Date>
     @State private var selection: Date
 
     init(lowerBound: Date, upperBound: Date, initialDate: Date, onConfirm: @escaping (Date) -> Void) {
-        self.lowerBound = lowerBound
-        self.upperBound = upperBound
-        self.initialDate = initialDate
         self.onConfirm = onConfirm
+        // Callers pass (oldest, newest), but order defensively — a ClosedRange
+        // with lowerBound > upperBound is a hard crash, not a clamp.
+        let range = min(lowerBound, upperBound)...max(lowerBound, upperBound)
+        self.dateRange = range
         // Clamp into the valid span so the wheel never opens on an out-of-range
         // day (e.g. the centred song's date sitting outside a 1-day span).
-        _selection = State(initialValue: min(max(initialDate, lowerBound), upperBound))
+        _selection = State(initialValue: min(max(initialDate, range.lowerBound), range.upperBound))
     }
 
     var body: some View {
@@ -102,7 +114,7 @@ struct DateJumpSheet: View {
             DatePicker(
                 "Start date",
                 selection: $selection,
-                in: lowerBound...upperBound,
+                in: dateRange,
                 displayedComponents: .date
             )
             .datePickerStyle(.wheel)

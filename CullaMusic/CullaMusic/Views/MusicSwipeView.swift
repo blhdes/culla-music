@@ -43,6 +43,12 @@ struct MusicSwipeView: View {
     @AppStorage("managePlaylists.sidebarSortDescending") private var sidebarSortDescending = false
 
     @Environment(\.appAccent) private var paletteAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Shared namespace for the iOS 26 Liquid Glass morph in the swipe chrome —
+    /// the undo chip crystallizes in/out inside its stable container instead of
+    /// only sliding up. Inert below iOS 26.
+    @Namespace private var glassMorph
 
     // Dynamic accent pair sampled from the current song's artwork. Nil → fall
     // back to the palette accent so the UI never goes uncolored.
@@ -313,9 +319,14 @@ struct MusicSwipeView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            undoButton
-                .padding(.bottom, 32)
-                .opacity(chromeOpacity)
+            // The container is always present (even when the button isn't), so
+            // the undo chip materializes as glass *inside* it on iOS 26 rather
+            // than the chip carrying its own appear animation. Empty → no size.
+            GlassStack(spacing: 0) {
+                undoButton
+            }
+            .padding(.bottom, 32)
+            .opacity(chromeOpacity)
         }
         .overlay(alignment: .top) {
             if shouldShowDismissedLongPressTip {
@@ -908,6 +919,8 @@ struct MusicSwipeView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .glassSurface(in: Capsule(), interactive: true)
+                .glassMorphID("swipe.undo", in: glassMorph)
+                .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
             }
             .buttonStyle(.plain)
             .transition(.move(edge: .bottom).combined(with: .opacity))

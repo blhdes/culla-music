@@ -259,6 +259,12 @@ struct HomeView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appAccent) private var appAccent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Shared namespace for the iOS 26 Liquid Glass morph. The mode-tile cluster
+    /// and the source chips read it so their glass coordinates as one family —
+    /// the cluster crystallizes out as the source chips crystallize in, instead
+    /// of each being an isolated frosted bubble. Inert below iOS 26.
+    @Namespace private var glassMorph
     @State private var homeVM: HomeViewModel?
     @State private var showSourcePicker = false
     @State private var showSettings = false
@@ -364,33 +370,44 @@ struct HomeView: View {
                                 .combined(with: .opacity)
                         )
                     )
+                    // On iOS 26 the cluster's glass crystallizes in/out (on top
+                    // of the scale above) as the source is picked/cleared, so it
+                    // hands focus to the source chips below as one glass family.
+                    .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
                 }
 
                 Spacer(minLength: 12)
 
-                if selectedMode == .library {
-                    sourceFilterButton
+                // The source-driven controls share ONE GlassEffectContainer so
+                // their glass refracts as a family and inserts crystallize as
+                // glass (iOS 26) instead of independent scale/opacity fades.
+                // spacing 0 matches the prior direct-VStack layout exactly — each
+                // row keeps its own paddings and cross-OS transition.
+                GlassStack(spacing: 0) {
+                    if selectedMode == .library {
+                        sourceFilterButton
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 10)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    if selectedMode == .library, case .playlist = source {
+                        sourceTransferPicker
+                            .padding(.bottom, 10)
+                            .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                    }
+
+                    if selectedMode == .library, source != nil {
+                        includeDismissedRow
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 10)
+                            .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                    }
+
+                    orderRow
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 16)
                 }
-
-                if selectedMode == .library, case .playlist = source {
-                    sourceTransferPicker
-                        .padding(.bottom, 10)
-                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
-                }
-
-                if selectedMode == .library, source != nil {
-                    includeDismissedRow
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 10)
-                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
-                }
-
-                orderRow
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
 
                 startButton
                     .padding(.horizontal, 20)
@@ -698,6 +715,11 @@ struct HomeView: View {
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous),
                 interactive: true
             )
+            // Continuous glass identity for the source pill so its surface
+            // morphs (not pops) as its content swaps between "All library" and a
+            // picked source, and refracts with the chips below it.
+            .glassMorphID("home.sourcePill", in: glassMorph)
+            .glassMorphTransition(.matchedGeometry, reduceMotion: reduceMotion)
         }
         .buttonStyle(.plain)
     }
@@ -748,6 +770,10 @@ struct HomeView: View {
                 .padding(.vertical, 7)
                 .contentShape(Capsule())
                 .glassSurface(in: Capsule(), interactive: true)
+                // Always-present chip — a stable glass identity so it refracts
+                // with the source pill/dismissed chip in the shared container.
+                .glassMorphID("home.order", in: glassMorph)
+                .glassMorphTransition(.matchedGeometry, reduceMotion: reduceMotion)
             }
             .buttonStyle(.plain)
         }
@@ -831,6 +857,10 @@ struct HomeView: View {
                 .padding(.vertical, 7)
                 .contentShape(Capsule())
                 .glassSurface(in: Capsule(), interactive: true)
+                // This chip only exists in scoped sessions, so it materializes
+                // as glass when a source is picked rather than scaling in cold.
+                .glassMorphID("home.includeDismissed", in: glassMorph)
+                .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
             }
             .buttonStyle(.plain)
         }

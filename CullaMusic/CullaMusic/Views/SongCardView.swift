@@ -35,6 +35,11 @@ struct SongCardView: View {
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("showAlbumOnHero") private var showAlbumOnHero: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Namespace for the swipe arming chip: at the commit threshold a glass coin
+    /// crystallizes behind the trash/heart inside its container. Inert < iOS 26.
+    @Namespace private var armNS
 
     private let swipeThreshold: CGFloat = 100
 
@@ -340,16 +345,31 @@ struct SongCardView: View {
     /// Swipe-action overlay icon that scales up as the gesture approaches the
     /// commit threshold and fires a one-shot bounce the instant it crosses.
     /// The bounce is the moment the user feels the action "arm" — past this
-    /// point the gesture's release commits the swipe.
+    /// point the gesture's release commits the swipe. At that instant a glass
+    /// coin crystallizes behind the glyph (iOS 26) so "armed" reads as a
+    /// material forming, not just a bigger icon.
     @ViewBuilder
     private func armingIcon(systemName: String, progress: CGFloat) -> some View {
         let isArmed = progress >= 1.0
-        Image(systemName: systemName)
-            .font(.system(size: 60))
-            .foregroundStyle(.white.opacity(0.85 * progress))
-            .scaleEffect(0.7 + 0.4 * progress)
-            .symbolEffect(.bounce, value: isArmed)
-            .allowsHitTesting(false)
-            .animation(.snappy(duration: 0.15), value: progress)
+        // GlassStack supplies the stable GlassEffectContainer the coin
+        // materializes inside; one ZStack child, so the layout is unchanged.
+        GlassStack(spacing: 0) {
+            ZStack {
+                if isArmed {
+                    Color.clear
+                        .frame(width: 112, height: 112)
+                        .glassSurface(in: Circle())
+                        .glassMorphID("arm.disc", in: armNS)
+                        .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
+                }
+                Image(systemName: systemName)
+                    .font(.system(size: 60))
+                    .foregroundStyle(.white.opacity(0.85 * progress))
+                    .scaleEffect(0.7 + 0.4 * progress)
+                    .symbolEffect(.bounce, value: isArmed)
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(.snappy(duration: 0.15), value: progress)
     }
 }

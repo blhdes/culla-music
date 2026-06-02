@@ -74,3 +74,72 @@ struct GlassStack<Content: View>: View {
         }
     }
 }
+
+// MARK: - Liquid Glass morphing (iOS 26+)
+
+/// How a glass surface enters, leaves, or morphs inside a `GlassEffectContainer`.
+/// Mirrors iOS 26's `GlassEffectTransition` but stays usable on the iOS 17/18
+/// floor, where every modifier below is a no-op. Lets call sites name the
+/// behavior they want without referencing an iOS-26-only type unguarded.
+enum GlassMorphStyle {
+    /// Crystallizes the glass in/out — the iOS 26-correct insert/remove.
+    case materialize
+    /// Morphs the glass shape to/from a sibling carrying the same id.
+    case matchedGeometry
+    /// Plain cut, no glass motion (used for reduce-motion).
+    case identity
+}
+
+/// Resolves the app's `GlassMorphStyle` to the system transition, collapsing to
+/// a plain cut when the user has asked for reduced motion. Kept off `View` so
+/// the `@ViewBuilder` modifier below stays a single expression.
+@available(iOS 26.0, *)
+private func resolvedGlassTransition(
+    _ style: GlassMorphStyle,
+    reduceMotion: Bool
+) -> GlassEffectTransition {
+    if reduceMotion { return .identity }
+    switch style {
+    case .materialize:     return .materialize
+    case .matchedGeometry: return .matchedGeometry
+    case .identity:        return .identity
+    }
+}
+
+extension View {
+    /// Tags a glass surface so iOS 26 can morph it to/from a sibling carrying
+    /// the same id inside a shared `GlassEffectContainer` (e.g. one source chip
+    /// flowing into another). Must sit on the glassed view itself. No-op < iOS 26.
+    @ViewBuilder
+    func glassMorphID<ID: Hashable>(_ id: ID, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffectID(id, in: namespace)
+        } else {
+            self
+        }
+    }
+
+    /// Controls how a glass surface inside a `GlassEffectContainer` appears,
+    /// disappears, or morphs. Pass `reduceMotion: true` to force a plain cut so
+    /// the motion respects the accessibility setting. No-op < iOS 26.
+    @ViewBuilder
+    func glassMorphTransition(_ style: GlassMorphStyle, reduceMotion: Bool = false) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffectTransition(resolvedGlassTransition(style, reduceMotion: reduceMotion))
+        } else {
+            self
+        }
+    }
+
+    /// iOS 26's soft scroll-edge effect — content gently diffuses under the nav
+    /// bar instead of a hard cut. Calm enough for the quiet Settings tier; it
+    /// adds the Liquid Glass scroll feel without any new color. No-op < iOS 26.
+    @ViewBuilder
+    func softScrollEdge() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .all)
+        } else {
+            self
+        }
+    }
+}

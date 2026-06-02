@@ -58,7 +58,11 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 22) {
+                // GlassStack groups the cards in one GlassEffectContainer so
+                // their glass reads as a coordinated family on iOS 26 (spacing
+                // 22 matches the prior VStack, so nothing reflows). Stays within
+                // the deliberately quiet Settings tier — no new color or mesh.
+                GlassStack(spacing: 22) {
                     lookCard
                     playbackCard
                     personalCard
@@ -69,6 +73,10 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemBackground))
+            // The one tasteful iOS 26 nicety: content softly diffuses under the
+            // nav bar instead of a hard cut — the Liquid Glass scroll feel,
+            // calm enough for a settings screen.
+            .softScrollEdge()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -30,21 +30,20 @@ struct HomeHeroArtStack: View {
     /// Forwarded to `MusicLibraryService.scopeExclusionSet`; ignored when
     /// `source == nil` (those decks hide dismissals via `deckExclusionSet`).
     let includeDismissedInScope: Bool
-    /// Fires when the hero card's primary artwork is known — for source-picked
-    /// modes that's the cached playlist/artist artwork, otherwise it's the
-    /// first item from the freshly-fetched library/dismissed list. Used by
-    /// HomeView to tint the ambient background to match the current preview.
+    /// Fires when the hero card's primary artwork is known — the pinned lead
+    /// (source cover / "where you left off") when present, otherwise the first
+    /// cover in the deck. Used by HomeView to tint the ambient background to
+    /// match the current preview.
     var onPrimaryArtworkResolved: ((Artwork?) -> Void)? = nil
-    /// Fires when the user taps the hero — only in the scrub-deck branch
-    /// (`source == nil` with artworks loaded). Used by HomeView to open the
-    /// full carousel exploration screen. Sourced stacks (playlist / artist)
-    /// route through their own UIs and don't trigger this.
+    /// Fires when the user taps the hero (any source, once the deck has
+    /// loaded). Used by HomeView to open the full carousel exploration screen.
     var onHeroTap: (() -> Void)? = nil
     /// Apple Music song-id of the last cover the user centred inside the
     /// carousel exploration screen. When set, the scrub deck prepends that
     /// song's artwork at position 0 so the hero reflects "where you left
     /// off." `nil` falls back to the default mode-sorted deck. Ignored for
-    /// playlist/artist sources — those modes have their own portrait.
+    /// playlist/artist sources — there the pinned lead is the source's own
+    /// cover, which stays put regardless of where the carousel was left.
     var preferredFrontSongID: String? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -69,10 +68,9 @@ struct HomeHeroArtStack: View {
     /// Reset at the start of every load so a mode swap re-shows the skeleton.
     @State private var hasLoadedDeck: Bool = false
     @State private var pulse: Bool = false
-    /// Live horizontal drag translation for the scrub gesture (source == nil
-    /// only). Negative values pull the deck leftwards to reveal later covers;
-    /// lifting the finger springs this back to 0 so the first cover returns
-    /// to the front. Always 0 in source-picked modes.
+    /// Live horizontal drag translation for the scrub gesture. Negative values
+    /// pull the deck leftwards to reveal later covers; lifting the finger
+    /// springs this back to 0 so the first cover returns to the front.
     @State private var dragX: CGFloat = 0
     /// Axis lock for the scrub gesture. The first tick past `minimumDistance`
     /// picks `.horizontal` or `.ignored` from the dominant translation axis;
@@ -84,10 +82,10 @@ struct HomeHeroArtStack: View {
     private enum DragAxis { case undecided, horizontal, ignored }
 
     private let size: CGFloat = 168
-    /// Library/dismissed deck holds up to this many covers — the rest state
-    /// shows the first three balanced (centre + near-left + near-right);
-    /// the last two live off-screen and slide in when the user drags in
-    /// their direction. Anything past 5 is loaded but not rendered.
+    /// The deck holds up to this many covers — the rest state shows the first
+    /// three balanced (centre + near-left + near-right); the last two live
+    /// off-screen and slide in when the user drags in their direction.
+    /// Anything past 5 is loaded but not rendered.
     private let deckCapacity: Int = 5
     /// Drag distance per stage in the scrub. Stage 1 (`0 → revealDistance`)
     /// pulls the near-side rest peek to centre; stage 2 (`revealDistance →
@@ -116,14 +114,14 @@ struct HomeHeroArtStack: View {
         .contentShape(Rectangle())
         .gesture(
             scrubGesture,
-            including: !combinedArtworks.isEmpty ? .gesture : .subviews
+            including: hasArtworks ? .gesture : .subviews
         )
         // Tap (without a drag — DragGesture's minimumDistance keeps them
         // distinct) opens the full carousel exploration. Gated only by a
         // loaded deck now — every source (including playlist/artist) scrubs
         // and expands; an empty deck has nothing to navigate to.
         .onTapGesture {
-            if !combinedArtworks.isEmpty {
+            if hasArtworks {
                 onHeroTap?()
             }
         }
@@ -146,7 +144,7 @@ struct HomeHeroArtStack: View {
         // swaps are content updates, not arrivals.
     }
 
-    // MARK: - Scrub deck (source == nil)
+    // MARK: - Scrub deck
 
     /// Bidirectional peek-deck.
     ///
@@ -338,9 +336,9 @@ struct HomeHeroArtStack: View {
             }
     }
 
-    /// Resolved render values for one card in the scrub deck. Stacking order
-    /// is derived from `scale` at the call site (line 161) so the focus card
-    /// is always on top — no separate zIndex needed.
+    /// Resolved render values for one card in the scrub deck. The call site
+    /// sets `.zIndex(layout.scale)`, so whichever card is largest (closest to
+    /// centre) sits on top — no separate hand-tuned stacking index needed.
     private struct ScrubLayout {
         let offset: CGSize
         let scale: CGFloat
@@ -433,6 +431,14 @@ struct HomeHeroArtStack: View {
     }
 
     // MARK: - State helpers
+
+    /// Cheap emptiness check that answers "is there anything to show?" without
+    /// building `combinedArtworks`. The gesture mask and tap gate are
+    /// re-evaluated on every body pass — i.e. every scrub tick — so allocating
+    /// a fresh array there just to read `.isEmpty` is wasted per-frame work.
+    private var hasArtworks: Bool {
+        leadArtwork != nil || !deckArtworks.isEmpty
+    }
 
     /// Combined deck = optional lead + deck artworks, capped at `deckCapacity`.
     /// Computed (not cached) because the inputs are tiny — a 5-element array

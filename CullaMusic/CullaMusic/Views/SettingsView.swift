@@ -42,10 +42,12 @@ struct SettingsView: View {
         }
     }
 
-    // A sheet runs in its own presentation host, so `.preferredColorScheme`
-    // set on the presenter doesn't update this view live — only on the next
-    // re-presentation. Mirror it here so the toggle takes effect instantly.
-    private var sheetColorScheme: ColorScheme? {
+    // A sheet runs in its own presentation host, so a theme change doesn't
+    // reliably restyle it live (UIKit's trait-driven surfaces — the background
+    // and glass cards — lag behind, half-theming the sheet). `.sheetColorScheme`
+    // pins the sheet host's appearance directly so the toggle takes effect
+    // instantly and completely. See SheetColorScheme.swift.
+    private var resolvedColorScheme: ColorScheme? {
         switch colorSchemeRaw {
         case "light": .light
         case "dark":  .dark
@@ -87,7 +89,7 @@ struct SettingsView: View {
                 AccentPalettePickerSheet(selectedRaw: $accentPaletteRaw)
             }
         }
-        .preferredColorScheme(sheetColorScheme)
+        .sheetColorScheme(resolvedColorScheme)
     }
 
     // MARK: - Cards

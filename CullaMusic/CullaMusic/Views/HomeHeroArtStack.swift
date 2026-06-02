@@ -3,33 +3,33 @@ import SwiftData
 import MusicKit
 
 /// Hero preview shown above the mode tiles on HomeView. Renders a glass-framed
-/// artwork that previews what the user is about to swipe.
+/// horizontal fan of the next few covers — a one-journey peek at what the user
+/// is about to swipe. The user can drag a single continuous gesture across the
+/// screen to scrub through them; letting go springs everything back to the
+/// first cover. Tapping opens the full carousel exploration (`onHeroTap`). No
+/// commit, no "swipe again to see the next one", just a finger across the
+/// screen to glance ahead.
 ///
-/// Two modes of presentation, depending on `source`:
+/// What fills the deck depends on the current source/mode:
+/// - `source == nil`, `.library` / `.unsorted` → most-recently-added library songs
+/// - `source == nil`, `.dismissed`              → most-recently-dismissed songs
+/// - **playlist source** → the playlist's cover pinned on top (when it has one),
+///   then the playlist's tracks behind it; no cover → the tracks scrub alone
+/// - **artist source**   → the artist's photo pinned on top (when it has one),
+///   then the artist's library tracks behind it; no photo → the tracks alone
 ///
-/// - **source == nil** (library / unsorted / dismissed): the stack becomes a
-///   horizontal fan of the next few covers. The user can drag a single
-///   continuous gesture across the screen to scrub through them; letting go
-///   springs everything back to the first cover. It's a one-journey peek —
-///   no commit, no "swipe again to see the next one", just a finger across
-///   the screen to glance ahead.
-///
-/// - **source != nil** (playlist / artist picked): the hero is locked to the
-///   source's cover. No scrub gesture — the hero IS the source, there's
-///   nothing to cycle. Playlists keep two static decorative cards behind the
-///   front cover; artists render as a single solo card because the artist
-///   profile reads as its own portrait without a deck behind it.
-///
-/// Source resolution per mode:
-/// - `.library` + playlist source → the playlist's own cover
-/// - `.library` + artist source   → the artist's library artwork (or initials)
-/// - `.library` / `.unsorted`     → most-recently-added library songs
-/// - `.dismissed`                  → most-recently-dismissed songs
+/// The pinned source cover/photo rides the same `leadArtwork` slot the
+/// "where you left off" feature uses, so the fan layout is identical across
+/// every source — only what fills slot 0 differs.
 struct HomeHeroArtStack: View {
     let mode: ReviewMode
     let source: SourceScope?
     let sortOrder: SortOrder
     let modelContext: ModelContext
+    /// Whether dismissed tracks surface inside a scoped (playlist/artist) deck.
+    /// Forwarded to `MusicLibraryService.scopeExclusionSet`; ignored when
+    /// `source == nil` (those decks hide dismissals via `deckExclusionSet`).
+    let includeDismissedInScope: Bool
     /// Fires when the hero card's primary artwork is known — for source-picked
     /// modes that's the cached playlist/artist artwork, otherwise it's the
     /// first item from the freshly-fetched library/dismissed list. Used by
@@ -47,20 +47,19 @@ struct HomeHeroArtStack: View {
     /// playlist/artist sources — those modes have their own portrait.
     var preferredFrontSongID: String? = nil
 
-    @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Mode-sorted, exclusion-filtered deck. In source-picked modes this is
-    /// the two back-card artworks (the hero itself is PlaylistCoverView /
-    /// ArtistHeroSquare). In source == nil modes this is the scrubbable fan,
-    /// minus any prepended `leadArtwork`. Filter logic lives in
-    /// `MusicLibraryService.deckExclusionSet` so the carousel and the hero
-    /// can't drift on what counts as "next song."
+    /// Exclusion-filtered deck behind the lead — the scrubbable fan, minus any
+    /// prepended `leadArtwork`. Unscoped modes fill it from the library /
+    /// dismissed walks; scoped modes fill it with the playlist/artist tracks.
+    /// Filter logic lives in `MusicLibraryService` (`deckExclusionSet` /
+    /// `scopeExclusionSet`) so the carousel and the hero can't drift on what
+    /// counts as "next song."
     @State private var deckArtworks: [Artwork] = []
-    /// Lead artwork prepended at slot 0 when the user has a "where you left
-    /// off" cover from the carousel. Held separately from `deckArtworks` so a
-    /// carousel-close event doesn't force a full library re-walk — only the
-    /// lead refetches.
+    /// Lead artwork pinned at slot 0. Unscoped: the carousel's "where you left
+    /// off" cover. Scoped: the playlist cover / artist photo. Held separately
+    /// from `deckArtworks` so a carousel-close event doesn't force a full
+    /// re-walk — only the lead refetches.
     @State private var leadArtwork: Artwork? = nil
     @State private var frontFallbackKind: FallbackKind = .library
     /// Flips true once `loadDeck` finishes a pass for the current `deckKey`.
@@ -102,11 +101,7 @@ struct HomeHeroArtStack: View {
 
     var body: some View {
         ZStack {
-            if source == nil {
-                scrubDeck
-            } else {
-                sourcedStack
-            }
+            scrubDeck
         }
         // Pin to parent width so the surrounding VStack sizes itself to the
         // screen instead of shrinking to the natural width of the small
@@ -115,22 +110,20 @@ struct HomeHeroArtStack: View {
         .frame(maxWidth: .infinity)
         .frame(height: size + 24)
         // Hit-test the whole section, not just the centred card silhouette,
-        // so the scrub can start from the empty flanks too. The
-        // `including:` mask disables the gesture entirely when the scrub
-        // doesn't apply (sourced modes, empty-deck loading state), which
-        // matches the prior behavior where the gesture only lived inside
-        // the cards branch of `scrubDeck`.
+        // so the scrub can start from the empty flanks too. The `including:`
+        // mask disables the gesture while the deck is empty (loading / nothing
+        // to preview) so an empty card silhouette isn't draggable.
         .contentShape(Rectangle())
         .gesture(
             scrubGesture,
-            including: (source == nil && !combinedArtworks.isEmpty) ? .gesture : .subviews
+            including: !combinedArtworks.isEmpty ? .gesture : .subviews
         )
         // Tap (without a drag — DragGesture's minimumDistance keeps them
-        // distinct) opens the full carousel exploration. Gated to source-less
-        // modes with a loaded deck because sourced stacks have their own UIs
-        // and an empty deck has nothing to navigate to.
+        // distinct) opens the full carousel exploration. Gated only by a
+        // loaded deck now — every source (including playlist/artist) scrubs
+        // and expands; an empty deck has nothing to navigate to.
         .onTapGesture {
-            if source == nil, !combinedArtworks.isEmpty {
+            if !combinedArtworks.isEmpty {
                 onHeroTap?()
             }
         }
@@ -370,91 +363,7 @@ struct HomeHeroArtStack: View {
         }
     }
 
-    // MARK: - Sourced stack (playlist / artist)
-
-    /// Layout shown when the user has picked a specific playlist or artist as
-    /// the source. The front card is the source's cover. Playlists render two
-    /// static decorative back cards previewing the next two tracks; artists
-    /// render solo since the profile portrait reads better without a deck
-    /// behind it. No scrub here — the hero IS the source, there's no deck.
-    private var sourcedStack: some View {
-        // Playlist back cards come from the deck (lead never applies to
-        // sourced stacks — `leadKey` returns "no-lead" for non-nil source).
-        ZStack {
-            if case .playlist = source {
-                sourcedBackCard(
-                    artwork: deckArtworks.indices.contains(0) ? deckArtworks[0] : nil,
-                    rotation: -8,
-                    offset: CGSize(width: -34, height: 8),
-                    opacity: 0.72
-                )
-                sourcedBackCard(
-                    artwork: deckArtworks.indices.contains(1) ? deckArtworks[1] : nil,
-                    rotation: 6,
-                    offset: CGSize(width: 32, height: 10),
-                    opacity: 0.85
-                )
-            }
-            sourcedFrontCard
-        }
-    }
-
-    private var sourcedFrontCard: some View {
-        Group {
-            switch source {
-            case .playlist(let id, _, _):
-                PlaylistCoverView(appleMusicPlaylistID: id, size: size, cornerRadius: 22)
-            case .artist(let id, let name):
-                ArtistHeroSquare(artistID: id, artistName: name, size: size)
-            case .none:
-                EmptyView() // unreachable — `sourcedStack` only renders with a source
-            }
-        }
-        .shadow(color: .black.opacity(0.22), radius: 18, y: 12)
-        .scaleEffect(pulse ? 1.0 : 0.96)
-        .animation(.spring(response: 0.55, dampingFraction: 0.7), value: pulse)
-        .transition(.scale(scale: 0.9).combined(with: .opacity))
-    }
-
-    /// Decorative back card used only in source-picked stacks. Falls back to
-    /// a glass placeholder when the source doesn't yield enough track
-    /// artworks to fill the slot.
-    private func sourcedBackCard(
-        artwork: Artwork?,
-        rotation: Double,
-        offset: CGSize,
-        opacity: Double
-    ) -> some View {
-        let side = size - 18
-        return Group {
-            if let artwork {
-                ArtworkImage(artwork, width: side, height: side)
-                    .frame(width: side, height: side)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(.white.opacity(0.16), lineWidth: 1)
-                    )
-            } else {
-                // Shimmering bone while the track artwork resolves — same
-                // SkeletonShape vocabulary as the hero deck and the artist
-                // sheet, so every loading surface breathes in one language
-                // instead of a dead material rectangle.
-                SkeletonShape(shape: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .frame(width: side, height: side)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(.white.opacity(0.10), lineWidth: 1)
-                    )
-            }
-        }
-        .opacity(opacity)
-        .rotationEffect(.degrees(rotation))
-        .offset(offset)
-        .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
-    }
-
-    /// Empty/loading state for the source-less deck, shown before the album
+    /// Empty/loading state for the deck, shown before the album
     /// artworks land. Three shimmering bones laid out at the SAME rest slots
     /// the real covers occupy (`centreSlot` + the two near peeks), so when the
     /// art arrives it sharpens into this exact pile instead of a single
@@ -471,10 +380,10 @@ struct HomeHeroArtStack: View {
 
     /// Shown when a deck finished loading but resolved to nothing — e.g. the
     /// only Dismissed row left is a stale record that no longer resolves to a
-    /// song. A single quiet glass card with the mode's fallback symbol,
-    /// deliberately NOT shimmering, so the hero reads as "nothing to preview"
-    /// instead of looping a load that will never finish. Same glass-fallback
-    /// vocabulary as `sourcedBackCard` so it sits naturally next to the deck.
+    /// song, or a scoped playlist whose every track is filtered out. A single
+    /// quiet glass card with the mode's fallback symbol, deliberately NOT
+    /// shimmering, so the hero reads as "nothing to preview" instead of looping
+    /// a load that will never finish.
     private var emptyDeckCard: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
             .fill(.ultraThinMaterial)
@@ -540,24 +449,29 @@ struct HomeHeroArtStack: View {
     }
 
     /// Identity for `.task(id:)` on the deck reload. Changes when the *source*
-    /// of the deck changes — mode, sort, or the picked playlist/artist. Stable
-    /// across carousel close events: those only affect `leadKey`, so closing
-    /// the carousel at a new song no longer triggers a full library walk.
+    /// of the deck changes — mode, sort, the picked playlist/artist, or the
+    /// scoped include-dismissed toggle (which changes the scope's exclusion).
+    /// Stable across carousel close events: those only affect `leadKey`, so
+    /// closing the carousel at a new song no longer triggers a full re-walk.
     private var deckKey: String {
+        let base = "\(mode.rawValue):\(sortOrder.rawValue)"
         switch source {
-        case .playlist(let id, _, _): return "\(mode.rawValue):\(sortOrder.rawValue):playlist:\(id)"
-        case .artist(let id, _):      return "\(mode.rawValue):\(sortOrder.rawValue):artist:\(id)"
-        case .none:                   return "\(mode.rawValue):\(sortOrder.rawValue):none"
+        case .playlist(let id, _, _): return "\(base):playlist:\(id):\(includeDismissedInScope)"
+        case .artist(let id, _):      return "\(base):artist:\(id):\(includeDismissedInScope)"
+        case .none:                   return "\(base):none"
         }
     }
 
-    /// Identity for `.task(id:)` on the lead artwork. Folding `source` in
-    /// forces the lead to clear when the user picks a source (sourced stacks
-    /// render the source as the hero, not a "where you left off" cover).
+    /// Identity for `.task(id:)` on the lead artwork. For a scope the lead is
+    /// the source's own cover (keyed on its id so it loads once); for an
+    /// unscoped deck it's the "where you left off" cover keyed on
+    /// `preferredFrontSongID`. Folding `source` in keeps the two from leaking
+    /// across the none ↔ scoped boundary.
     private var leadKey: String {
         switch source {
-        case .playlist, .artist: return "no-lead"
-        case .none:              return preferredFrontSongID ?? ""
+        case .playlist(let id, _, _): return "playlist-cover:\(id)"
+        case .artist(let id, _):      return "artist-cover:\(id)"
+        case .none:                   return preferredFrontSongID ?? ""
         }
     }
 
@@ -590,27 +504,15 @@ struct HomeHeroArtStack: View {
         // empty result reads as "loading then empty", not "empty forever".
         hasLoadedDeck = false
 
-        switch source {
-        case .playlist(let id, _, _):
-            // Hero is the playlist cover (PlaylistCoverView), so the deck is
-            // just the next 2 track artworks for the back cards.
-            let result = await fetchPlaylistTrackArtworks(id: id, limit: 2)
+        // A picked scope fills the deck with the collection's tracks; the
+        // source's own cover is pinned separately as the lead (see `updateLead`).
+        if let source {
+            let result = await fetchScopeArtworks(source: source, limit: deckCapacity)
             if Task.isCancelled { return }
             withAnimation(.smooth(duration: 0.3)) { deckArtworks = result }
             hasLoadedDeck = true
             publishPrimaryArtwork()
             return
-        case .artist:
-            // Artist hero is a solo card — no back cards to fill, so the
-            // deck stays empty. Ambient tint comes from the cached artist
-            // artwork via `publishPrimaryArtwork`.
-            if Task.isCancelled { return }
-            withAnimation(.smooth(duration: 0.3)) { deckArtworks = [] }
-            hasLoadedDeck = true
-            publishPrimaryArtwork()
-            return
-        case .none:
-            break
         }
 
         let result: [Artwork]
@@ -632,13 +534,30 @@ struct HomeHeroArtStack: View {
         publishPrimaryArtwork()
     }
 
-    /// Refreshes the lead artwork only. Driven by `preferredFrontSongID`
-    /// changes — typically when the user closes the carousel at a new song.
-    /// Sourced stacks (playlist/artist) ignore the lead entirely; we clear
-    /// any stale value when a source is picked so nothing leaks across the
-    /// none ↔ sourced boundary.
+    /// Refreshes the lead artwork — the card pinned at slot 0.
+    ///
+    /// - Scoped source → the playlist's cover / artist's photo, read straight
+    ///   from the service cache (no round-trip). It deliberately ignores
+    ///   `preferredFrontSongID` so the cover stays pinned even after the user
+    ///   scrubs the expanded carousel to a different track. A scope with no
+    ///   cover image resolves to `nil`, so the deck's tracks scrub on their own.
+    /// - Unscoped → the carousel's "where you left off" cover, fetched by id.
     private func updateLead() async {
-        guard source == nil, let preferredFrontSongID else {
+        switch source {
+        case .playlist(let id, _, _):
+            let cover = MusicLibraryService.shared.artwork(forPlaylistID: id)
+            withAnimation(.smooth(duration: 0.3)) { leadArtwork = cover }
+            publishPrimaryArtwork()
+            return
+        case .artist(let id, _):
+            let photo = MusicLibraryService.shared.artwork(forArtistID: id)
+            withAnimation(.smooth(duration: 0.3)) { leadArtwork = photo }
+            publishPrimaryArtwork()
+            return
+        case .none:
+            break
+        }
+        guard let preferredFrontSongID else {
             if leadArtwork != nil {
                 withAnimation(.smooth(duration: 0.3)) { leadArtwork = nil }
                 publishPrimaryArtwork()
@@ -651,20 +570,13 @@ struct HomeHeroArtStack: View {
         publishPrimaryArtwork()
     }
 
-    /// Reports the hero's "first visible" artwork up to HomeView so the
-    /// ambient background can tint to match. Sourced modes prefer the cached
-    /// playlist/artist artwork; source == nil falls through to lead ?? deck.
-    /// Called from both `loadDeck` and `updateLead` so whichever finishes
-    /// last writes the up-to-date value.
+    /// Reports the hero's "first visible" artwork up to HomeView so the ambient
+    /// background can tint to match. Always the front card: the pinned lead
+    /// (source cover / where-you-left-off) when present, otherwise the deck's
+    /// first cover. Called from both `loadDeck` and `updateLead` so whichever
+    /// finishes last writes the up-to-date value.
     private func publishPrimaryArtwork() {
-        switch source {
-        case .playlist(let id, _, _):
-            onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forPlaylistID: id))
-        case .artist(let id, _):
-            onPrimaryArtworkResolved?(MusicLibraryService.shared.artwork(forArtistID: id))
-        case .none:
-            onPrimaryArtworkResolved?(leadArtwork ?? deckArtworks.first)
-        }
+        onPrimaryArtworkResolved?(leadArtwork ?? deckArtworks.first)
     }
 
     /// Direct single-song artwork fetch. Used to resolve the carousel's
@@ -765,17 +677,33 @@ struct HomeHeroArtStack: View {
         }
     }
 
-    /// Reads the first N tracks of a playlist without disturbing the swipe-
-    /// session cursor (see MusicLibraryService.peekPlaylistTrackArtworks).
-    /// Returns empty on failure so the back cards fall through to glass.
-    private func fetchPlaylistTrackArtworks(id: String, limit: Int) async -> [Artwork] {
+    /// Resolves the scope's track artworks for the scrub deck. Applies the same
+    /// dismissed filter the scoped swipe session uses (via `scopeExclusionSet`),
+    /// so the hero and the expanded carousel preview the same tracks in the same
+    /// order. The playlist cover / artist photo itself is pinned separately as
+    /// `leadArtwork` (see `updateLead`), so it isn't drawn from here. Returns
+    /// empty on failure → the deck falls through to its empty/loading state.
+    private func fetchScopeArtworks(source: SourceScope, limit: Int) async -> [Artwork] {
+        let exclusion = MusicLibraryService.shared.scopeExclusionSet(
+            includeDismissed: includeDismissedInScope,
+            modelContext: modelContext
+        )
         do {
-            return try await MusicLibraryService.shared.peekPlaylistTrackArtworks(
-                playlistID: MusicItemID(id),
-                limit: limit,
-                ascending: sortOrder.ascending
+            let songs = try await MusicLibraryService.shared.scopeSongs(
+                for: source,
+                sortOrder: sortOrder
             )
+            if Task.isCancelled { return [] }
+            var collected: [Artwork] = []
+            for song in songs where !exclusion.contains(song.id.rawValue) {
+                if let art = song.artwork {
+                    collected.append(art)
+                    if collected.count >= limit { break }
+                }
+            }
+            return collected
         } catch {
+            print("HomeHeroArtStack fetchScopeArtworks failed: \(error)")
             return []
         }
     }
@@ -802,55 +730,5 @@ struct HomeHeroArtStack: View {
             case .artist:    "person.fill"
             }
         }
-    }
-}
-
-// MARK: - ArtistHeroSquare
-
-/// Big rounded-square version of the artist thumbnail. We keep this local
-/// (rather than parameterizing the existing `ArtistThumbnail` which is private
-/// to HomeView) because the hero needs a square + initials at large size, and
-/// the small circular thumbnail in the source pill has different proportions.
-private struct ArtistHeroSquare: View {
-    let artistID: String
-    let artistName: String
-    let size: CGFloat
-
-    @Environment(\.appAccent) private var appAccent
-
-    var body: some View {
-        Group {
-            if let artwork = MusicLibraryService.shared.artwork(forArtistID: artistID) {
-                ArtworkImage(artwork, width: size, height: size)
-                    .frame(width: size, height: size)
-            } else {
-                placeholder
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-        )
-    }
-
-    private var placeholder: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(LinearGradient(
-                colors: [appAccent.opacity(0.6), appAccent.opacity(0.3)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ))
-            .frame(width: size, height: size)
-            .overlay(
-                Text(initials)
-                    .font(.system(size: size * 0.32, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.92))
-            )
-    }
-
-    private var initials: String {
-        let parts = artistName.split(separator: " ").prefix(2)
-        return parts.compactMap { $0.first.map(String.init) }.joined().uppercased()
     }
 }

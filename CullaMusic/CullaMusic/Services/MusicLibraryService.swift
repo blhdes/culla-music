@@ -517,25 +517,6 @@ final class MusicLibraryService {
         playlistCache[MusicItemID(id)]?.lastModifiedDate
     }
 
-    /// Peek at the first track artworks of a playlist *without* advancing the
-    /// swipe-session cursor — `fetchNextPlaylistSongs` mutates
-    /// `playlistPageOffsets`, so calling it from a hero preview would silently
-    /// skip songs in the real swipe. This path resolves the playlist fresh and
-    /// reads its `.tracks` relationship directly. `ascending` mirrors
-    /// `fetchNextPlaylistSongs`: when false, walk in reverse so newly-added
-    /// tracks lead the preview.
-    func peekPlaylistTrackArtworks(
-        playlistID id: MusicItemID,
-        limit: Int,
-        ascending: Bool
-    ) async throws -> [Artwork] {
-        guard let playlist = try await freshPlaylist(id: id) else { return [] }
-        let populated: MusicKit.Playlist = try await playlist.with([.tracks])
-        let tracks = Array(populated.tracks ?? [])
-        let ordered = ascending ? tracks : tracks.reversed()
-        return ordered.prefix(limit).compactMap(\.artwork)
-    }
-
     func createPlaylist(name: String) async throws -> MusicKit.Playlist {
         let stored = (UserDefaults.standard.string(forKey: "authorDisplayName") ?? "")
             .trimmingCharacters(in: .whitespaces)
@@ -885,6 +866,43 @@ final class MusicLibraryService {
         case .dismissed:
             return []
         }
+    }
+
+    /// Ordered songs for a picked playlist/artist scope, matching the ordering
+    /// the scoped swipe walk uses so the hero deck, the expanded carousel, and
+    /// the session itself agree on "what's in this collection" and in what
+    /// order. Playlists read tracks in playlist position (reversed for
+    /// newest-first, so freshly-added tracks lead); artists read their library
+    /// tracks (roughly add-date order, same reversal). Both reuse the per-scope
+    /// caches the swipe session fills, so picking a source on Home warms the
+    /// session that follows.
+    func scopeSongs(for source: SourceScope, sortOrder: SortOrder) async throws -> [Song] {
+        let ascending = sortOrder.ascending
+        switch source {
+        case .playlist(let id, _, _):
+            let mid = MusicItemID(id)
+            if playlistSongs[mid] == nil {
+                playlistSongs[mid] = try await fetchPlaylistSongs(inPlaylistID: mid)
+            }
+            let raw = playlistSongs[mid] ?? []
+            return ascending ? raw : Array(raw.reversed())
+        case .artist(let id, _):
+            let raw = try await artistLibrarySongs(artistID: MusicItemID(id))
+            return ascending ? raw : Array(raw.reversed())
+        }
+    }
+
+    /// Exclusion set for a scoped (playlist/artist) deck. Mirrors the scope
+    /// branch of `MusicSwipeViewModel.fetchExcludedIdentifiers`: sorted songs
+    /// stay visible (a scoped session is "re-categorize this collection from
+    /// scratch"), and only previously-dismissed songs are hidden — unless the
+    /// user opted into `includeDismissed`, which surfaces those too. Lives next
+    /// to `deckExclusionSet` so the unscoped and scoped rules sit side by side
+    /// and can't quietly diverge.
+    func scopeExclusionSet(includeDismissed: Bool, modelContext: ModelContext) -> Set<String> {
+        guard !includeDismissed else { return [] }
+        let dismissed = (try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? []
+        return Set(dismissed)
     }
 
     // Editorial / auto-generated kinds aren't the user's content; everything else

@@ -317,6 +317,7 @@ struct HomeView: View {
                     source: source,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
                     modelContext: modelContext,
+                    includeDismissedInScope: includeDismissedInScope,
                     onPrimaryArtworkResolved: { heroArtwork = $0 },
                     onHeroTap: {
                         withAnimation(.easeInOut(duration: 0.28)) {
@@ -406,6 +407,8 @@ struct HomeView: View {
                 HomeArtCarouselView(
                     mode: $selectedMode,
                     sortOrder: SortOrder(rawValue: sortOrderRaw) ?? .newestFirst,
+                    source: source,
+                    includeDismissedInScope: includeDismissedInScope,
                     modelContext: modelContext,
                     totalCount: count(for: selectedMode),
                     onStart: { anchor in

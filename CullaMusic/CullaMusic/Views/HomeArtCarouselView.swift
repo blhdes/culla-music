@@ -13,17 +13,25 @@ import MusicKit
 /// - Drag/scroll → snaps to the nearest cover; preview keeps playing.
 /// - Tap the **identity strip** → opens a Menu to switch mode (Library /
 ///   Unsorted / Dismissed). The selection is bound to HomeView so the choice
-///   syncs back to the Home screen.
+///   syncs back to the Home screen. When a `source` is picked the strip is a
+///   plain label naming the playlist/artist — there's no mode to switch.
 /// - Tap **Start Cullaing** → opens `MusicSwipeView` seeded with the centred
 ///   song as its first card, so an already-playing preview keeps going.
 /// - Tap the **dim backdrop** → returns to Home. The carousel band has a
 ///   vertical safe gutter so a near-miss release doesn't accidentally dismiss.
 ///
-/// Scope (v1): only `.library`, `.unsorted`, `.dismissed`. Playlist/artist
-/// sources are deferred — those screens have their own portrait vocabulary.
+/// Source: unscoped (`source == nil`) browses the current mode's deck;
+/// a picked playlist/artist browses that collection instead. The date-jump
+/// control is unscoped-only — scoped sessions don't walk an add-date timeline.
 struct HomeArtCarouselView: View {
     @Binding var mode: ReviewMode
     let sortOrder: SortOrder
+    /// Picked playlist/artist scope, forwarded from Home. `nil` → browse the
+    /// `mode` deck; non-nil → browse that collection's tracks.
+    let source: SourceScope?
+    /// Whether dismissed tracks surface inside a scoped browse. Forwarded to the
+    /// feed; ignored when `source == nil`.
+    let includeDismissedInScope: Bool
     let modelContext: ModelContext
     /// Real total for the current mode, sourced from `HomeView.count(for:)`.
     /// The carousel feed only loads ~100 songs initially, so the strip would
@@ -206,23 +214,44 @@ struct HomeArtCarouselView: View {
     /// Falls back to the loaded page count with a `+` suffix while Home's
     /// real count is still computing, so the strip never shows a
     /// misleadingly small number.
+    @ViewBuilder
     private var identityStrip: some View {
         let (count, isPartial) = displayCount
-        return Menu {
-            Picker("Mode", selection: $mode) {
-                ForEach(ReviewMode.allCases) { reviewMode in
-                    Label(reviewMode.title, systemImage: reviewMode.icon)
-                        .tag(reviewMode)
-                }
-            }
-        } label: {
+        if let source {
+            // Scoped browse — the strip just names the collection. No Menu:
+            // switching to "Unsorted" while inside a playlist is meaningless.
             CarouselIdentityStrip(
                 mode: mode,
                 count: count,
-                isPartial: isPartial
+                isPartial: isPartial,
+                titleOverride: source.displayName,
+                iconOverride: scopeIcon(for: source),
+                showsMenuAffordance: false
             )
+        } else {
+            Menu {
+                Picker("Mode", selection: $mode) {
+                    ForEach(ReviewMode.allCases) { reviewMode in
+                        Label(reviewMode.title, systemImage: reviewMode.icon)
+                            .tag(reviewMode)
+                    }
+                }
+            } label: {
+                CarouselIdentityStrip(
+                    mode: mode,
+                    count: count,
+                    isPartial: isPartial
+                )
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+    }
+
+    private func scopeIcon(for source: SourceScope) -> String {
+        switch source {
+        case .playlist: return "music.note.list"
+        case .artist:   return "person.fill"
+        }
     }
 
     /// Resolves what to show in the strip's count slot.
@@ -579,7 +608,8 @@ struct HomeArtCarouselView: View {
     /// covers to scrub. Dismissed is sorted by dismissal date, so a
     /// library-add-date jump doesn't map — hide it there.
     private var showsDateControl: Bool {
-        (mode == .library || mode == .unsorted)
+        source == nil
+            && (mode == .library || mode == .unsorted)
             && dateSpan != nil
             && !(feed?.songs.isEmpty ?? true)
     }
@@ -637,6 +667,8 @@ struct HomeArtCarouselView: View {
             let f = CarouselSongFeed(
                 mode: mode,
                 sortOrder: sortOrder,
+                source: source,
+                includeDismissedInScope: includeDismissedInScope,
                 modelContext: modelContext
             )
             feed = f

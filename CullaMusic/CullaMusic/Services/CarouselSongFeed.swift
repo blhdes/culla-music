@@ -6,16 +6,26 @@ import MusicKit
 /// `MusicSwipeViewModel`'s queue — uses its own offset cursor so browsing
 /// through the carousel doesn't consume the swipe-session paging state.
 ///
-/// Three modes, each mirroring the matching swipe session's exclusion logic
-/// so the carousel preview matches what the user is about to swipe:
+/// Sources, each mirroring the matching swipe session's exclusion logic so the
+/// carousel preview matches what the user is about to swipe:
 /// - `.library`:   library songs minus sorted minus dismissed
 /// - `.unsorted`:  library minus playlist memberships minus sorted minus dismissed
 /// - `.dismissed`: every DismissedSong row, resolved up-front (bounded set)
+/// - **scoped** (a non-nil `source`, playlist or artist): every track in the
+///   collection, ordered like the scoped walk, minus dismissed (unless the
+///   user opted in). Sorted songs stay — scoped sessions re-categorize the
+///   whole collection. Bounded like `.dismissed`, so no incremental paging.
 @Observable
 @MainActor
 final class CarouselSongFeed {
     let mode: ReviewMode
     let sortOrder: SortOrder
+    /// Picked playlist/artist scope. `nil` → unscoped library/unsorted/dismissed
+    /// browsing. When set, the feed loads the scope as a bounded one-shot set.
+    let source: SourceScope?
+    /// Whether dismissed tracks surface inside a scoped session. Only meaningful
+    /// when `source != nil`; ignored otherwise.
+    private let includeDismissedInScope: Bool
     private let modelContext: ModelContext
     private let service: MusicLibraryService
 
@@ -56,9 +66,17 @@ final class CarouselSongFeed {
     /// of the loaded tail, kick off the next page.
     let prefetchDistance: Int = 8
 
-    init(mode: ReviewMode, sortOrder: SortOrder, modelContext: ModelContext) {
+    init(
+        mode: ReviewMode,
+        sortOrder: SortOrder,
+        source: SourceScope? = nil,
+        includeDismissedInScope: Bool = false,
+        modelContext: ModelContext
+    ) {
         self.mode = mode
         self.sortOrder = sortOrder
+        self.source = source
+        self.includeDismissedInScope = includeDismissedInScope
         self.modelContext = modelContext
         self.service = MusicLibraryService.shared
     }
@@ -67,6 +85,13 @@ final class CarouselSongFeed {
     /// re-fetch if songs are already present.
     func loadInitial() async {
         guard songs.isEmpty, !isExhausted else { return }
+        // A picked scope short-circuits the mode paths — it's a bounded
+        // collection regardless of which mode tile is nominally selected.
+        if let source {
+            await loadScope(source)
+            isInitialLoading = false
+            return
+        }
         switch mode {
         case .library, .unsorted:
             await buildExclusionSet()
@@ -81,8 +106,9 @@ final class CarouselSongFeed {
     /// to fetch. Coalesced — concurrent callers from rapid scroll all collapse
     /// into the single in-flight task.
     func loadMoreIfNeeded() {
-        // Dismissed loads its bounded set up front — no incremental paging.
-        guard mode != .dismissed else { return }
+        // Dismissed and scoped collections load their bounded set up front —
+        // no incremental paging.
+        guard source == nil, mode != .dismissed else { return }
         guard !isExhausted, pagingTask == nil else { return }
         // No @MainActor annotation — the enclosing type is already
         // MainActor-isolated, so the Task inherits that isolation.
@@ -156,6 +182,28 @@ final class CarouselSongFeed {
             if let id = boundaryID() { return id }
         }
         return songs.last?.id.rawValue
+    }
+
+    // MARK: - Scoped (bounded, one-shot load)
+
+    /// Loads a picked playlist/artist scope as a bounded set — the collection's
+    /// full track list is small enough to resolve up front. Ordered via the
+    /// shared `scopeSongs` (so it matches the hero deck and the swipe walk) and
+    /// filtered by `scopeExclusionSet` (dismissed only, unless opted in — sorted
+    /// stays visible). One-shot: `isExhausted` flips immediately so the carousel
+    /// never asks for more.
+    private func loadScope(_ source: SourceScope) async {
+        let exclusion = service.scopeExclusionSet(
+            includeDismissed: includeDismissedInScope,
+            modelContext: modelContext
+        )
+        do {
+            let ordered = try await service.scopeSongs(for: source, sortOrder: sortOrder)
+            songs = ordered.filter { !exclusion.contains($0.id.rawValue) }
+        } catch {
+            print("CarouselSongFeed scope load failed: \(error)")
+        }
+        isExhausted = true
     }
 
     // MARK: - Dismissed (bounded, one-shot load)

@@ -23,18 +23,27 @@ struct CarouselIdentityStrip: View {
     /// total. Appends a "+" to the digits so the user sees e.g. "100+
     /// songs" rather than a misleading absolute number.
     let isPartial: Bool
+    /// Overrides the mode title/icon for scoped (playlist/artist) carousels,
+    /// where the strip names the source instead of a review mode. `nil` keeps
+    /// the mode's own title/icon.
+    var titleOverride: String? = nil
+    var iconOverride: String? = nil
+    /// Hides the menu-affordance chevron. Scoped carousels don't switch modes,
+    /// so the strip reads as a plain label there, not a Menu target.
+    var showsMenuAffordance: Bool = true
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: mode.icon)
+            Image(systemName: iconOverride ?? mode.icon)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            Text(mode.title.uppercased())
+            Text((titleOverride ?? mode.title).uppercased())
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(.primary)
                 .contentTransition(.opacity)
+                .lineLimit(1)
 
             Circle()
                 .fill(.secondary)
@@ -45,11 +54,14 @@ struct CarouselIdentityStrip: View {
 
             // Standard "this opens a menu" affordance — same glyph iOS uses
             // for Menu-backed controls system-wide. Kept secondary and small
-            // so the strip still reads label-first.
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.leading, 2)
+            // so the strip still reads label-first. Dropped entirely for scoped
+            // carousels, which aren't Menu-backed.
+            if showsMenuAffordance {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 2)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

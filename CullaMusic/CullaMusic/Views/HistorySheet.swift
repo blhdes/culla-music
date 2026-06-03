@@ -16,6 +16,11 @@ struct HistorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Namespace so the undo toast crystallizes (materializes) inside its stable
+    /// container on iOS 26 rather than only sliding up. Inert below iOS 26.
+    @Namespace private var glassMorph
 
     @State private var store: HistoryStore?
     @State private var toastTimer: Task<Void, Never>?
@@ -80,10 +85,14 @@ struct HistorySheet: View {
         .listStyle(.insetGrouped)
         .animation(.snappy(duration: 0.28), value: store.entries.map(\.id))
         .overlay(alignment: .bottom) {
-            if let toast = store.toast {
-                toastPill(toast)
-                    .padding(.bottom, 28)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // Stable container outside the `if` so the toast materializes as
+            // glass inside it on iOS 26 rather than only sliding up.
+            GlassStack(spacing: 0) {
+                if let toast = store.toast {
+                    toastPill(toast)
+                        .padding(.bottom, 28)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: store.toast)
@@ -172,6 +181,8 @@ struct HistorySheet: View {
             .glassSurface(in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.08), lineWidth: 1))
             .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
+            .glassMorphID("history.toast", in: glassMorph)
+            .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
     }
 }
 

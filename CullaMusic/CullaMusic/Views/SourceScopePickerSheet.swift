@@ -63,6 +63,9 @@ struct SourceScopePickerSheet: View {
                 .padding(.bottom, 6)
 
                 listBody
+                    // Soft scroll edge so rows diffuse under the segmented
+                    // header / search bar instead of a hard cut (iOS 26).
+                    .softScrollEdge()
             }
             .navigationTitle("Sort From")
             .navigationBarTitleDisplayMode(.inline)

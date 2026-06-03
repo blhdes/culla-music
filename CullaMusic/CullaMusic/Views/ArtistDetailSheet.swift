@@ -167,6 +167,9 @@ private struct ArtistDetailView: View {
             }
             .padding(.vertical, 20)
         }
+        // The hero artwork diffuses softly under the nav title as it scrolls,
+        // the iOS 26 Liquid Glass scroll feel. No-op below iOS 26.
+        .softScrollEdge()
     }
 
     // MARK: Sections

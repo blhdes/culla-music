@@ -29,6 +29,9 @@ struct AccentPalettePickerSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemBackground))
+            // Match the Settings parent's soft scroll edge — the swatch grid
+            // diffuses gently under the nav bar instead of a hard cut (iOS 26).
+            .softScrollEdge()
             .navigationTitle("Accent Color")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

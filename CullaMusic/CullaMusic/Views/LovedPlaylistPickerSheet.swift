@@ -42,6 +42,9 @@ struct LovedPlaylistPickerSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemBackground))
+            // Match the Settings parent's soft scroll edge so opening this sheet
+            // doesn't cross an unannounced edge-effect boundary (iOS 26).
+            .softScrollEdge()
             .navigationTitle("Loved Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -42,6 +42,11 @@ protocol SortFieldProtocol: CaseIterable, Identifiable, Hashable {
 struct SortChip<Field: SortFieldProtocol>: View where Field.AllCases: RandomAccessCollection {
     @Binding var field: Field
     @Binding var descending: Bool
+    /// Optional "Selected first" grouping toggle, shown as a divided section
+    /// below the sort fields. On/off only — no direction, unlike the fields, so
+    /// it never flips. When nil (e.g. the Sidebar segment) the menu is just the
+    /// field list, unchanged.
+    var selectedFirst: Binding<Bool>? = nil
 
     var body: some View {
         Menu {
@@ -53,6 +58,22 @@ struct SortChip<Field: SortFieldProtocol>: View where Field.AllCases: RandomAcce
                         Label(option.label, systemImage: symbol)
                     } else {
                         Text(option.label)
+                    }
+                }
+            }
+            // Plain on/off grouping in its own divided section, so it reads as a
+            // separate axis from the sort field rather than another field. A
+            // checkmark marks it active — the native toggle idiom in sort menus.
+            if let selectedFirst {
+                Section {
+                    Button {
+                        selectedFirst.wrappedValue.toggle()
+                    } label: {
+                        if selectedFirst.wrappedValue {
+                            Label("Selected first", systemImage: "checkmark")
+                        } else {
+                            Text("Selected first")
+                        }
                     }
                 }
             }
@@ -92,8 +113,13 @@ struct SortChip<Field: SortFieldProtocol>: View where Field.AllCases: RandomAcce
     }
 
     private var accessibilityValue: String {
-        guard field.defaultDescending != nil else { return field.label }
-        return "\(field.label), \(descending ? "descending" : "ascending")"
+        var value = field.defaultDescending != nil
+            ? "\(field.label), \(descending ? "descending" : "ascending")"
+            : field.label
+        if selectedFirst?.wrappedValue == true {
+            value += ", selected first"
+        }
+        return value
     }
 }
 

@@ -62,6 +62,12 @@ struct ManagePlaylistsSheet: View {
     @AppStorage("managePlaylists.filterSortDescending") private var filterSortDescending = false
     @AppStorage("managePlaylists.artistFilterSortField") private var artistFilterSortFieldRaw = ArtistSortField.alphabetical.rawValue
     @AppStorage("managePlaylists.artistFilterSortDescending") private var artistFilterSortDescending = false
+    // "Selected first" grouping per filter scope — floats the rows you've chosen
+    // to filter above the rest. Off by default (normal sort); persisted so the
+    // grouping survives re-opening the sheet. Separate from the sort field, so
+    // toggling it never disturbs the chosen field or direction.
+    @AppStorage("managePlaylists.filterSelectedFirst") private var filterSelectedFirst = false
+    @AppStorage("managePlaylists.artistFilterSelectedFirst") private var artistFilterSelectedFirst = false
     /// Which list the Filter queue shows — playlists or artists. Persisted so
     /// re-opening the sheet keeps the user on their last sub-tab.
     @AppStorage("managePlaylists.filterScope") private var filterScopeRaw = FilterScope.playlists.rawValue
@@ -160,9 +166,23 @@ struct ManagePlaylistsSheet: View {
     }
 
     private var sortedFilterablePlaylists: [Playlist] {
-        searchFiltered(sorted(filterablePlaylists,
-                              field: filterSortField.wrappedValue,
-                              descending: filterSortDescending))
+        let rows = searchFiltered(sorted(filterablePlaylists,
+                                         field: filterSortField.wrappedValue,
+                                         descending: filterSortDescending))
+        guard filterSelectedFirst else { return rows }
+        let selected = excludedSet
+        return selectedFirst(rows) { playlist in
+            guard let amID = playlist.appleMusicPlaylistID, !amID.isEmpty else { return false }
+            return selected.contains(amID)
+        }
+    }
+
+    /// Stable "Selected first" grouping: floats the chosen rows above the rest
+    /// while keeping each group's existing sorted order (two `filter` passes
+    /// preserve order, unlike a `sort`). Shared by both filter lists so the
+    /// toggle behaves identically for playlists and artists.
+    private func selectedFirst<T>(_ rows: [T], isSelected: (T) -> Bool) -> [T] {
+        rows.filter(isSelected) + rows.filter { !isSelected($0) }
     }
 
     /// Search + sort for the artist filter list. Mirrors the Sort-From picker's
@@ -184,7 +204,9 @@ struct ManagePlaylistsSheet: View {
             }
         }
         if artistFilterSortDescending { rows.reverse() }
-        return rows
+        guard artistFilterSelectedFirst else { return rows }
+        let selected = excludedArtistSet
+        return selectedFirst(rows) { selected.contains($0.id.rawValue) }
     }
 
     /// Orders a list by a sort field via the shared `sortedBy` helper, injecting
@@ -247,6 +269,12 @@ struct ManagePlaylistsSheet: View {
             .onChange(of: searchQuery) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistFilterSortFieldRaw) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistFilterSortDescending) { _, _ in visibleArtists = computeFilteredSortedArtists() }
+            // "Selected first" regroups on demand — when you toggle it or change
+            // the sort/search — deliberately NOT on each selection tap. Tapping
+            // only flips the row's checkmark in place; re-sorting thousands of
+            // artists per tap (and the row-jump it caused) isn't worth a live
+            // float. Don't add an `onChange(of: rawExcludedArtists)` reseed here.
+            .onChange(of: artistFilterSelectedFirst) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistStore.artists) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .onChange(of: artistStore.trackCounts) { _, _ in visibleArtists = computeFilteredSortedArtists() }
             .toolbar {
@@ -420,7 +448,11 @@ struct ManagePlaylistsSheet: View {
     /// Filter list: structurally identical to `sidebarSection` — count + chip in
     /// the header, the library-mode reminder in the footer, rows below.
     private var filterSection: some View {
-        let count = excludedSet.count
+        // Decode the excluded set once here, then hand it to each row — the
+        // rows used to re-decode the comma-joined string per visible row, per
+        // body pass (a fresh Set allocation on every scroll frame).
+        let excluded = excludedSet
+        let count = excluded.count
         return Section {
             if filterablePlaylists.isEmpty {
                 emptyRow(
@@ -432,24 +464,27 @@ struct ManagePlaylistsSheet: View {
                 noMatchesRow
             } else {
                 ForEach(sortedFilterablePlaylists, id: \.id) { playlist in
-                    filterRow(for: playlist)
+                    filterRow(for: playlist, excluded: excluded)
                 }
             }
         } header: {
             filterScopeHeader(
                 field: filterSortField,
                 descending: $filterSortDescending,
-                showsChip: !filterablePlaylists.isEmpty
+                selectedFirst: $filterSelectedFirst,
+                showsChip: !filterablePlaylists.isEmpty,
+                hiddenCount: count,
+                noun: "playlist"
             )
         } footer: {
-            filterFooter(count: count, noun: "playlist")
+            filterFooter()
         }
     }
 
     @ViewBuilder
-    private func filterRow(for playlist: Playlist) -> some View {
+    private func filterRow(for playlist: Playlist, excluded: Set<String>) -> some View {
         let amID = playlist.appleMusicPlaylistID ?? ""
-        let isFiltered = !amID.isEmpty && excludedSet.contains(amID)
+        let isFiltered = !amID.isEmpty && excluded.contains(amID)
         let isTappable = !amID.isEmpty
 
         // Tap gesture instead of `Button` — see `sidebarRow` for the rationale
@@ -494,7 +529,10 @@ struct ManagePlaylistsSheet: View {
     /// don't walk the library for artists they may never filter. Loading /
     /// empty / no-matches states match the Sort-From picker's artist tab.
     private var artistFilterSection: some View {
-        let count = excludedArtistSet.count
+        // One decode for the whole section (count + every row), instead of each
+        // row re-decoding the excluded-artist string on every scroll frame.
+        let excluded = excludedArtistSet
+        let count = excluded.count
         return Section {
             if (artistStore.isLoadingArtists && artistStore.artists.isEmpty) || artistStore.isAwaitingFirstCounts {
                 loadingRow
@@ -506,7 +544,7 @@ struct ManagePlaylistsSheet: View {
                 )
             } else if !visibleArtists.isEmpty {
                 ForEach(visibleArtists, id: \.id) { artist in
-                    artistFilterRow(for: artist)
+                    artistFilterRow(for: artist, excluded: excluded)
                 }
             } else if !trimmedQuery.isEmpty {
                 // Only "no results" when actually searching. An empty memo with
@@ -518,18 +556,21 @@ struct ManagePlaylistsSheet: View {
             filterScopeHeader(
                 field: artistFilterSortField,
                 descending: $artistFilterSortDescending,
-                showsChip: !artistStore.artists.isEmpty
+                selectedFirst: $artistFilterSelectedFirst,
+                showsChip: !artistStore.artists.isEmpty,
+                hiddenCount: count,
+                noun: "artist"
             )
         } footer: {
-            filterFooter(count: count, noun: "artist")
+            filterFooter()
         }
         .task { await artistStore.prime() }
     }
 
     @ViewBuilder
-    private func artistFilterRow(for artist: Artist) -> some View {
+    private func artistFilterRow(for artist: Artist, excluded: Set<String>) -> some View {
         let amID = artist.id.rawValue
-        let isFiltered = excludedArtistSet.contains(amID)
+        let isFiltered = excluded.contains(amID)
 
         // Tap gesture instead of `Button` — see `sidebarRow` for the iOS 26
         // Liquid Glass press-highlight rationale.
@@ -750,37 +791,48 @@ struct ManagePlaylistsSheet: View {
         .accessibilityHint("Switches between filtering playlists and artists")
     }
 
-    /// Filter-queue section header: the scope switcher on the leading edge, the
-    /// per-scope `SortChip` on the trailing edge. The two glass chips replace the
-    /// old stacked segmented control; the filtered count moves to the footer so
-    /// the header stays a clean two-chip row.
+    /// Filter-queue section header: scope switcher + per-scope `SortChip` on the
+    /// top row, the live hidden-count on a second line. The count used to ride in
+    /// the footer, but with hundreds of artists that meant scrolling to the very
+    /// bottom just to see how many you'd filtered — so it now sits at the top
+    /// where it's always visible. `selectedFirst` threads into the `SortChip` so
+    /// its menu can float the chosen rows up.
     private func filterScopeHeader<Field>(
         field: Binding<Field>,
         descending: Binding<Bool>,
-        showsChip: Bool
+        selectedFirst: Binding<Bool>,
+        showsChip: Bool,
+        hiddenCount: Int,
+        noun: String
     ) -> some View where Field: SortFieldProtocol, Field.AllCases: RandomAccessCollection {
-        HStack {
-            filterScopeChip
-            Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                filterScopeChip
+                Spacer()
+                if showsChip {
+                    SortChip(field: field, descending: descending, selectedFirst: selectedFirst)
+                }
+            }
+            // Gated on the same flag as the chip: while the list is empty or
+            // loading there's nothing to count, so the line stays hidden and the
+            // header is just the scope chip.
             if showsChip {
-                SortChip(field: field, descending: descending)
+                Text("\(hiddenCount) \(noun)\(hiddenCount == 1 ? "" : "s") hidden in Library mode")
+                    .monospacedDigit()
+                    .contentTransition(.numericText(countsDown: false))
+                    .animation(.snappy, value: hiddenCount)
             }
         }
         .textCase(nil)
     }
 
-    /// Filter-queue footer: the live filtered count (numeric tick on toggle) plus
-    /// the "filter is paused outside Library mode" note. Folding the count down
-    /// here keeps the header to its two chips.
-    private func filterFooter(count: Int, noun: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(count) \(noun)\(count == 1 ? "" : "s") hidden in Library mode")
-                .monospacedDigit()
-                .contentTransition(.numericText(countsDown: false))
-                .animation(.snappy, value: count)
-            if viewModel.config.mode != .library {
-                Text("Current session is \(viewModel.config.mode.title).")
-            }
+    /// Filter-queue footer: just the "filtering is paused outside Library mode"
+    /// caveat now — the live count moved up into `filterScopeHeader`. Renders
+    /// nothing during a Library session, so the section has no trailing text.
+    @ViewBuilder
+    private func filterFooter() -> some View {
+        if viewModel.config.mode != .library {
+            Text("Current session is \(viewModel.config.mode.title).")
         }
     }
 

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Culla Music does not track users across apps/websites. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<!-- No domains used for tracking. -->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!-- No user data is collected and sent off device. The app reads the
+	     Apple Music library locally and looks up public artist bios; it
+	     gathers no data linked to the user's identity. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<!-- Required-reason API declarations. -->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- @AppStorage / UserDefaults: app settings (theme, accent,
+			     haptics, auto-play, Loved-playlist target, etc.). -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1: read/write defaults accessible only to this app. -->
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

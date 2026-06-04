@@ -230,20 +230,21 @@ struct SettingsView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         let year = Calendar.current.component(.year, from: Date())
-        let versionLine = build.isEmpty ? "Version \(version)" : "Version \(version) (\(build))"
-        return VStack(spacing: 3) {
-            Text("Culla Music")
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(versionLine)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Text("© \(String(year)) Culla Music")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 8)
+        let versionText = build.isEmpty ? version : "\(version) (\(build))"
+
+        // One quiet line: the wordmark carries a touch of emphasis, the version
+        // and copyright trail off in tertiary. Middle dots keep it elegant
+        // instead of stacking three raw rows.
+        let name = Text("CullaMusic")
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+            .foregroundStyle(.secondary)
+        let trail = Text("  ·  \(versionText)  ·  © \(String(year))")
+            .font(.system(.caption2, design: .rounded))
+            .foregroundStyle(.tertiary)
+
+        return (name + trail)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 6)
     }
 }
 

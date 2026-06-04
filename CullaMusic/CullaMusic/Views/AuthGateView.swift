@@ -1,10 +1,11 @@
 import SwiftUI
 import MusicKit
 
-/// First-launch screen requesting Apple Music access. Sets the visual tone for
-/// the rest of the app — uses the same Living-Glass vocabulary as HomeView
-/// (mesh background + glass hero tile + gradient CTA) so this is recognizably
-/// "Culla" before the user has even seen their library.
+/// First-launch screen requesting Apple Music access. Kept deliberately calm and
+/// brand-forward: a plain system background (no mesh), the adaptive `CullaLogo`
+/// mark, the "CullaMusic" wordmark, a one-line access explanation, the CTA, and
+/// an honest privacy reassurance backed by `PrivacyInfo.xcprivacy` (nothing is
+/// collected, tracked, or sent off device).
 struct AuthGateView: View {
     let status: MusicAuthorization.Status
     let onRequest: () -> Void
@@ -13,66 +14,80 @@ struct AuthGateView: View {
 
     var body: some View {
         ZStack {
-            LivingMeshBackground()
+            // Subtle top-to-bottom system fill — gives a hint of depth without
+            // the busy mesh, and adapts to light/dark for free.
+            LinearGradient(
+                colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-            VStack(spacing: 28) {
-                HeroIconTile(
-                    systemName: heroSymbol,
-                    foreground: heroColor,
-                    pulse: status == .notDetermined
-                )
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
 
-                VStack(spacing: 12) {
-                    Text("Apple Music access")
-                        .font(.system(.title2, design: .rounded).weight(.bold))
+                // Brand identity — the logo glyph follows `.primary`, so it flips
+                // black-on-light / white-on-dark, while the five accent dots keep
+                // their brand colors in both appearances.
+                VStack(spacing: 22) {
+                    CullaLogo()
+                        .frame(width: 96, height: 96)
 
-                    Text(message)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                    VStack(spacing: 10) {
+                        Text("CullaMusic")
+                            .font(.system(.largeTitle, design: .rounded).weight(.bold))
+
+                        Text(message)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 36)
+                    }
                 }
 
-                if !buttonTitle.isEmpty {
-                    GradientCapsuleButton(
-                        title: buttonTitle,
-                        icon: buttonIcon,
-                        iconEffect: status == .notDetermined ? .pulse : .none,
-                        action: action
-                    )
-                    .padding(.horizontal, 32)
-                    .padding(.top, 8)
+                Spacer(minLength: 0)
+
+                VStack(spacing: 22) {
+                    if !buttonTitle.isEmpty {
+                        GradientCapsuleButton(
+                            title: buttonTitle,
+                            icon: buttonIcon,
+                            iconEffect: status == .notDetermined ? .pulse : .none,
+                            action: action
+                        )
+                        .padding(.horizontal, 32)
+                    }
+
+                    privacyFooter
                 }
             }
-            .padding(.vertical, 40)
+            .padding(.vertical, 44)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    /// SF symbol shown in the hero tile. Swaps to a lock when access has been
-    /// denied so the user understands why we can't proceed — the music.note
-    /// icon would read as "we're loading something" instead of "we need you
-    /// to flip a setting."
-    private var heroSymbol: String {
-        switch status {
-        case .denied, .restricted: return "lock.shield"
-        default:                   return "music.note.list"
-        }
-    }
+    /// Honest, plain-language privacy promise — every claim here is enforced by
+    /// the privacy manifest, so it's safe to state plainly.
+    private var privacyFooter: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
 
-    private var heroColor: Color {
-        switch status {
-        case .denied, .restricted: return .orange
-        default:                   return appAccent
+            Text("Everything stays on your device.\nCullaMusic never collects, tracks, or shares your data.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
         }
     }
 
     private var message: String {
         switch status {
         case .notDetermined:
-            return "Culla Music needs to read your library and edit your playlists to let you swipe-sort songs."
+            return "To swipe-sort your songs, CullaMusic needs to read your library and edit your playlists."
         case .denied, .restricted:
-            return "Access was denied. Open Settings to grant permission."
+            return "Access was denied. Open Settings to grant CullaMusic permission to your Apple Music library."
         case .authorized:
             return ""
         @unknown default:
@@ -109,4 +124,9 @@ struct AuthGateView: View {
             break
         }
     }
+}
+
+#Preview {
+    AuthGateView(status: .notDetermined, onRequest: {})
+        .environment(\.appAccent, .blue)
 }

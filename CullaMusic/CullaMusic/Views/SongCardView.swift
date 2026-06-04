@@ -399,6 +399,13 @@ struct SongCardView: View {
                 Image(systemName: systemName)
                     .font(.system(size: 60))
                     .foregroundStyle(.white.opacity(0.85 * progress))
+                    // Dark disc keyed to the swipe's progress so the white
+                    // glyph stays readable on a light cover — mirrors the play
+                    // button's scrim. Padding gives the circle room around the
+                    // glyph; ramped (not constant) so there's no dark blob
+                    // behind the near-invisible icon early in the drag.
+                    .padding(22)
+                    .background(.black.opacity(0.35 * progress), in: Circle())
                     .scaleEffect(0.7 + 0.4 * progress)
                     .symbolEffect(.bounce, value: isArmed)
             }

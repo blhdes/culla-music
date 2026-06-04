@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Culla Music does not track users across apps/websites. -->
+	<!-- CullaMusic does not track users across apps/websites. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 

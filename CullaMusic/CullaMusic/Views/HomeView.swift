@@ -213,8 +213,16 @@ final class HomeViewModel {
             // delete to their SortedSong records, which is correct: that
             // history is meaningless once the destination playlist is gone.
             let liveAMIDs = Set(amPlaylists.map { $0.id.rawValue })
+            // Never prune the Loved target. Every up-swipe is a SortedSong on
+            // this playlist, so the cascade delete would erase all loved history.
+            // And `refreshUserPlaylists` legitimately omits it sometimes — Apple's
+            // library is eventually consistent right after we create "Culla Loves",
+            // and the smart "Favorites" playlist is filtered out of that fetch
+            // entirely — so a missing-from-Apple result here is not proof it's gone.
+            let lovedAMID = UserDefaults.standard.string(forKey: LovedPlaylistResolver.defaultsKey)
             for playlist in local {
                 guard let amID = playlist.appleMusicPlaylistID else { continue }
+                if amID == lovedAMID { continue }
                 if !liveAMIDs.contains(amID) {
                     modelContext.delete(playlist)
                 }

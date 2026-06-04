@@ -84,6 +84,7 @@ struct MusicSwipeView: View {
     /// on a different card after dismissal cleanly re-resolves instead of
     /// flashing stale state from the prior song.
     @State private var artistSheetSong: Song?
+    @State private var albumSheetSong: Song?
 
     /// Share sheet — non-nil presents the system share sheet for the current
     /// song (swipe DOWN). Mirrors the photo app's swipe-down-to-share, but the
@@ -171,6 +172,9 @@ struct MusicSwipeView: View {
         }
         .sheet(item: $artistSheetSong) { song in
             ArtistDetailSheet(song: song)
+        }
+        .sheet(item: $albumSheetSong) { song in
+            AlbumDetailSheet(song: song)
         }
         .sheet(item: $shareItem) { item in
             SongShareSheet(url: item.url, title: item.title)
@@ -565,6 +569,7 @@ struct MusicSwipeView: View {
                     onTogglePlay: { viewModel.togglePreview() },
                     onSeek: { service.seek(to: $0) },
                     onShowArtist: { artistSheetSong = current },
+                    onShowAlbum: { albumSheetSong = current },
                     onScrubbingChanged: { isScrubbing = $0 },
                     heroNamespace: heroNamespace,
                     chromeRevealed: chromeRevealed

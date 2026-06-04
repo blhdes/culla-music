@@ -16,6 +16,11 @@ struct SongCardView: View {
     /// small info button next to the artist name. Not wired on the next-card
     /// (underneath) instance so the button never appears on the obscured card.
     var onShowArtist: (() -> Void)? = nil
+    /// Optional — when set and the card is settled, shows a small info button
+    /// next to the inline album label that opens the album's liner-notes sheet.
+    /// Like `onShowArtist`, only wired on the front card so it never appears on
+    /// the obscured next card or while a drag is in flight.
+    var onShowAlbum: (() -> Void)? = nil
     /// Fires `true` the moment the progress bar's scrub begins and `false` when
     /// it ends. MusicSwipeView uses it to freeze the card's drag-to-sort while
     /// the user moves through the song, so a horizontal scrub never doubles as
@@ -115,14 +120,7 @@ struct SongCardView: View {
                                 .multilineTextAlignment(.center)
                                 .lineLimit(2)
 
-                            if showAlbumOnHero, let album = song.albumTitle, !album.isEmpty {
-                                let year = song.releaseDate.map { Calendar.current.component(.year, from: $0) }
-                                Text(year.map { "@\(album) (\($0))" } ?? "@\(album)")
-                                    .font(.system(.subheadline, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            albumRow(for: song)
 
                             artistRow(for: song)
 
@@ -151,6 +149,42 @@ struct SongCardView: View {
         // about the card stack above it.
         .onChange(of: scrubOverride != nil) { _, scrubbing in
             onScrubbingChanged?(scrubbing)
+        }
+    }
+
+    /// Inline album line (`@Album (Year)`) with an optional info button that
+    /// opens the album's liner-notes sheet. Mirrors `artistRow`: the button only
+    /// shows on the top, settled card so it can't fight the swipe gesture, and
+    /// the whole row is hidden unless "Show album on cards" is on.
+    @ViewBuilder
+    private func albumRow(for song: Song) -> some View {
+        if showAlbumOnHero, let album = song.albumTitle, !album.isEmpty {
+            let year = song.releaseDate.map { Calendar.current.component(.year, from: $0) }
+            let canShowInfo = (onShowAlbum != nil) && offset == .zero
+
+            HStack(spacing: 6) {
+                Text(year.map { "@\(album) (\($0))" } ?? "@\(album)")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if canShowInfo {
+                    Button {
+                        onShowAlbum?()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(4)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Album info")
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: canShowInfo)
         }
     }
 

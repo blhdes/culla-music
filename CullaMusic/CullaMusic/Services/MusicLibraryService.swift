@@ -964,6 +964,87 @@ final class MusicLibraryService {
         try await artist.with([.topSongs, .similarArtists])
     }
 
+    // MARK: - Album Liner Notes
+
+    /// Resolves the catalog `Album` for a song so the liner-notes sheet can show
+    /// the *complete* tracklist — not just the tracks the user happens to have
+    /// in their library. Leads with a catalog search by "artist + album" (the
+    /// full pressing), then falls back to the song's own `.albums` relationship
+    /// for uploaded / library-only tracks the catalog can't match. Returns nil
+    /// only when both paths miss; the caller degrades to a "no notes" view.
+    func resolveAlbum(for song: Song) async throws -> Album? {
+        let title = (song.albumTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty {
+            let artist = song.artistName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let term = artist.isEmpty ? title : "\(artist) \(title)"
+            var request = MusicCatalogSearchRequest(term: term, types: [Album.self])
+            request.limit = 10
+            let response = try await request.response()
+
+            // Only accept an exact (case-insensitive) album-title match so a
+            // search for, say, "1989" can't resolve to a same-named different
+            // record the term happened to surface first.
+            let lower = title.lowercased()
+            if let match = response.albums.first(where: { $0.title.lowercased() == lower }) {
+                return match
+            }
+        }
+
+        // Fallback: the song's own album relationship. For library-only tracks
+        // this is whatever pressing the user has (sometimes a partial one), but
+        // it's the exact record the track belongs to — better than nothing.
+        let populated = try await song.with([.albums])
+        return populated.albums?.first
+    }
+
+    /// Hydrates an `Album` with its `.tracks` relationship. Tracks come back as
+    /// the `Track` enum (songs plus the occasional music video); we keep them
+    /// all so the sleeve lists every entry in order, and pull the `.song` out
+    /// only when a row is tapped to preview.
+    func loadAlbumTracks(_ album: Album) async throws -> [MusicKit.Track] {
+        let populated = try await album.with([.tracks])
+        return Array(populated.tracks ?? [])
+    }
+
+    /// Apple Music's editorial blurb for an album (the long "standard" note,
+    /// falling back to the shorter one) — shown in the sleeve sheet between the
+    /// cover and the tracklist. Uses the note already on the album when present;
+    /// otherwise re-fetches the album from the catalog to pull it in.
+    ///
+    /// The re-fetch is title-guarded: a library album's ID lives in a different
+    /// namespace than catalog IDs, so feeding it to a catalog request could
+    /// resolve to an *unrelated* album. We only trust a result whose title
+    /// matches, so a mismatched collision is discarded rather than shown.
+    func loadAlbumEditorial(for album: Album) async -> String? {
+        if let notes = album.editorialNotes, let text = Self.preferredEditorial(notes) {
+            return text
+        }
+        do {
+            let request = MusicCatalogResourceRequest<Album>(matching: \.id, equalTo: album.id)
+            let response = try await request.response()
+            if let fetched = response.items.first,
+               fetched.title.lowercased() == album.title.lowercased(),
+               let notes = fetched.editorialNotes,
+               let text = Self.preferredEditorial(notes) {
+                return text
+            }
+        } catch {
+            print("loadAlbumEditorial fetch failed: \(error)")
+        }
+        return nil
+    }
+
+    /// Prefers the full "standard" editorial note, falling back to the short
+    /// one; returns nil when both are empty so the caller can hide the section.
+    private static func preferredEditorial(_ notes: EditorialNotes) -> String? {
+        for candidate in [notes.standard, notes.short] {
+            if let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+
     // MARK: - Dismissed Mode
 
     /// Resolves a list of song IDs to Song objects by paging through the library.

@@ -785,18 +785,9 @@ struct MusicSwipeView: View {
     private func presentShareForCurrent() {
         guard let song = viewModel.currentSong else { return }
         shareItem = SongShareItem(
-            url: appleMusicURL(for: song),
+            url: song.appleMusicLinkURL,
             title: "\(song.title) · \(song.artistName)"
         )
-    }
-
-    private func appleMusicURL(for song: Song) -> URL {
-        if let url = song.url { return url }
-        var components = URLComponents(string: "https://music.apple.com/search")
-        components?.queryItems = [
-            URLQueryItem(name: "term", value: "\(song.title) \(song.artistName)")
-        ]
-        return components?.url ?? URL(string: "https://music.apple.com")!
     }
 
     // MARK: - Dynamic accent

@@ -73,6 +73,9 @@ struct HistorySheet: View {
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 rowAction(for: entry, store: store)
                             }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                openInMusicAction(for: entry)
+                            }
                     }
                 } header: {
                     Text(section.title)
@@ -121,13 +124,13 @@ struct HistorySheet: View {
             // Music). Nothing to undo or open; the row stays purely as a record.
             EmptyView()
         } else if case .sorted(_, _, let createdByApp) = entry.movement, !createdByApp {
-            // Culla can't remove from the user's own playlists, and Apple exposes
-            // no deep link to a private playlist — so we just open the Music app
-            // and let them remove the track there. Reconciliation then greys this
-            // row and frees the song to re-sort.
+            // Culla can't remove from the user's own playlists — so instead of a
+            // half-true undo, jump to the actual track in Apple Music (the album
+            // is one tap from there), where the user can manage it themselves.
+            // Falls back to launching the app only if the song couldn't resolve.
             Button {
                 Haptics.tap()
-                openURL(Self.appleMusicAppURL)
+                openURL(entry.song?.appleMusicLinkURL ?? Self.appleMusicAppURL)
             } label: {
                 Label("Open in Music", systemImage: "arrow.up.right.square")
             }
@@ -141,6 +144,32 @@ struct HistorySheet: View {
             }
             .tint(appAccent)
         }
+    }
+
+    /// Leading-swipe jump to the track in Apple Music, on every *undoable* row
+    /// that resolved to a song. Undoable rows (Culla sorts + dismissals)
+    /// otherwise have no path to the song; non-Culla sorts already carry an
+    /// Open-in-Music on the trailing edge, and stale / unresolved rows have
+    /// nothing to open — so the leading edge stays empty for those.
+    @ViewBuilder
+    private func openInMusicAction(for entry: HistoryStore.Entry) -> some View {
+        if isUndoable(entry), let song = entry.song {
+            Button {
+                Haptics.tap()
+                openURL(song.appleMusicLinkURL)
+            } label: {
+                Label("Open in Music", systemImage: "arrow.up.right.square")
+            }
+            .tint(appAccent)
+        }
+    }
+
+    /// Mirrors `rowAction`'s "Undo" branch: a row is undoable when it's neither
+    /// a phantom nor a sort into the user's own (non-Culla) playlist.
+    private func isUndoable(_ entry: HistoryStore.Entry) -> Bool {
+        if entry.isStale { return false }
+        if case .sorted(_, _, let createdByApp) = entry.movement, !createdByApp { return false }
+        return true
     }
 
     /// Apple exposes no public URL for a user's private library playlist (a

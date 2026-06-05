@@ -68,6 +68,20 @@ final class AccentExtractor {
         cache[song.id.rawValue]
     }
 
+    /// An *instant*, cover-derived accent from MusicKit's artwork metadata
+    /// (`Artwork.backgroundColor`) — no network, no pixel sampling. Lets a cold
+    /// card open on a tint pulled from its own cover instead of the app palette
+    /// while the full pixel extraction is still in flight; that extraction then
+    /// blooms in over this. Clamped into the same comfortable HSL band as the
+    /// extracted accent so the two read as the same "weight" and the refine is a
+    /// soft step, not a jump. Nil when the artwork exposes no background color.
+    func provisionalAccent(for song: Song) -> ArtworkAccent? {
+        guard let cg = song.artwork?.backgroundColor else { return nil }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard UIColor(cgColor: cg).getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        return Self.comfortableAccent(fromRGB: Double(r), Double(g), Double(b))
+    }
+
     // MARK: - URL resolution
 
     /// Returns a publicly-fetchable HTTPS artwork URL for the song.
@@ -271,6 +285,40 @@ final class AccentExtractor {
         let l = min(max(lRaw, 0.40), 0.58)
         let (rOut, gOut, bOut) = hslToRGB(h: h, s: s, l: l)
         return Color(red: rOut, green: gOut, blue: bOut)
+    }
+
+    /// Builds a UI-comfortable accent from a single seed color — the entry
+    /// point for `provisionalAccent`. Mirrors the pixel pipeline's own clamps so
+    /// a provisional tint sits at the same weight as the eventual extraction:
+    /// a low-saturation seed becomes the grey/slate monochrome pair (so a B&W
+    /// cover never flashes a synthetic hue), and a colored seed is pinned into
+    /// the comfortable saturation/lightness band, with a rotated sibling for
+    /// `secondary`.
+    nonisolated private static func comfortableAccent(fromRGB r: Double, _ g: Double, _ b: Double) -> ArtworkAccent {
+        let (h, sRaw, lRaw) = rgbToHSL(r: r, g: g, b: b)
+
+        // Same monochrome gate as the pixel path (`s < 0.25`): no real hue, so
+        // build the slate pair + neutral grey keyed to the seed's lightness.
+        if sRaw < 0.25 {
+            let hue = lRaw < 0.5 ? 215.0 / 360.0 : 35.0 / 360.0
+            let slateL = min(max(lRaw, 0.42), 0.55)
+            let (pr, pg, pb) = hslToRGB(h: hue, s: 0.25, l: slateL)
+            let primary = Color(red: pr, green: pg, blue: pb)
+            let neutralL = min(max(lRaw, 0.22), 0.82)
+            let neutral = Color(red: neutralL, green: neutralL, blue: neutralL)
+            return ArtworkAccent(
+                primary: primary,
+                secondary: derivedSecondary(from: primary),
+                neutralTint: neutral
+            )
+        }
+
+        // Colored seed — same clamp as `bucketColor`.
+        let s = max(sRaw, 0.50)
+        let l = min(max(lRaw, 0.40), 0.58)
+        let (rOut, gOut, bOut) = hslToRGB(h: h, s: s, l: l)
+        let primary = Color(red: rOut, green: gOut, blue: bOut)
+        return ArtworkAccent(primary: primary, secondary: derivedSecondary(from: primary))
     }
 
     /// When no second hue exists in the artwork, build one by rotating the

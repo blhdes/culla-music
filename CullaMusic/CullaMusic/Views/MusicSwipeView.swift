@@ -828,31 +828,32 @@ struct MusicSwipeView: View {
 
     private var effectiveAccent: ArtworkAccent {
         if useDynamicAccent {
+            // Already sampled this session → the committed extracted accent.
             if let dynamicAccent { return dynamicAccent }
-            // Not committed into state yet (session's first card), but the cover
-            // tint may already be cached — warmed by Home. Use it so the opening
-            // frame paints the real tint instead of the unrelated palette accent.
-            if let song = viewModel.currentSong,
-               let cached = AccentExtractor.shared.cachedAccent(for: song) {
-                return cached
+            if let song = viewModel.currentSong {
+                if let cached = AccentExtractor.shared.cachedAccent(for: song) {
+                    return cached
+                }
+                // Cold card (session entry): nothing reaches the extractor before
+                // the swipe view, so seed from MusicKit's *instant* artwork color
+                // — the pills open on a cover-derived tint, never the app palette.
+                // `refreshDynamicAccent` blooms the full extraction in over it.
+                if let provisional = AccentExtractor.shared.provisionalAccent(for: song) {
+                    return provisional
+                }
             }
         }
         return .flat(paletteAccent)
     }
 
-    /// Commits a new accent. The *first* color (when we have none yet — session
-    /// entry) lands instantly: there's no prior cover tint to bloom *from*, so
-    /// animating would morph the pills up from the unrelated app palette accent,
-    /// which read as a strange color fade. Once a cover tint exists, every
-    /// card-to-card change is a soft bloom. The equality guard keeps the lockstep
-    /// and async paths from animating the same color twice.
+    /// Commits a new accent with the soft bloom. The opening frame already shows
+    /// a cover-derived tint (cached or `provisionalAccent`, via `effectiveAccent`),
+    /// so the first commit blooms cover→cover — a gentle refine, never the old
+    /// palette→cover morph. The equality guard keeps the lockstep and async paths
+    /// from animating the same color twice.
     private func setAccent(_ accent: ArtworkAccent?) {
         guard dynamicAccent != accent else { return }
-        if dynamicAccent == nil {
-            dynamicAccent = accent
-        } else {
-            withAnimation(Self.accentBloom) { dynamicAccent = accent }
-        }
+        withAnimation(Self.accentBloom) { dynamicAccent = accent }
     }
 
     /// Lockstep recolor: paint the current card's *already-cached* accent

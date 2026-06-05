@@ -82,10 +82,21 @@ private struct ArtistDetailView: View {
     @State private var bioExpanded = false
     @State private var bioIsTruncated = false
 
+    /// Apple Music's editorial blurb — loaded separately from the relationships
+    /// so it can fade in once it lands (like the bio). Nil until resolved, and
+    /// stays nil when the artist has no editorial note (section hidden).
+    @State private var editorialText: String?
+    /// First tap expands the clamped note to full length (one-way). Unlike the
+    /// bio there's no external article, so a fully-shown note has no further
+    /// action — matches the album sleeve's notes.
+    @State private var notesExpanded = false
+    @State private var notesIsTruncated = false
+
     /// True only while there's still hidden text to reveal. When the bio fits
     /// in the clamp (short bios) or is already expanded, the card's tap opens
     /// Wikipedia directly instead of doing a no-op "expand".
     private var bioCanExpand: Bool { bioIsTruncated && !bioExpanded }
+    private var notesCanExpand: Bool { notesIsTruncated && !notesExpanded }
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -137,6 +148,7 @@ private struct ArtistDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: artist.id.rawValue) { await loadDetail() }
         .task(id: artist.id.rawValue) { await loadBio() }
+        .task(id: artist.id.rawValue) { await loadEditorial() }
         .sheet(isPresented: $showGoogle) {
             if let googleURL {
                 SafariView(url: googleURL)
@@ -156,6 +168,7 @@ private struct ArtistDetailView: View {
                 hero
                     .padding(.horizontal, 20)
                 if !(current.genreNames ?? []).isEmpty { genreChips }
+                editorialSection
                 bioSection
                 topSongsSection
                 similarArtistsSection
@@ -228,6 +241,58 @@ private struct ArtistDetailView: View {
             }
         }
         .contentMargins(.horizontal, 20, for: .scrollContent)
+    }
+
+    /// Apple Music's editorial blurb for the artist, sitting just above the
+    /// Wikipedia "About". Same clamp-and-expand treatment as the album sleeve's
+    /// notes — tap once to reveal the full text, no external article. Hidden
+    /// entirely when the artist carries no editorial note.
+    @ViewBuilder
+    private var editorialSection: some View {
+        if let text = editorialText {
+            VStack(spacing: 12) {
+                sectionHeader("Notes")
+                Button {
+                    if notesCanExpand {
+                        withAnimation(.easeInOut(duration: 0.25)) { notesExpanded = true }
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(text)
+                            .font(.callout)
+                            .foregroundStyle(.primary)
+                            .lineLimit(notesExpanded ? nil : 4)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.leading)
+                            .background {
+                                // Hidden full-length copy behind the clamp: when
+                                // it doesn't fit, the clear fallback flags the
+                                // note as truncated so we show "More".
+                                if !notesExpanded {
+                                    ViewThatFits(in: .vertical) {
+                                        Text(text).font(.callout).hidden()
+                                        Color.clear.onAppear { notesIsTruncated = true }
+                                    }
+                                }
+                            }
+                        if notesCanExpand {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.down")
+                                Text("More")
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!notesCanExpand)
+            }
+            .padding(.horizontal, 20)
+            .transition(.opacity)
+        }
     }
 
     @ViewBuilder
@@ -401,6 +466,14 @@ private struct ArtistDetailView: View {
         }
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.4)) {
             isReady = true
+        }
+    }
+
+    private func loadEditorial() async {
+        let text = await MusicLibraryService.shared.loadArtistEditorial(for: artist)
+        guard let text else { return }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.35)) {
+            editorialText = text
         }
     }
 

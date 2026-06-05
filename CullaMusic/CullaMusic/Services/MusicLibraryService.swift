@@ -964,6 +964,34 @@ final class MusicLibraryService {
         try await artist.with([.topSongs, .similarArtists])
     }
 
+    /// Apple Music's editorial blurb for an artist (the long "standard" note,
+    /// falling back to the shorter one) — shown in the hub just above the
+    /// Wikipedia "About". Uses the note already on the artist when present;
+    /// otherwise re-fetches the artist from the catalog to pull it in.
+    ///
+    /// Title-guarded exactly like `loadAlbumEditorial`: a library artist's ID
+    /// lives in a different namespace than catalog IDs, so a catalog request
+    /// could resolve to an unrelated artist. We only trust a name-matching
+    /// result, so a mismatched collision is discarded rather than shown.
+    func loadArtistEditorial(for artist: Artist) async -> String? {
+        if let notes = artist.editorialNotes, let text = Self.preferredEditorial(notes) {
+            return text
+        }
+        do {
+            let request = MusicCatalogResourceRequest<Artist>(matching: \.id, equalTo: artist.id)
+            let response = try await request.response()
+            if let fetched = response.items.first,
+               fetched.name.lowercased() == artist.name.lowercased(),
+               let notes = fetched.editorialNotes,
+               let text = Self.preferredEditorial(notes) {
+                return text
+            }
+        } catch {
+            print("loadArtistEditorial fetch failed: \(error)")
+        }
+        return nil
+    }
+
     // MARK: - Album Liner Notes
 
     /// Resolves the catalog `Album` for a song so the liner-notes sheet can show

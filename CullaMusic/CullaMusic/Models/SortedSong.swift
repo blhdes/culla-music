@@ -33,13 +33,25 @@ enum SortedSongReconciler {
     /// whose song is back (self-healing both ways). `membership` maps a song ID
     /// to the set of playlist Apple-Music IDs it currently belongs to. Returns
     /// the row ids that are voided after the pass, so a caller can drive UI off
-    /// it without re-deriving. Pass only a *successfully* fetched membership —
-    /// reconciling against a stale/empty map would falsely void live sorts.
+    /// it without re-deriving. Reconciling against a stale/empty map would
+    /// falsely void live sorts, so an empty membership is refused here (see the
+    /// guard) — callers still shouldn't pass a *failed* fetch, but a
+    /// successful-but-empty one (cold open, library not synced) is handled.
     @discardableResult
     static func reconcile(
         membership: [String: Set<String>],
         in context: ModelContext
     ) -> Set<UUID> {
+        // An empty map isn't a trustworthy read. On a cold open the membership
+        // fetch can SUCCEED-but-empty before the library has synced (see
+        // `fetchAllPlaylistData` -> `refreshUserPlaylists` returning `[]`
+        // without throwing), and voiding every live sort against that corrupts
+        // both the deck's exclusion set and History. Never void on empty — the
+        // guard lives in the callee so no caller (current or future) can skip
+        // it. A genuinely-empty library is an accepted false-negative: rare,
+        // and the next non-empty reconcile self-heals it.
+        guard !membership.isEmpty else { return [] }
+
         let rows = (try? context.fetch(FetchDescriptor<SortedSong>())) ?? []
         var voidedRowIDs = Set<UUID>()
         var changed = false

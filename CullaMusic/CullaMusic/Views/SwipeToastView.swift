@@ -86,7 +86,7 @@ struct SwipeToastView: View {
 
     var body: some View {
         Group {
-            if #available(iOS 26.0, *) {
+            if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
                 GlassEffectContainer(spacing: 6) { pill }
             } else {
                 pill

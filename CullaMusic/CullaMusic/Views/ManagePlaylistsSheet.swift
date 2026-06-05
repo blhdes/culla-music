@@ -859,7 +859,7 @@ struct ManagePlaylistsSheet: View {
 /// chrome.
 private struct FilterScopeChipChrome: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             content
                 .menuStyle(.button)
                 .buttonStyle(.glass)

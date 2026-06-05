@@ -23,7 +23,7 @@ extension View {
         tint: Color? = nil,
         interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             self.modifier(GlassSurfaceModifier(shape: shape, tint: tint, interactive: interactive))
         } else {
             self.background {
@@ -65,7 +65,7 @@ struct GlassStack<Content: View>: View {
     }
 
     var body: some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             GlassEffectContainer(spacing: spacing) {
                 VStack(spacing: spacing) { content() }
             }
@@ -112,7 +112,7 @@ extension View {
     /// flowing into another). Must sit on the glassed view itself. No-op < iOS 26.
     @ViewBuilder
     func glassMorphID<ID: Hashable>(_ id: ID, in namespace: Namespace.ID) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             self.glassEffectID(id, in: namespace)
         } else {
             self
@@ -124,7 +124,7 @@ extension View {
     /// the motion respects the accessibility setting. No-op < iOS 26.
     @ViewBuilder
     func glassMorphTransition(_ style: GlassMorphStyle, reduceMotion: Bool = false) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             self.glassEffectTransition(resolvedGlassTransition(style, reduceMotion: reduceMotion))
         } else {
             self
@@ -136,7 +136,7 @@ extension View {
     /// adds the Liquid Glass scroll feel without any new color. No-op < iOS 26.
     @ViewBuilder
     func softScrollEdge() -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             self.scrollEdgeEffectStyle(.soft, for: .all)
         } else {
             self

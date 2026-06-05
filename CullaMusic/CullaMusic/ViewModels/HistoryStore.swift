@@ -73,13 +73,24 @@ final class HistoryStore {
         self.modelContext = modelContext
     }
 
-    var isEmpty: Bool { entries.isEmpty }
+    var isEmpty: Bool { visibleEntries.isEmpty }
+
+    /// Entries worth rendering. Drops "dead phantom" rows — a sort that's both
+    /// voided (greyed; its song left the playlist) AND unresolvable (the song
+    /// is gone from the library): no track identity, no swipe action, nothing
+    /// the user can act on. Resolved-but-voided rows stay (a readable log), and
+    /// unresolved-but-active rows stay (still undoable for cleanup); only the
+    /// useless intersection is hidden. Safe during load — `isStale` is set only
+    /// after the resolve, so this never hides a row that's merely still loading.
+    private var visibleEntries: [Entry] {
+        entries.filter { !($0.isStale && $0.song == nil) }
+    }
 
     /// Entries grouped into day sections, newest day first. Recomputed when
     /// `entries` changes (a song resolves, or an undo removes a row).
     var sections: [DaySection] {
         let calendar = Calendar.current
-        let grouped = Dictionary(grouping: entries) { calendar.startOfDay(for: $0.date) }
+        let grouped = Dictionary(grouping: visibleEntries) { calendar.startOfDay(for: $0.date) }
         return grouped.keys.sorted(by: >).map { day in
             let dayEntries = (grouped[day] ?? []).sorted { $0.date > $1.date }
             return DaySection(
@@ -149,7 +160,14 @@ final class HistoryStore {
     /// network error can never turn live rows into false phantoms.
     private func reconcileSortedMemberships() async {
         guard !entries.isEmpty else { return }
-        guard let data = try? await service.fetchAllPlaylistData(includeCurated: false) else { return }
+        // `fetchAllPlaylistData` can SUCCEED with an empty map on a cold first
+        // open — `refreshUserPlaylists` returns `[]` before Apple Music's
+        // library has synced, without throwing. Reconciling against that would
+        // void every live sort (and persist it), so require a non-empty result:
+        // an empty walk on a library that has sorts means "not synced yet," not
+        // "every song left its playlist." The next open reconciles for real.
+        guard let data = try? await service.fetchAllPlaylistData(includeCurated: false),
+              !data.songIDs.isEmpty else { return }
         let membership = data.membershipIndex.reduce(into: [String: Set<String>]()) { acc, pair in
             acc[pair.key] = Set(pair.value.map(\.rawValue))
         }
@@ -184,16 +202,38 @@ final class HistoryStore {
             if seen.insert(entry.songID).inserted { orderedIDs.append(entry.songID) }
         }
 
-        let resolved = (try? await service.resolveSongs(
-            orderedIDs: orderedIDs,
-            catalogIDs: catalogIDs
-        )) ?? []
-        let byID = Dictionary(resolved.map { ($0.id.rawValue, $0) }, uniquingKeysWith: { first, _ in first })
-
-        entries = entries.map { entry in
-            var copy = entry
-            copy.song = byID[entry.songID]
-            return copy
+        // The library resolver THROWS when the library isn't ready yet (cold
+        // first open, before Apple Music has synced) — distinct from "resolved,
+        // song is genuinely gone," which comes back as a nil entry. Swallowing
+        // the throw with `try?` would flash every row as "Track unavailable."
+        // Retry once after a short beat instead: a bounded retry can't spin into
+        // an endless skeleton, and the common cold-open case fills in cleanly.
+        for attempt in 0..<2 {
+            do {
+                let resolved = try await service.resolveSongs(
+                    orderedIDs: orderedIDs,
+                    catalogIDs: catalogIDs
+                )
+                let byID = Dictionary(
+                    resolved.map { ($0.id.rawValue, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                entries = entries.map { entry in
+                    var copy = entry
+                    copy.song = byID[entry.songID]
+                    return copy
+                }
+                return
+            } catch {
+                // First failure: let the library settle, then retry once.
+                // Second: give up — rows fall back to "Track unavailable."
+                guard attempt == 0 else {
+                    print("HistoryStore.resolveSongs failed: \(error)")
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(600))
+                if Task.isCancelled { return }
+            }
         }
     }
 

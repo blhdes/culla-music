@@ -31,12 +31,17 @@ final class HomeViewModel {
         self.modelContext = modelContext
     }
 
-    func loadCounts() async {
+    func loadCounts(onReady: (() -> Void)? = nil) async {
         // Local SwiftData fetch — paint the dismissed card immediately
         // instead of waiting on the Apple Music playlist sync round-trip.
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
         await syncPlaylistsFromAppleMusic()
+        // Playlists are in — Home can render real content now, so let the
+        // launch splash dismiss. The library/unsorted walk below is unbounded
+        // on a first launch and has its own in-card loaders, so we don't hold
+        // the brand screen for it.
+        onReady?()
         // Route through the cancellable slot so a toggle-flip arriving
         // mid-cold-start cancels this walk instead of racing it for the
         // cache. Previously the initial walk wasn't cancellable, so its
@@ -264,6 +269,11 @@ struct HomeView: View {
     /// remounts but resets on a fresh launch — same rationale as `selectedMode`.
     /// See `RootView.selectedSourceScope`.
     @Binding var source: SourceScope?
+    /// Called once the first content load reaches the point where Home can show
+    /// real content (playlists synced) — dismisses the launch splash. Optional
+    /// so previews and any future caller can omit it. Harmless if it fires again
+    /// on a later Home ⇄ Swipe remount; the splash is long gone by then.
+    var onReady: (() -> Void)? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appAccent) private var appAccent
@@ -523,7 +533,7 @@ struct HomeView: View {
             async let artistCounts = Task.detached(priority: .userInitiated) {
                 MembershipIndex.diskArtistCountsSnapshot()
             }.value
-            await vm.loadCounts()
+            await vm.loadCounts(onReady: onReady)
             let initialSnapshot = await counts
             sourceTrackCounts = initialSnapshot
             artistTrackCounts = await artistCounts.counts

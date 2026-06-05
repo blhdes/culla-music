@@ -3,6 +3,12 @@ import SwiftData
 import MusicKit
 
 struct RootView: View {
+    /// Flipped true once the first real screen has its content — drives the
+    /// launch splash crossfade up in `SplashGate`. The auth gate readies as
+    /// soon as we know we're not showing Home; the authorized path waits for
+    /// HomeView's first load (see the `onReady` handed to it below).
+    @Binding var isReady: Bool
+
     @Environment(\.modelContext) private var modelContext
     @State private var authStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
     @State private var activeViewModel: MusicSwipeViewModel?
@@ -80,7 +86,8 @@ struct RootView: View {
                             onStart: startSession,
                             heroNamespace: heroNamespace,
                             selectedMode: $selectedHomeMode,
-                            source: $selectedSourceScope
+                            source: $selectedSourceScope,
+                            onReady: { isReady = true }
                         )
                             .transition(.parallaxRecede)
                             .zIndex(0)
@@ -95,6 +102,12 @@ struct RootView: View {
         .task {
             seedDefaults()
             authStatus = MusicAuthorization.currentStatus
+            // Auth gate / denied screens are static, so they're ready the
+            // instant we know Home isn't showing. The authorized path readies
+            // itself from HomeView's `onReady` once its playlists have synced.
+            if authStatus != .authorized {
+                isReady = true
+            }
         }
         .preferredColorScheme(appColorScheme)
         // Don't set a global .tint(palette.color) — that propagates the

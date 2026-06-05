@@ -60,6 +60,14 @@ final class AccentExtractor {
         return accent
     }
 
+    /// Synchronous read of an already-cached accent, or nil if it hasn't been
+    /// extracted yet. Lets the swipe view recolor in lockstep with a card
+    /// transition using a pre-warmed color, instead of awaiting `accent(for:)`
+    /// (whose suspension lands a frame later and makes the recolor trail the card).
+    func cachedAccent(for song: Song) -> ArtworkAccent? {
+        cache[song.id.rawValue]
+    }
+
     // MARK: - URL resolution
 
     /// Returns a publicly-fetchable HTTPS artwork URL for the song.

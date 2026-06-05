@@ -104,6 +104,17 @@ struct MusicSwipeView: View {
 
     @Environment(\.openURL) private var openURL
 
+    // Accent frozen the moment a toast is set, so its icon stays tinted by the
+    // song that was just sorted rather than the next card (whose live accent
+    // takes over the chrome a beat later). Nil → fall back to the palette accent.
+    @State private var toastAccent: Color?
+    // The acted-on song's accent, captured at the *start* of a swipe (before the
+    // card advances and the lockstep recolor swaps `dynamicAccent`). `.onChange`
+    // on the toast fires only after those mutations commit, so it can't read the
+    // outgoing color itself — it consumes this instead. Nil for non-swipe toasts
+    // (created/restored), where the live accent is already the right one.
+    @State private var pendingToastAccent: Color?
+
     // Toast / undo timers
     @State private var toastTimer: Task<Void, Never>?
     @State private var showUndo = false
@@ -235,6 +246,12 @@ struct MusicSwipeView: View {
         }
         .onChange(of: viewModel.toastMessage) { _, message in
             guard message != nil else { return }
+            // A swipe captured the outgoing song's tint into `pendingToastAccent`
+            // before the card advanced — use it so the toast stays tied to the
+            // song you just sorted. Non-swipe toasts (created/restored) leave it
+            // nil; for those the live accent is already the right one.
+            toastAccent = pendingToastAccent ?? effectiveAccent.primary
+            pendingToastAccent = nil
             toastTimer?.cancel()
             let duration: Duration = viewModel.toastUndoable ? .seconds(6) : .seconds(1.4)
             toastTimer = Task {
@@ -738,6 +755,11 @@ struct MusicSwipeView: View {
     }
 
     private func flyOff(x: CGFloat = 0, y: CGFloat = 0, action: @escaping () -> Void) {
+        // Freeze the acted-on song's accent right now, while it's still the
+        // current card. The toast that `action()` raises lands a beat later as
+        // the next card slides in — by then `dynamicAccent` has bloomed to the
+        // incoming color, so this is the only point we can grab the outgoing one.
+        pendingToastAccent = effectiveAccent.primary
         // easeOut continues the drag's velocity instead of restarting from rest —
         // easeIn paused at the release point before accelerating, which made
         // partial drags look like two separate motions.
@@ -765,6 +787,13 @@ struct MusicSwipeView: View {
                 cardOffset = .zero
                 action()
             }
+            // Recolor the chrome in the same beat as the incoming card. The
+            // next card's accent was pre-warmed (see the nextSong `.task`), so
+            // we read it synchronously and bloom it in *now* instead of letting
+            // the async `refreshDynamicAccent` catch up a frame later. Its own
+            // softer/slower curve lets the color settle as the card lands. A
+            // cache miss falls through to the async refresh.
+            bloomAccentForCurrentCard()
         }
     }
 
@@ -792,19 +821,65 @@ struct MusicSwipeView: View {
 
     // MARK: - Dynamic accent
 
+    /// Curve for every accent recolor — a touch slower than the card's
+    /// slide-in (0.25s) so the color reads as a soft bloom that settles in as
+    /// the card lands, rather than a second, competing motion.
+    private static let accentBloom: Animation = .easeInOut(duration: 0.45)
+
     private var effectiveAccent: ArtworkAccent {
-        if useDynamicAccent, let dynamicAccent { return dynamicAccent }
+        if useDynamicAccent {
+            if let dynamicAccent { return dynamicAccent }
+            // Not committed into state yet (session's first card), but the cover
+            // tint may already be cached — warmed by Home. Use it so the opening
+            // frame paints the real tint instead of the unrelated palette accent.
+            if let song = viewModel.currentSong,
+               let cached = AccentExtractor.shared.cachedAccent(for: song) {
+                return cached
+            }
+        }
         return .flat(paletteAccent)
     }
 
+    /// Commits a new accent. The *first* color (when we have none yet — session
+    /// entry) lands instantly: there's no prior cover tint to bloom *from*, so
+    /// animating would morph the pills up from the unrelated app palette accent,
+    /// which read as a strange color fade. Once a cover tint exists, every
+    /// card-to-card change is a soft bloom. The equality guard keeps the lockstep
+    /// and async paths from animating the same color twice.
+    private func setAccent(_ accent: ArtworkAccent?) {
+        guard dynamicAccent != accent else { return }
+        if dynamicAccent == nil {
+            dynamicAccent = accent
+        } else {
+            withAnimation(Self.accentBloom) { dynamicAccent = accent }
+        }
+    }
+
+    /// Lockstep recolor: paint the current card's *already-cached* accent
+    /// immediately, on the same frame a card transition fires. No `await`, so
+    /// the chrome never trails the card. No-op when dynamic accent is off or the
+    /// color isn't warmed yet (the async `refreshDynamicAccent` covers that).
+    private func bloomAccentForCurrentCard() {
+        guard useDynamicAccent,
+              let song = viewModel.currentSong,
+              let cached = AccentExtractor.shared.cachedAccent(for: song) else { return }
+        setAccent(cached)
+    }
+
+    /// Async fallback for the cold path — first card, undo, or a cache miss the
+    /// lockstep recolor couldn't serve. Tries the warm cache first so the first
+    /// card paints its real tint without a frame on the palette accent; only
+    /// then falls back to the (suspending) extraction.
     private func refreshDynamicAccent() async {
         guard useDynamicAccent, let song = viewModel.currentSong else { return }
+        if let cached = AccentExtractor.shared.cachedAccent(for: song) {
+            setAccent(cached)
+            return
+        }
         let extracted = await AccentExtractor.shared.accent(for: song)
         // Bail if the song changed under us while we were sampling.
         guard viewModel.currentSong?.id.rawValue == song.id.rawValue else { return }
-        withAnimation(.easeInOut(duration: 0.35)) {
-            dynamicAccent = extracted
-        }
+        setAccent(extracted)
     }
 
     /// Starts the current card's preview when `autoplayOnSwipe` is on, unless
@@ -892,8 +967,13 @@ struct MusicSwipeView: View {
         // A pure status pill — undo lives in the single bottom Undo button so
         // it isn't duplicated here. The trailing glass dot signs each toast
         // with an action icon + role color; layout/glass/motion live in
-        // `SwipeToastView`. Reads `toastKind` set alongside the message.
-        SwipeToastView(message: message, kind: viewModel.toastKind)
+        // `SwipeToastView`. Reads `toastKind` set alongside the message, and the
+        // accent frozen when the toast landed (see `toastAccent`).
+        SwipeToastView(
+            message: message,
+            kind: viewModel.toastKind,
+            accent: toastAccent ?? paletteAccent
+        )
     }
 
     @ViewBuilder
@@ -904,6 +984,10 @@ struct MusicSwipeView: View {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     viewModel.undo()
                 }
+                // Same lockstep recolor as a swipe: the restored card is now
+                // current, so bloom the chrome to its pre-warmed tint in this
+                // same beat instead of waiting for the async refresh.
+                bloomAccentForCurrentCard()
                 flashUndo()
             } label: {
                 let count = viewModel.actionCount

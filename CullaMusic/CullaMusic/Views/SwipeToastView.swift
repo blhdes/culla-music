@@ -66,10 +66,12 @@ struct SwipeToastView: View {
     let message: String
     let kind: ToastKind
 
-    /// Album-derived accent (set by `MusicSwipeView` on the environment).
-    /// Drives the icon color for positive toasts so they tie into the rest of
-    /// the swipe UI instead of introducing a fixed brand hue.
-    @Environment(\.appAccent) private var appAccent
+    /// Album-derived accent for positive toasts — but *frozen at the instant
+    /// the toast was set*, not read live from the environment. A sort toast
+    /// only lands as the next card slides in, by which point the live
+    /// `appAccent` has already begun shifting to the new song's artwork. Passing
+    /// the snapshot in keeps the icon tinted by the song you actually sorted.
+    let accent: Color
 
     /// Bumped on appear (deferred one tick) and on every message change to
     /// re-fire the symbol bounce. An Int so `.symbolEffect(value:)` always sees
@@ -78,7 +80,7 @@ struct SwipeToastView: View {
 
     private var roleColor: Color {
         switch kind.role {
-        case .positive:    return appAccent
+        case .positive:    return accent
         case .neutral:     return .secondary
         case .destructive: return .red
         }

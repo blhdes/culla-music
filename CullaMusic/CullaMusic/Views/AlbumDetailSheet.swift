@@ -385,11 +385,14 @@ private struct TrackLinerRow: View {
                 .foregroundStyle(accented ? appAccent : .secondary)
                 .frame(width: 24, alignment: .leading)
 
-            Text(track.title)
-                .font(.system(.subheadline, design: .monospaced))
-                .foregroundStyle(accented ? appAccent : .primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            MarqueeText(
+                text: track.title,
+                font: .system(.subheadline, design: .monospaced),
+                color: accented ? appAccent : .primary,
+                // Only the row that's actually previewing scrolls its title —
+                // the rest stay calmly tail-truncated.
+                isActive: isPlaying
+            )
 
             Spacer(minLength: 8)
 
@@ -418,6 +421,129 @@ private struct TrackLinerRow: View {
         guard let duration = track.duration, duration > 0 else { return "--:--" }
         let total = Int(duration.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+// MARK: - Marquee title
+
+/// A single line of text that scrolls horizontally to reveal its full length
+/// while `isActive` and the title is too wide to fit; otherwise it tail-
+/// truncates like a normal line. Used for the now-playing track row so a long
+/// title can be read in full without the row growing or the name staying
+/// clipped. Honours Reduce Motion (stays truncated, never scrolls).
+private struct MarqueeText: View {
+    let text: String
+    let font: Font
+    let color: Color
+    let isActive: Bool
+
+    /// Drift speed in points per second — slow enough to read comfortably.
+    private let speed: CGFloat = 30
+    /// Beat held at each end before reversing, so both extremes stay readable.
+    private let edgePause: TimeInterval = 1.2
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+    @State private var scrollTask: Task<Void, Never>?
+
+    /// How far the title spills past the visible slot.
+    private var overflow: CGFloat { max(0, textWidth - containerWidth) }
+
+    /// Scroll only a playing, overflowing row that isn't in Reduce Motion — and
+    /// only once both widths have actually been measured.
+    private var shouldScroll: Bool {
+        isActive && !reduceMotion && containerWidth > 0 && overflow > 2
+    }
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .leading) { textMeasurer }
+            .background { containerMeasurer }
+            .clipped()
+            .onChange(of: shouldScroll) { _, scroll in
+                if scroll { startScrolling() } else { resetScrolling() }
+            }
+            .onAppear { if shouldScroll { startScrolling() } }
+            .onDisappear { scrollTask?.cancel() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if shouldScroll {
+            Text(text)
+                .font(font)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .offset(x: offset)
+        } else {
+            Text(text)
+                .font(font)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    // MARK: Measurement
+
+    /// Hidden full-width copy used only to learn the title's intrinsic width.
+    /// `.fixedSize` lets it take its ideal width behind the visible (clipped)
+    /// content without affecting the row's layout.
+    private var textMeasurer: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .hidden()
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { textWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, w in textWidth = w }
+                }
+            )
+    }
+
+    /// Measures the visible slot so we know when the title overflows it.
+    private var containerMeasurer: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { containerWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, w in containerWidth = w }
+        }
+    }
+
+    // MARK: Animation
+
+    /// Ping-pong the offset: ease to the far end, hold, ease back, hold, repeat.
+    /// Distance is read each lap so rotation / re-measure stays correct.
+    private func startScrolling() {
+        scrollTask?.cancel()
+        offset = 0
+        scrollTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(edgePause))
+            while !Task.isCancelled {
+                let distance = overflow
+                guard distance > 2 else { break }
+                let duration = TimeInterval(distance / speed)
+                withAnimation(.linear(duration: duration)) { offset = -distance }
+                try? await Task.sleep(for: .seconds(duration + edgePause))
+                if Task.isCancelled { break }
+                withAnimation(.linear(duration: duration)) { offset = 0 }
+                try? await Task.sleep(for: .seconds(duration + edgePause))
+            }
+        }
+    }
+
+    private func resetScrolling() {
+        scrollTask?.cancel()
+        scrollTask = nil
+        withAnimation(.easeOut(duration: 0.25)) { offset = 0 }
     }
 }
 

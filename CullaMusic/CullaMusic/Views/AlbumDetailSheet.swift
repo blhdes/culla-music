@@ -234,7 +234,10 @@ private struct AlbumLinerNotesView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!notesCanExpand)
+                // Block the tap once fully expanded without greying the text:
+                // `.disabled` would dim the whole label, `allowsHitTesting`
+                // keeps the note in crisp `.primary` whether compact or open.
+                .allowsHitTesting(notesCanExpand)
             }
             .transition(.opacity)
         }

@@ -482,6 +482,13 @@ private struct MarqueeText: View {
     private let tailPause: TimeInterval = 2.0
     /// Soft cross-fade that hides the instant snap back to the start.
     private let fadeDuration: TimeInterval = 0.25
+    /// A title that spills past the slot by no more than this many characters
+    /// reads as "basically fits": on the playing row we shrink it a hair to show
+    /// the whole thing instead of scrolling a pointless inch to reveal 2–3 chars.
+    private let maxAbsorbableTrailChars: CGFloat = 3
+    /// Floor for that shrink. A tiny trail needs only ~0.85–0.92, so 0.8 just
+    /// bounds pathological cases — the text scales no further than it must to fit.
+    private let trailFitFloor: CGFloat = 0.8
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -501,10 +508,31 @@ private struct MarqueeText: View {
     /// How far the title spills past the visible slot.
     private var overflow: CGFloat { max(0, textWidth - containerWidth) }
 
-    /// Scroll only a playing, overflowing row that isn't in Reduce Motion — and
-    /// only once the slot has actually been measured.
+    /// Width of one character in the row's font. It's monospaced here, so this is
+    /// exact for every glyph — lets us size the "tiny trail" cutoff in characters
+    /// rather than guessing at raw points.
+    private var characterWidth: CGFloat {
+        ("0" as NSString).size(withAttributes: [.font: uiFont]).width
+    }
+
+    /// True when the title overflows by only a few characters — small enough to
+    /// reveal in full by shrinking a hair instead of scrolling.
+    private var trailIsTiny: Bool {
+        overflow > 1 && overflow <= maxAbsorbableTrailChars * characterWidth
+    }
+
+    /// On the playing row, a tiny trail shrinks to fit (full text, no ellipsis,
+    /// no scroll) instead of sliding an inch to reveal 2–3 characters. Static, so
+    /// it's fine under Reduce Motion too.
+    private var shouldShrinkToFit: Bool {
+        isActive && containerWidth > 1 && trailIsTiny
+    }
+
+    /// Scroll only a playing, overflowing row that isn't in Reduce Motion, has
+    /// been measured, and overflows by *more* than a tiny trail (those shrink to
+    /// fit instead of scrolling).
     private var shouldScroll: Bool {
-        isActive && !reduceMotion && containerWidth > 1 && overflow > 1
+        isActive && !reduceMotion && containerWidth > 1 && overflow > 1 && !trailIsTiny
     }
 
     var body: some View {
@@ -515,6 +543,10 @@ private struct MarqueeText: View {
         // can't inflate the slot out from under itself.
         line
             .truncationMode(.tail)
+            // A tiny trail on the playing row scales down just enough to show the
+            // whole title; every other state stays full-size (truncating or
+            // scrolling exactly as before).
+            .minimumScaleFactor(shouldShrinkToFit ? trailFitFloor : 1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .opacity(shouldScroll ? 0 : 1)
             .background { containerMeasurer }

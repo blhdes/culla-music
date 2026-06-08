@@ -109,14 +109,17 @@ private struct AlbumLinerNotesView: View {
 
     private var content: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            // Horizontal padding is applied per-section (matching
+            // `ArtistDetailSheet`) instead of on this outer VStack, so the
+            // tracklist rows can run full-width with edge-aligned hairline
+            // dividers rather than sitting inside an inset floating card.
+            VStack(spacing: 28) {
                 hero
-                sleeveMeta
+                    .padding(.horizontal, 20)
                 editorialSection
                 tracklist
             }
             .padding(.vertical, 24)
-            .padding(.horizontal, 20)
         }
         // The cover diffuses softly under the nav title as it scrolls — the
         // iOS 26 Liquid Glass scroll feel. No-op below iOS 26.
@@ -150,7 +153,7 @@ private struct AlbumLinerNotesView: View {
             // colour (matches the Artist hero's restraint).
             .shadow(color: .black.opacity(album.artwork == nil ? 0.18 : 0.28), radius: 22, y: 12)
 
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 Text(album.title)
                     .font(.system(.title3, design: .rounded).weight(.bold))
                     .multilineTextAlignment(.center)
@@ -158,21 +161,20 @@ private struct AlbumLinerNotesView: View {
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                if let year = releaseYear {
-                    Text(year)
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                }
+                sleeveSmallPrint
+                    .padding(.top, 2)
             }
         }
     }
 
     // MARK: Sleeve small-print
 
-    private var sleeveMeta: some View {
-        let count = tracks.isEmpty ? album.trackCount : tracks.count
-        return VStack(spacing: 4) {
-            Text(countAndRuntimeLine(count: count))
+    /// One tight cluster of sleeve facts sitting directly under the title, so the
+    /// album's identity (year · songs · runtime, then ©) reads as a single unit
+    /// instead of floating in a separate block a section-gap away.
+    private var sleeveSmallPrint: some View {
+        VStack(spacing: 4) {
+            Text(sleeveLine(count: trackCountForDisplay))
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
             // Apple's copyright string usually carries the label too
@@ -239,6 +241,7 @@ private struct AlbumLinerNotesView: View {
                 // keeps the note in crisp `.primary` whether compact or open.
                 .allowsHitTesting(notesCanExpand)
             }
+            .padding(.horizontal, 20)
             .transition(.opacity)
         }
     }
@@ -256,26 +259,35 @@ private struct AlbumLinerNotesView: View {
     @ViewBuilder
     private var tracklist: some View {
         if tracks.isEmpty {
-            Text("Tracklist unavailable.")
-                .font(.system(.footnote, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
+            VStack(spacing: 12) {
+                sectionHeader("Tracklist")
+                Text("Tracklist unavailable.")
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 20)
         } else {
-            VStack(spacing: 0) {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { pair in
-                    let track = pair.element
-                    TrackLinerRow(
-                        track: track,
-                        position: track.trackNumber ?? (pair.offset + 1),
-                        isCurrent: isCurrent(track)
-                    )
-                    if pair.offset < tracks.count - 1 {
-                        Divider().padding(.leading, 16)
+            VStack(spacing: 12) {
+                sectionHeader("Tracklist")
+                    .padding(.horizontal, 20)
+                // Rows sit flush on the sleeve — no floating glass card — with
+                // dividers inset to the title so the page matches the Artist
+                // sheet's Top Songs instead of reading as a separate tile.
+                VStack(spacing: 0) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { pair in
+                        let track = pair.element
+                        TrackLinerRow(
+                            track: track,
+                            position: track.trackNumber ?? (pair.offset + 1),
+                            isCurrent: isCurrent(track)
+                        )
+                        if pair.offset < tracks.count - 1 {
+                            Divider().padding(.leading, 58)
+                        }
                     }
                 }
             }
-            .padding(.vertical, 6)
-            .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
     }
 
@@ -290,11 +302,20 @@ private struct AlbumLinerNotesView: View {
         tracks.reduce(0) { $0 + ($1.duration ?? 0) }
     }
 
-    private func countAndRuntimeLine(count: Int) -> String {
-        let songs = "\(count) \(count == 1 ? "song" : "songs")"
-        let runtime = totalRuntime
-        guard runtime > 0 else { return songs }
-        return "\(songs)  ·  \(formatRuntime(runtime))"
+    /// The real track count once tracks load; the album's advertised count
+    /// meanwhile, so the sleeve line shows a number from the first frame.
+    private var trackCountForDisplay: Int {
+        tracks.isEmpty ? album.trackCount : tracks.count
+    }
+
+    /// One sleeve line of small-print — release year (when known), song count,
+    /// and total runtime — joined by middots, e.g. "2017  ·  12 songs  ·  48:21".
+    private func sleeveLine(count: Int) -> String {
+        var parts: [String] = []
+        if let releaseYear { parts.append(releaseYear) }
+        parts.append("\(count) \(count == 1 ? "song" : "songs")")
+        if totalRuntime > 0 { parts.append(formatRuntime(totalRuntime)) }
+        return parts.joined(separator: "  ·  ")
     }
 
     private func formatRuntime(_ t: TimeInterval) -> String {
@@ -423,7 +444,7 @@ private struct TrackLinerRow: View {
                 // Never let the duration get squeezed — it stays pinned right.
                 .fixedSize()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
     }
@@ -585,12 +606,14 @@ private struct AlbumLoadingView: View {
     private let titleWidths: [CGFloat] = [180, 132, 156, 120, 168, 110]
 
     var body: some View {
-        VStack(spacing: 24) {
+        // Same per-section inset + rhythm as the resolved sheet, so the cover
+        // and rows materialize exactly where they'll live.
+        VStack(spacing: 28) {
             heroPlaceholder
+                .padding(.horizontal, 20)
             tracklistSkeleton
         }
         .padding(.vertical, 24)
-        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -603,33 +626,46 @@ private struct AlbumLoadingView: View {
                         .strokeBorder(.white.opacity(0.12), lineWidth: 1)
                 )
 
-            // The title is known up front, so it renders as finished content —
-            // only the unresolved cover / tracks get the bone treatment.
-            if !title.isEmpty {
-                Text(title)
-                    .font(.system(.title3, design: .rounded).weight(.bold))
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                // The title is known up front, so it renders as finished content
+                // — only the unresolved artist / sleeve line get bones.
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .multilineTextAlignment(.center)
+                }
+                SkeletonShape(shape: Capsule())
+                    .frame(width: 150, height: 11)
+                SkeletonShape(shape: Capsule())
+                    .frame(width: 110, height: 9)
+                    .padding(.top, 2)
             }
-            SkeletonShape(shape: Capsule())
-                .frame(width: 120, height: 10)
         }
     }
 
     private var tracklistSkeleton: some View {
-        VStack(spacing: 0) {
-            ForEach(0..<6, id: \.self) { index in
-                row(index: index)
-                if index < 5 {
-                    Divider().padding(.leading, 16)
+        VStack(spacing: 12) {
+            // Stands in for the "Tracklist" section header.
+            HStack {
+                SkeletonShape(shape: Capsule())
+                    .frame(width: 96, height: 15)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+
+            VStack(spacing: 0) {
+                ForEach(0..<6, id: \.self) { index in
+                    row(index: index)
+                    if index < 5 {
+                        Divider().padding(.leading, 58)
+                    }
                 }
             }
         }
-        .padding(.vertical, 6)
-        .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     /// Mirrors `TrackLinerRow`: 24pt number slot, flexible title, trailing
-    /// duration, 16pt side / 11pt vertical padding — so rows reveal in place.
+    /// duration, 20pt side / 11pt vertical padding — so rows reveal in place.
     private func row(index: Int) -> some View {
         HStack(spacing: 14) {
             SkeletonShape(shape: Capsule())
@@ -641,7 +677,7 @@ private struct AlbumLoadingView: View {
             SkeletonShape(shape: Capsule())
                 .frame(width: 30, height: 11)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.vertical, 11)
     }
 }

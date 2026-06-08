@@ -27,6 +27,19 @@ final class HomeViewModel {
     /// walks from racing when the user flips the toggle in rapid succession.
     private var pendingRecompute: Task<Void, Never>?
 
+    /// UserDefaults keys for the day-scoped count caches. Named once so a read
+    /// site and its matching write site can't drift apart on a typo — a
+    /// mismatch would silently disable the cache and re-walk the whole library
+    /// on every launch.
+    private enum CacheKey {
+        static let libraryDate = "music.libraryCountDate"
+        static let libraryFingerprint = "music.libraryCountFingerprint"
+        static let libraryValue = "music.libraryCountCached"
+        static let unsortedDate = "music.unsortedCountDate"
+        static let unsortedFingerprint = "music.unsortedCountFingerprint"
+        static let unsortedValue = "music.unsortedCountCached"
+    }
+
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
     }
@@ -54,28 +67,30 @@ final class HomeViewModel {
     /// modes need to walk the full library on a cache miss, so we do it in a
     /// single pass and tally each count from the same iteration.
     ///
-    /// Library cache is fingerprinted by Sorted/Dismissed counts + calendar
-    /// day. Unsorted adds the chip toggle to its fingerprint, so flipping the
-    /// toggle invalidates only the unsorted slot — the library cache stays warm.
+    /// Both counts share one fingerprint — Sorted/Dismissed counts + the
+    /// calendar day — and are cached under separate keys because the two
+    /// cached values are different numbers. A change to either snapshot, or a
+    /// new day, invalidates both.
     func recomputeCounts() async {
         let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
         let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
         dismissedCount = dismissedSnapshot
         let today = todayString()
 
+        // One fingerprint, two cache slots (the values differ: library vs unsorted).
+        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
+
         // Library cache.
-        let libraryFingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
-        let libraryCachedDate = UserDefaults.standard.string(forKey: "music.libraryCountDate") ?? ""
-        let libraryCachedFP = UserDefaults.standard.string(forKey: "music.libraryCountFingerprint") ?? ""
-        let libraryCachedValue = UserDefaults.standard.integer(forKey: "music.libraryCountCached")
-        let libraryFresh = (libraryCachedDate == today && libraryCachedFP == libraryFingerprint)
+        let libraryCachedDate = UserDefaults.standard.string(forKey: CacheKey.libraryDate) ?? ""
+        let libraryCachedFP = UserDefaults.standard.string(forKey: CacheKey.libraryFingerprint) ?? ""
+        let libraryCachedValue = UserDefaults.standard.integer(forKey: CacheKey.libraryValue)
+        let libraryFresh = (libraryCachedDate == today && libraryCachedFP == fingerprint)
 
         // Unsorted cache.
-        let unsortedFingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
-        let unsortedCachedDate = UserDefaults.standard.string(forKey: "music.unsortedCountDate") ?? ""
-        let unsortedCachedFP = UserDefaults.standard.string(forKey: "music.unsortedCountFingerprint") ?? ""
-        let unsortedCachedValue = UserDefaults.standard.integer(forKey: "music.unsortedCountCached")
-        let unsortedFresh = (unsortedCachedDate == today && unsortedCachedFP == unsortedFingerprint)
+        let unsortedCachedDate = UserDefaults.standard.string(forKey: CacheKey.unsortedDate) ?? ""
+        let unsortedCachedFP = UserDefaults.standard.string(forKey: CacheKey.unsortedFingerprint) ?? ""
+        let unsortedCachedValue = UserDefaults.standard.integer(forKey: CacheKey.unsortedValue)
+        let unsortedFresh = (unsortedCachedDate == today && unsortedCachedFP == fingerprint)
 
         if libraryFresh { libraryCount = libraryCachedValue }
         if unsortedFresh { unsortedCount = unsortedCachedValue }
@@ -136,15 +151,15 @@ final class HomeViewModel {
 
             if !libraryFresh {
                 libraryCount = libCount
-                UserDefaults.standard.set(libCount, forKey: "music.libraryCountCached")
-                UserDefaults.standard.set(today, forKey: "music.libraryCountDate")
-                UserDefaults.standard.set(libraryFingerprint, forKey: "music.libraryCountFingerprint")
+                UserDefaults.standard.set(libCount, forKey: CacheKey.libraryValue)
+                UserDefaults.standard.set(today, forKey: CacheKey.libraryDate)
+                UserDefaults.standard.set(fingerprint, forKey: CacheKey.libraryFingerprint)
             }
             if !unsortedFresh {
                 unsortedCount = unsCount
-                UserDefaults.standard.set(unsCount, forKey: "music.unsortedCountCached")
-                UserDefaults.standard.set(today, forKey: "music.unsortedCountDate")
-                UserDefaults.standard.set(unsortedFingerprint, forKey: "music.unsortedCountFingerprint")
+                UserDefaults.standard.set(unsCount, forKey: CacheKey.unsortedValue)
+                UserDefaults.standard.set(today, forKey: CacheKey.unsortedDate)
+                UserDefaults.standard.set(fingerprint, forKey: CacheKey.unsortedFingerprint)
             }
         } catch is CancellationError {
             // A newer recompute superseded this one — leave the counts as
@@ -170,14 +185,19 @@ final class HomeViewModel {
         }
     }
 
-    private func todayString() -> String {
+    /// Fixed locale + calendar so the cache key is stable across users with
+    /// Persian/Hebrew/Buddhist calendars or non-Arabic numerals. Built once —
+    /// the format is constant, so there's no reason to reallocate per call.
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        // Fixed locale + calendar so the cache key is stable across users
-        // with Persian/Hebrew/Buddhist calendars or non-Arabic numerals.
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
-        return f.string(from: .now)
+        return f
+    }()
+
+    private func todayString() -> String {
+        Self.dayFormatter.string(from: .now)
     }
 
     private func syncPlaylistsFromAppleMusic() async {

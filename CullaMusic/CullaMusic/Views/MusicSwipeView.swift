@@ -566,25 +566,19 @@ struct MusicSwipeView: View {
             Color(.systemBackground).ignoresSafeArea()
 
             if let current = viewModel.currentSong {
-                let service = MusicLibraryService.shared
-                // "Loaded" = this card's song is the one the player holds, whether
-                // it's actively playing or paused. We feed position/duration for
-                // the whole loaded lifetime so the bar can stay visible (dimmed)
-                // while paused; `isPlaying` alone drives the play/pause icon.
-                let isLoadedSong = service.nowPlayingSongID == current.id.rawValue
-                let isPlayingThis = service.isPlayingPreview && isLoadedSong
-
-                SongCardView(
+                // The front card lives in its own leaf view so the player's
+                // high-frequency `playbackPosition` reads (which tick every
+                // 0.1–0.2s while a preview plays) stay scoped to the card. Read
+                // here, they'd tie all of `MusicSwipeView.body` to the tick and
+                // re-run the sidebar sort + every overlay several times a second.
+                CurrentCardView(
                     song: current,
                     offset: cardOffset,
-                    isPlaying: isPlayingThis,
-                    playbackPosition: isLoadedSong ? service.playbackPosition : 0,
-                    playbackDuration: isLoadedSong ? service.playbackDuration : 0,
                     memberships: viewModel.playlistMemberships(for: current),
                     isLoadingMemberships: viewModel.membershipIndex.showsLoadingPlaceholder,
                     dismissedAt: viewModel.dismissedDate(for: current),
                     onTogglePlay: { viewModel.togglePreview() },
-                    onSeek: { service.seek(to: $0) },
+                    onSeek: { MusicLibraryService.shared.seek(to: $0) },
                     onShowArtist: { artistSheetSong = current },
                     onShowAlbum: { albumSheetSong = current },
                     onScrubbingChanged: { isScrubbing = $0 },
@@ -1021,6 +1015,55 @@ struct MusicSwipeView: View {
                 withAnimation(.easeOut(duration: 0.3)) { showUndo = false }
             }
         }
+    }
+}
+
+// MARK: - Current Card
+
+/// The front (interactive) card. It exists as its own leaf view purely to
+/// contain the `@Observable` `MusicLibraryService` playback reads: those tick
+/// every 0.1–0.2s during preview playback, and if they happened inside
+/// `MusicSwipeView.body` the whole screen would re-render on every tick. Here,
+/// only this view re-evaluates per tick — `MusicSwipeView` re-renders only for
+/// the things that actually change it (drag, song change, membership updates).
+private struct CurrentCardView: View {
+    let song: Song
+    let offset: CGSize
+    let memberships: [Playlist]
+    let isLoadingMemberships: Bool
+    let dismissedAt: Date?
+    let onTogglePlay: () -> Void
+    let onSeek: (TimeInterval) -> Void
+    let onShowArtist: () -> Void
+    let onShowAlbum: () -> Void
+    let onScrubbingChanged: (Bool) -> Void
+    let heroNamespace: Namespace.ID?
+    let chromeRevealed: Bool
+
+    var body: some View {
+        let service = MusicLibraryService.shared
+        // "Loaded" = this card's song is the one the player holds, whether it's
+        // actively playing or paused. We feed position/duration for the whole
+        // loaded lifetime so the bar can stay visible (dimmed) while paused;
+        // `isPlaying` alone drives the play/pause icon.
+        let isLoadedSong = service.nowPlayingSongID == song.id.rawValue
+        SongCardView(
+            song: song,
+            offset: offset,
+            isPlaying: service.isPlayingPreview && isLoadedSong,
+            playbackPosition: isLoadedSong ? service.playbackPosition : 0,
+            playbackDuration: isLoadedSong ? service.playbackDuration : 0,
+            memberships: memberships,
+            isLoadingMemberships: isLoadingMemberships,
+            dismissedAt: dismissedAt,
+            onTogglePlay: onTogglePlay,
+            onSeek: onSeek,
+            onShowArtist: onShowArtist,
+            onShowAlbum: onShowAlbum,
+            onScrubbingChanged: onScrubbingChanged,
+            heroNamespace: heroNamespace,
+            chromeRevealed: chromeRevealed
+        )
     }
 }
 

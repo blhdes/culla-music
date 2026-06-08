@@ -368,7 +368,13 @@ struct HomeArtCarouselView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: coverSpacing) {
                     ForEach(Array(feed.songs.enumerated()), id: \.element.id.rawValue) { idx, song in
-                        coverCard(song: song)
+                        let isCentered = scrollPositionID == song.id.rawValue
+                        CoverCard(
+                            song: song,
+                            isCentered: isCentered,
+                            coverSize: coverSize,
+                            onTap: { handleCoverTap(song: song, isCentered: isCentered) }
+                        )
                             .id(song.id.rawValue)
                             // Side covers shrink + fade; centred cover stays
                             // at full size. `.scrollTransition(.interactive)`
@@ -424,95 +430,6 @@ struct HomeArtCarouselView: View {
                 .foregroundStyle(.white.opacity(0.7))
         }
         .frame(width: coverSize, height: coverSize)
-    }
-
-    // MARK: - Cover
-
-    private func coverCard(song: Song) -> some View {
-        let isCentered = scrollPositionID == song.id.rawValue
-        let isPlayingThis = service.isPlayingPreview
-            && service.nowPlayingSongID == song.id.rawValue
-
-        return Button {
-            handleCoverTap(song: song, isCentered: isCentered)
-        } label: {
-            ZStack {
-                coverArtwork(song: song)
-
-                if isCentered {
-                    if isPlayingThis, service.playbackDuration > 0 {
-                        progressRing
-                    }
-                    playPauseButton(isPlaying: isPlayingThis)
-                }
-            }
-            .frame(width: coverSize, height: coverSize)
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func coverArtwork(song: Song) -> some View {
-        Group {
-            if let artwork = song.artwork {
-                ArtworkImage(artwork, width: coverSize, height: coverSize)
-                    .frame(width: coverSize, height: coverSize)
-            } else {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(.thinMaterial)
-                    .frame(width: coverSize, height: coverSize)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 60))
-                            .foregroundStyle(.secondary)
-                    )
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .strokeBorder(.white.opacity(0.18), lineWidth: 1)
-        )
-    }
-
-    /// Tight progress ring traced around the play/pause button as the preview
-    /// plays. Originally a rounded-rectangle hugging the album's outline, but
-    /// that stroke fell outside the carousel band's frame and got clipped
-    /// top/bottom by the parent. A circle around just the play button stays
-    /// well inside the artwork bounds, reads as part of the control rather
-    /// than a separate decoration, and matches the simpler vocabulary of
-    /// SongCardView's playback chrome.
-    private var progressRing: some View {
-        let progress = min(1.0, max(0, service.playbackPosition / service.playbackDuration))
-        return Circle()
-            .trim(from: 0, to: progress)
-            .stroke(
-                .white.opacity(0.92),
-                style: StrokeStyle(lineWidth: 3, lineCap: .round)
-            )
-            // -90° puts the start of the trim at 12 o'clock so the ring fills
-            // clockwise from the top — the universal "playback progress" idiom.
-            .rotationEffect(.degrees(-90))
-            // Mirrors `playFullSong`'s 0.2s position timer — a hairline
-            // smoothing animation, not a full spring.
-            .animation(.linear(duration: 0.2), value: service.playbackPosition)
-            // Slightly larger than the 62pt play button so the ring sits just
-            // outside its rim with a clean breathing gap.
-            .frame(width: 76, height: 76)
-            .allowsHitTesting(false)
-    }
-
-    /// Frosted glass play/pause disc. Same vocabulary as `SongCardView`'s
-    /// playButton so the carousel and swipe screen feel like one family.
-    private func playPauseButton(isPlaying: Bool) -> some View {
-        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-            .font(.system(size: 26, weight: .bold))
-            .foregroundStyle(.white)
-            .contentTransition(.symbolEffect(.replace))
-            .frame(width: 62, height: 62)
-            .glassSurface(in: Circle(), interactive: true)
-            .background(.black.opacity(0.45), in: Circle())
-            .allowsHitTesting(false)
     }
 
     // MARK: - CTA
@@ -689,5 +606,106 @@ struct HomeArtCarouselView: View {
         scrollPositionID = nil
         feed = nil
         await loadFeedIfNeeded()
+    }
+}
+
+// MARK: - Cover
+
+/// A single carousel cover. It's a leaf view (not a method on the carousel) so
+/// the `@Observable` `MusicLibraryService` playback reads stay scoped here: only
+/// the centred, playing cover reads `playbackPosition` (the property a timer
+/// ticks every 0.1–0.2s), so a progress tick re-renders just that one cover
+/// instead of the whole carousel column. Side/paused covers never touch
+/// `playbackPosition`, so they don't re-render with the ring.
+private struct CoverCard: View {
+    let song: Song
+    let isCentered: Bool
+    let coverSize: CGFloat
+    let onTap: () -> Void
+
+    var body: some View {
+        let service = MusicLibraryService.shared
+        let isPlayingThis = service.isPlayingPreview
+            && service.nowPlayingSongID == song.id.rawValue
+
+        Button(action: onTap) {
+            ZStack {
+                coverArtwork
+
+                if isCentered {
+                    if isPlayingThis, service.playbackDuration > 0 {
+                        progressRing
+                    }
+                    playPauseButton(isPlaying: isPlayingThis)
+                }
+            }
+            .frame(width: coverSize, height: coverSize)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var coverArtwork: some View {
+        Group {
+            if let artwork = song.artwork {
+                ArtworkImage(artwork, width: coverSize, height: coverSize)
+                    .frame(width: coverSize, height: coverSize)
+            } else {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(.thinMaterial)
+                    .frame(width: coverSize, height: coverSize)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    /// Tight progress ring traced around the play/pause button as the preview
+    /// plays. Originally a rounded-rectangle hugging the album's outline, but
+    /// that stroke fell outside the carousel band's frame and got clipped
+    /// top/bottom by the parent. A circle around just the play button stays
+    /// well inside the artwork bounds, reads as part of the control rather
+    /// than a separate decoration, and matches the simpler vocabulary of
+    /// SongCardView's playback chrome.
+    private var progressRing: some View {
+        let service = MusicLibraryService.shared
+        let progress = min(1.0, max(0, service.playbackPosition / service.playbackDuration))
+        return Circle()
+            .trim(from: 0, to: progress)
+            .stroke(
+                .white.opacity(0.92),
+                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+            )
+            // -90° puts the start of the trim at 12 o'clock so the ring fills
+            // clockwise from the top — the universal "playback progress" idiom.
+            .rotationEffect(.degrees(-90))
+            // Mirrors `playFullSong`'s 0.2s position timer — a hairline
+            // smoothing animation, not a full spring.
+            .animation(.linear(duration: 0.2), value: service.playbackPosition)
+            // Slightly larger than the 62pt play button so the ring sits just
+            // outside its rim with a clean breathing gap.
+            .frame(width: 76, height: 76)
+            .allowsHitTesting(false)
+    }
+
+    /// Frosted glass play/pause disc. Same vocabulary as `SongCardView`'s
+    /// playButton so the carousel and swipe screen feel like one family.
+    private func playPauseButton(isPlaying: Bool) -> some View {
+        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 26, weight: .bold))
+            .foregroundStyle(.white)
+            .contentTransition(.symbolEffect(.replace))
+            .frame(width: 62, height: 62)
+            .glassSurface(in: Circle(), interactive: true)
+            .background(.black.opacity(0.45), in: Circle())
+            .allowsHitTesting(false)
     }
 }

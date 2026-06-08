@@ -188,7 +188,13 @@ final class MusicLibraryService {
                 break
             }
 
+            // Track items actually examined so the cursor advances by what we
+            // consumed — NOT the full page. Breaking early on `desired` and then
+            // adding `page.count` would skip the page's unseen tail forever
+            // (with desired < pageSize that drops roughly half the library).
+            var consumed = 0
             for song in page {
+                consumed += 1
                 if let startFromDate,
                    libraryAddDateIsPrefix(song.libraryAddedDate, day: startFromDate, ascending: ascending) {
                     continue   // still in the pre-date prefix — skip past it
@@ -199,8 +205,10 @@ final class MusicLibraryService {
                 }
             }
 
-            pageOffset += page.count
-            if page.count < pageSize { libraryExhausted = true }
+            pageOffset += consumed
+            // Only the genuinely-final page (fully walked AND short) ends the
+            // walk. An early break leaves a tail to resume from next call.
+            if consumed == page.count && page.count < pageSize { libraryExhausted = true }
         }
 
         return collected

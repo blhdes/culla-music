@@ -77,6 +77,13 @@ final class MusicSwipeViewModel {
     private let batchSize: Int = 50
     private let refillThreshold: Int = 10
 
+    /// In-flight background refill. Single-flighted: while one fetch is running
+    /// a fast swipe run keeps calling `advance()` past the threshold, and an
+    /// unguarded refill per swipe would page the *same* service cursor offset
+    /// concurrently — interleaving at the network `await` and appending the same
+    /// songs twice (duplicate cards). Held so a cursor reset can cancel it too.
+    private var refillTask: Task<Void, Never>?
+
     /// Exclusion set for the current session — grows as songs are acted on.
     private var sessionExclusionSet: Set<String> = []
 
@@ -212,6 +219,7 @@ final class MusicSwipeViewModel {
     }
 
     func reload() async {
+        refillTask?.cancel()
         currentSong = nil
         nextSong = nil
         songQueue.removeAll()
@@ -266,6 +274,7 @@ final class MusicSwipeViewModel {
     func jumpTo(startDate date: Date) async {
         guard supportsDateJump else { return }
         startFromDate = date
+        refillTask?.cancel()
         service.stopPreview()
         service.resetLibraryCursor()
         undoCoordinator.clear()
@@ -1061,17 +1070,21 @@ final class MusicSwipeViewModel {
         // Dismissed mode: the deck is finite, no background refill.
         guard config.mode != .dismissed else { return }
 
-        if songQueue.count < refillThreshold {
-            Task { @MainActor in
-                if let more = try? await fetchNextSessionSongs() {
-                    songQueue.append(contentsOf: more)
-                    if currentSong == nil, !songQueue.isEmpty {
-                        currentSong = songQueue.removeFirst()
-                        isEmpty = false
-                    }
-                    if nextSong == nil, !songQueue.isEmpty {
-                        nextSong = songQueue.removeFirst()
-                    }
+        if songQueue.count < refillThreshold, refillTask == nil {
+            refillTask = Task { @MainActor in
+                defer { refillTask = nil }
+                // Guard cancellation after the await: a `reload()`/`jumpTo()`
+                // resets the cursor and queue, so an in-flight fetch that
+                // captured the *old* offset must not append into the new deck.
+                guard let more = try? await fetchNextSessionSongs(),
+                      !Task.isCancelled else { return }
+                songQueue.append(contentsOf: more)
+                if currentSong == nil, !songQueue.isEmpty {
+                    currentSong = songQueue.removeFirst()
+                    isEmpty = false
+                }
+                if nextSong == nil, !songQueue.isEmpty {
+                    nextSong = songQueue.removeFirst()
                 }
             }
         }

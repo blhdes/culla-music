@@ -241,19 +241,10 @@ struct SongCardView: View {
     }
 
     private var playButton: some View {
+        // Shared visual; the swipe card owns the tap via this Button. See
+        // `GlassPlayPauseDisc` for the load-bearing black → glass → icon order.
         Button(action: onTogglePlay) {
-            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 30, weight: .bold))
-                .foregroundStyle(.white)
-                .contentTransition(.symbolEffect(.replace))
-                .frame(width: 72, height: 72)
-                // Order matters: glassSurface applied first sits closer to the
-                // icon; the black scrim applied second lands further back.
-                // Net stack: black → frosted glass → icon, giving a darkened
-                // frosted disk that keeps the white icon readable on any
-                // artwork (bright or dark).
-                .glassSurface(in: Circle(), interactive: true)
-                .background(.black.opacity(0.45), in: Circle())
+            GlassPlayPauseDisc(isPlaying: isPlaying, iconSize: 30, discSize: 72)
         }
         .buttonStyle(.plain)
     }
@@ -262,26 +253,16 @@ struct SongCardView: View {
         useHotPreview && isPlaying && playbackDuration > 0
     }
 
-    /// Circular progress trace around the play disc — only shown for the
-    /// 30s hot-clip path, where the horizontal bar is intentionally hidden.
-    /// Mirrors `HomeArtCarouselView.progressRing` so the swipe screen and
-    /// the carousel feel like one family.
+    /// Circular progress trace around the play disc — only shown for the 30s
+    /// hot-clip path, where the horizontal bar is intentionally hidden. Shares
+    /// `PlaybackProgressRing` with the carousel; `smoothingValue: nil` keeps the
+    /// trim un-animated here (it already updates ~10×/s from the clip observer,
+    /// and an implicit animation would only add a transaction next to the disc).
     private var hotProgressRing: some View {
-        let progress = min(1.0, max(0, playbackPosition / playbackDuration))
-        return Circle()
-            .trim(from: 0, to: progress)
-            .stroke(
-                .white.opacity(0.92),
-                style: StrokeStyle(lineWidth: 3, lineCap: .round)
-            )
-            .rotationEffect(.degrees(-90))
-            // No implicit `.animation(value: playbackPosition)`. The trim
-            // already updates ~10×/s from the clip observer, so stepping it
-            // un-animated is imperceptible on a hairline ring — and an implicit
-            // animation here would only invite another layout transaction next
-            // to the disc.
-            .frame(width: 86, height: 86)
-            .allowsHitTesting(false)
+        PlaybackProgressRing(
+            progress: playbackPosition / playbackDuration,
+            size: 86
+        )
     }
 
     // Gradient scrim → bar reads against any artwork. Clipped to the artwork's

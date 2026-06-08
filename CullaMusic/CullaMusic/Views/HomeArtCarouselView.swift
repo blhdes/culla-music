@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import MusicKit
+import UIKit
 
 /// Fullscreen exploration view reached by tapping the centered cover on
 /// `HomeHeroArtStack`. Shows the same mode's songs as a center-anchored
@@ -60,6 +61,11 @@ struct HomeArtCarouselView: View {
     /// or jumped straight to 4 when reduce-motion is on. Held as @State so
     /// each remount of the carousel plays a fresh entrance.
     @State private var revealStage: Int = 0
+    /// Single-flight latch for the entrance: set synchronously so a second
+    /// `.onAppear` firing inside the choreography's first sleep can't start a
+    /// second run racing the same `revealStage`. Resets with @State on remount,
+    /// so each fresh mount still plays the entrance.
+    @State private var didRunEntrance = false
     /// Presents the date-jump picker sheet.
     @State private var showDatePicker = false
     /// Oldest/newest library-add dates, bounding the picker. Loaded once on
@@ -286,11 +292,19 @@ struct HomeArtCarouselView: View {
     @ViewBuilder
     private func centeredMetadata(for song: Song?) -> some View {
         VStack(spacing: 4) {
-            Text(song?.title ?? " ")
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.center)
-                .lineLimit(1)
+            // Marquee (not lineLimit truncation) — the centred title is the
+            // focal text on this screen, so a long one scrolls to reveal in
+            // full rather than getting cut with "…". `isActive: true` because
+            // there's only ever one centred title and it's always the subject;
+            // `.center` keeps a short title centred under the cover (the shared
+            // component left-aligns by default for the album track row).
+            MarqueeText(
+                text: song?.title ?? " ",
+                uiFont: titleUIFont,
+                color: .primary,
+                isActive: true,
+                alignment: .center
+            )
 
             Text(metadataSubtitle(for: song))
                 .font(.system(.subheadline, design: .rounded))
@@ -301,6 +315,17 @@ struct HomeArtCarouselView: View {
         .contentTransition(.opacity)
         .animation(reduceMotion ? nil : .smooth(duration: 0.32), value: scrollPositionID)
         .frame(maxWidth: .infinity)
+    }
+
+    /// The carousel title's font as a `UIFont` so `MarqueeText` can measure its
+    /// true width. Mirrors `.system(.title3, design: .rounded).weight(.semibold)`:
+    /// the rounded variant of the semibold system font at the current Dynamic
+    /// Type title3 size. Recomputed per read so it tracks text-size changes.
+    private var titleUIFont: UIFont {
+        let size = UIFont.preferredFont(forTextStyle: .title3).pointSize
+        let base = UIFont.systemFont(ofSize: size, weight: .semibold)
+        let descriptor = base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor
+        return UIFont(descriptor: descriptor, size: size)
     }
 
     private var currentCenteredSong: Song? {
@@ -325,7 +350,8 @@ struct HomeArtCarouselView: View {
     /// one settling motion. Reduce-motion jumps straight to the final
     /// state with no animation.
     private func runEntranceChoreography() {
-        guard revealStage == 0 else { return }
+        guard !didRunEntrance else { return }
+        didRunEntrance = true
         guard !reduceMotion else { revealStage = 4; return }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(40))
@@ -365,9 +391,13 @@ struct HomeArtCarouselView: View {
     private func loadedCarousel(feed: CarouselSongFeed) -> some View {
         GeometryReader { geo in
             let sidePadding = max(0, (geo.size.width - coverSize) / 2)
+            // Ids of the last `prefetchDistance` covers — the prefetch trigger.
+            // A small set built once per body, instead of `enumerated()` rebuilding
+            // a tuple array of every loaded song (hundreds) on each scroll tick.
+            let tailIDs = Set(feed.songs.suffix(feed.prefetchDistance).map { $0.id.rawValue })
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: coverSpacing) {
-                    ForEach(Array(feed.songs.enumerated()), id: \.element.id.rawValue) { idx, song in
+                    ForEach(feed.songs, id: \.id.rawValue) { song in
                         let isCentered = scrollPositionID == song.id.rawValue
                         CoverCard(
                             song: song,
@@ -387,8 +417,8 @@ struct HomeArtCarouselView: View {
                                     .opacity(phase.isIdentity ? 1.0 : 0.55)
                             }
                             .onAppear {
-                                // Prefetch when we're near the loaded tail.
-                                if feed.songs.count - idx <= feed.prefetchDistance {
+                                // Prefetch when one of the tail covers appears.
+                                if tailIDs.contains(song.id.rawValue) {
                                     feed.loadMoreIfNeeded()
                                 }
                             }
@@ -633,10 +663,20 @@ private struct CoverCard: View {
                 coverArtwork
 
                 if isCentered {
+                    // Read the ticking `playbackPosition` here, in the leaf, so
+                    // only the centred playing cover re-renders on a progress
+                    // tick. The 76pt ring sits just outside the 62pt disc's rim;
+                    // `smoothingValue` eases the trim between the 0.2s ticks.
                     if isPlayingThis, service.playbackDuration > 0 {
-                        progressRing
+                        PlaybackProgressRing(
+                            progress: service.playbackPosition / service.playbackDuration,
+                            size: 76,
+                            smoothingValue: service.playbackPosition
+                        )
                     }
-                    playPauseButton(isPlaying: isPlayingThis)
+                    // Passive overlay — the cover's own Button owns the tap.
+                    GlassPlayPauseDisc(isPlaying: isPlayingThis, iconSize: 26, discSize: 62)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(width: coverSize, height: coverSize)
@@ -668,44 +708,4 @@ private struct CoverCard: View {
         )
     }
 
-    /// Tight progress ring traced around the play/pause button as the preview
-    /// plays. Originally a rounded-rectangle hugging the album's outline, but
-    /// that stroke fell outside the carousel band's frame and got clipped
-    /// top/bottom by the parent. A circle around just the play button stays
-    /// well inside the artwork bounds, reads as part of the control rather
-    /// than a separate decoration, and matches the simpler vocabulary of
-    /// SongCardView's playback chrome.
-    private var progressRing: some View {
-        let service = MusicLibraryService.shared
-        let progress = min(1.0, max(0, service.playbackPosition / service.playbackDuration))
-        return Circle()
-            .trim(from: 0, to: progress)
-            .stroke(
-                .white.opacity(0.92),
-                style: StrokeStyle(lineWidth: 3, lineCap: .round)
-            )
-            // -90° puts the start of the trim at 12 o'clock so the ring fills
-            // clockwise from the top — the universal "playback progress" idiom.
-            .rotationEffect(.degrees(-90))
-            // Mirrors `playFullSong`'s 0.2s position timer — a hairline
-            // smoothing animation, not a full spring.
-            .animation(.linear(duration: 0.2), value: service.playbackPosition)
-            // Slightly larger than the 62pt play button so the ring sits just
-            // outside its rim with a clean breathing gap.
-            .frame(width: 76, height: 76)
-            .allowsHitTesting(false)
-    }
-
-    /// Frosted glass play/pause disc. Same vocabulary as `SongCardView`'s
-    /// playButton so the carousel and swipe screen feel like one family.
-    private func playPauseButton(isPlaying: Bool) -> some View {
-        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-            .font(.system(size: 26, weight: .bold))
-            .foregroundStyle(.white)
-            .contentTransition(.symbolEffect(.replace))
-            .frame(width: 62, height: 62)
-            .glassSurface(in: Circle(), interactive: true)
-            .background(.black.opacity(0.45), in: Circle())
-            .allowsHitTesting(false)
-    }
 }

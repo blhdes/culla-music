@@ -1,9 +1,15 @@
 import SwiftUI
 
 /// One-time gesture guide, shown the first time the user lands on a populated
-/// swipe deck. Four glass direction chips fan out around a small card token —
-/// the thing being swiped — so the spatial mapping (up = Love, left = Dismiss,
-/// right = Add, down = Share) is taught the way it's performed.
+/// swipe deck. Four glass chips fan out around a small card token — the thing
+/// being swiped — so the spatial mapping (up = Love, left = Dismiss, right =
+/// Add, down = Share) is taught purely by position. Each chip carries the
+/// *meaning* icon (heart, plus, ✕, share) rather than a plain arrow: the
+/// layout already says which way to flick, so the glyph can say what it does.
+///
+/// Deliberately near-wordless — one title, four one-word chips, one button.
+/// The secondary gestures (double-tap, info button) are left to be discovered
+/// so the guide stays a glance, not a manual.
 ///
 /// Sits on an opaque, theme-aware ground so it never reads as part of the deck
 /// behind it. Dismissed by "Got it" or by tapping anywhere; the caller flips
@@ -22,10 +28,9 @@ struct SwipeGuideOverlay: View {
         ZStack {
             ground
 
-            VStack(spacing: 26) {
+            VStack(spacing: 32) {
                 header
                 compass
-                hints
                 cta
             }
             .padding(28)
@@ -64,14 +69,9 @@ struct SwipeGuideOverlay: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 4) {
-            Text("Swipe to sort")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text("Move each song with a flick")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
+        Text("Swipe to sort")
+            .font(.title2.weight(.semibold))
+            .foregroundStyle(.primary)
     }
 
     // MARK: - Compass
@@ -89,16 +89,17 @@ struct SwipeGuideOverlay: View {
     }
 
     private func chip(_ dir: Dir) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: dir.symbol)
-                .font(.subheadline.weight(.bold))
+                .font(.body.weight(.bold))
                 .foregroundStyle(dir.tint(accent))
+                .symbolRenderingMode(.hierarchical)
             Text(dir.label)
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .glassSurface(in: Capsule())
     }
 
@@ -108,25 +109,6 @@ struct SwipeGuideOverlay: View {
             .foregroundStyle(.secondary)
             .frame(width: 56, height: 74)
             .glassSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    // MARK: - Hints
-
-    private var hints: some View {
-        VStack(spacing: 12) {
-            Text("Drag right, then slide up or down to pick the playlist.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 290)
-
-            VStack(spacing: 8) {
-                Label("Double-tap to skip", systemImage: "hand.tap.fill")
-                Label("Tap a card's info button for artist details", systemImage: "info.circle")
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        }
     }
 
     // MARK: - CTA
@@ -145,12 +127,14 @@ struct SwipeGuideOverlay: View {
 private enum Dir {
     case up, down, left, right
 
+    /// The *meaning* glyph, not a direction arrow — position around the card
+    /// already conveys which way to flick, so each icon can describe the action.
     var symbol: String {
         switch self {
-        case .up: "arrow.up"
-        case .down: "arrow.down"
-        case .left: "arrow.left"
-        case .right: "arrow.right"
+        case .up: "heart.fill"
+        case .down: "square.and.arrow.up"
+        case .left: "xmark"
+        case .right: "plus"
         }
     }
 
@@ -159,7 +143,7 @@ private enum Dir {
         case .up: "Love"
         case .down: "Share"
         case .left: "Dismiss"
-        case .right: "Add to playlist"
+        case .right: "Add"
         }
     }
 

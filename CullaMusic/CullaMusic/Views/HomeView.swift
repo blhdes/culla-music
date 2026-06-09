@@ -388,17 +388,28 @@ struct HomeView: View {
                 // shows over the skeleton, and hidden while the carousel it points
                 // to is open.
                 .overlay(alignment: .bottom) {
-                    if !hasSeenHomeHeroHint, heroArtwork != nil, !showCarousel {
-                        CoachTip(icon: "hand.draw", text: "Drag to peek · tap to browse covers") {
-                            withAnimation(.smooth(duration: 0.4)) {
+                    // ZStack + `.animation(value:)` so BOTH directions animate.
+                    // Before, only the dismiss was wrapped in `withAnimation`;
+                    // the *insertion* fired when `heroArtwork` resolved — outside
+                    // any transaction — so the tip popped in with no fade. Driving
+                    // it off a Bool here gives the appear a real spring too.
+                    ZStack {
+                        if showsHeroHint {
+                            CoachTip(icon: "hand.draw", text: "Drag to peek · tap to browse covers") {
                                 hasSeenHomeHeroHint = true
                             }
+                            .padding(.bottom, 6)
+                            // Rise + grow on the way in, sink + shrink on the way
+                            // out — a clearly visible motion, not the old
+                            // near-invisible 0.94 nudge the user couldn't see.
+                            .transition(
+                                .opacity
+                                    .combined(with: .scale(scale: 0.8, anchor: .bottom))
+                                    .combined(with: .offset(y: 14))
+                            )
                         }
-                        .padding(.bottom, 6)
-                        // Dissolve + a small settle downward, rather than a flat
-                        // opacity cut, so the dismissal reads as gentle.
-                        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
                     }
+                    .animation(.spring(response: 0.45, dampingFraction: 0.8), value: showsHeroHint)
                 }
                 .padding(.bottom, 22)
 
@@ -705,6 +716,14 @@ struct HomeView: View {
             return Color(cgColor: cg)
         }
         return appAccent
+    }
+
+    /// Whether the hero's one-time "drag/tap" hint should be on screen. Pulled
+    /// out as a plain `Bool` so the overlay can drive a real fade with
+    /// `.animation(_:value:)` — an `Artwork?` can't be observed there directly,
+    /// which is why the insertion never animated before.
+    private var showsHeroHint: Bool {
+        !hasSeenHomeHeroHint && heroArtwork != nil && !showCarousel
     }
 
     // MARK: - Wordmark

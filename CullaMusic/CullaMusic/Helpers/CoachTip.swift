@@ -5,18 +5,17 @@ import SwiftUI
 /// shows again. Naming the keys here keeps them from drifting across the views
 /// that read them — `MusicSwipeView` and `HomeView` both point at these.
 enum OnboardingFlags {
-    /// First-run gesture guide over a populated swipe deck.
+    /// First-run gesture guide over a populated swipe deck. The guide teaches
+    /// all four swipe directions plus double-tap-to-skip, so it's the only
+    /// swipe-screen tip — no separate double-tap / long-press capsules.
     static let swipeGuide = "hasSeenSwipeGuide"
     /// Home hero "drag to peek / tap to browse" capsule.
     static let homeHeroHint = "hasSeenHomeHeroHint"
-    /// Dismissed-mode long-press cleanup hint. Pre-existing key — kept verbatim
-    /// so any already-stored value still counts as seen.
-    static let dismissedLongPress = "hasSeenDismissedLongPressTip"
 
     /// Every onboarding key, so a debug reset can clear them all in one place.
     /// Add new tips here as well as above.
     static var allKeys: [String] {
-        [swipeGuide, homeHeroHint, dismissedLongPress]
+        [swipeGuide, homeHeroHint]
     }
 }
 

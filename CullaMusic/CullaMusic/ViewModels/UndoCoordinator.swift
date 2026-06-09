@@ -3,8 +3,8 @@ import MusicKit
 
 /// Single source of truth for the swipe-deck undo stack.
 ///
-/// Owns the `actionHistory` array and the `SwipeAction` / `PlaylistRemovalSnapshot`
-/// types it stores. Exposes a small API (`record`, `popLast`, `remove(where:)`,
+/// Owns the `actionHistory` array and the `SwipeAction` type it stores.
+/// Exposes a small API (`record`, `popLast`, `remove(where:)`,
 /// `clear`) so callers can't mutate the history directly — the only way an
 /// action enters or leaves the stack is through this type.
 ///
@@ -42,15 +42,6 @@ final class UndoCoordinator {
 
 // MARK: - Supporting Types
 
-/// Captures a single playlist the song was removed from, plus enough state
-/// to recreate the corresponding `SortedSong` row on undo. `sortedAt` is
-/// nil when the song was only in the Apple Music playlist (added outside
-/// Culla) — undo still re-adds to Apple Music but skips the local row.
-struct PlaylistRemovalSnapshot {
-    let playlist: Playlist
-    let sortedAt: Date?
-}
-
 enum SwipeAction {
     case dismissed(song: Song, record: DismissedSong)
     /// Left-swipe on a song that *already* has a DismissedSong row (resurfaced
@@ -68,14 +59,4 @@ enum SwipeAction {
     /// `originalDismissedAt` lets undo restore the prior dismissed timestamp
     /// so the song goes back where it was, not to "now".
     case lovedFromDismissed(song: Song, playlist: Playlist, record: SortedSong, originalDismissedAt: Date)
-    /// Long-press cleanup sheet in Dismissed mode → "Remove from playlists".
-    /// Strips the song from a user-chosen subset of its Apple Music playlists.
-    /// The `DismissedSong` row is untouched. Undo re-adds the song to each
-    /// playlist and recreates any `SortedSong` rows that previously existed.
-    case removedFromPlaylists(song: Song, removals: [PlaylistRemovalSnapshot])
-    /// Long-press menu in Dismissed mode → "Forget dismissal". Deletes the
-    /// `DismissedSong` row outright. Any `SortedSong` rows are untouched —
-    /// if the song was in playlists it stays there; otherwise it resurfaces
-    /// in Unsorted. Undo recreates the row with its original `dismissedAt`.
-    case forgotDismissal(song: Song, dismissedAt: Date)
 }

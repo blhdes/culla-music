@@ -30,13 +30,9 @@ struct MusicSwipeView: View {
     /// (`viewModel.supportsDateJump`).
     @AppStorage("dateJumpInSession") private var dateJumpEnabled: Bool = false
 
-    /// One-time discovery hint for the long-press cleanup menu. Flips to true
-    /// the first time the user successfully long-presses in Dismissed mode (or
-    /// taps the banner's close button).
-    @AppStorage(OnboardingFlags.dismissedLongPress) private var hasSeenDismissedLongPressTip: Bool = false
-
     /// One-time gesture guide over the deck. Flips to true the first time the
-    /// user lands on a populated swipe session and dismisses the overlay.
+    /// user lands on a populated swipe session and dismisses the overlay. The
+    /// guide itself teaches double-tap-to-skip, so there's no separate tip.
     @AppStorage(OnboardingFlags.swipeGuide) private var hasSeenSwipeGuide: Bool = false
 
     /// The swipe sidebar inherits whatever sort the user picked for the Sidebar
@@ -95,9 +91,6 @@ struct MusicSwipeView: View {
     /// shared payload is the song's Apple Music link, not an image.
     @State private var shareItem: SongShareItem?
 
-    // Destructive long-press menu in Dismissed mode
-    @State private var showRemovalSheet = false
-
     // Date-jump (opt-in) — top-center pill + wheel sheet that re-seeds the deck.
     // `dateSpan` bounds the picker (oldest/newest library add-dates, cached in
     // the service); nil until loaded or when the library exposes no add-dates.
@@ -105,8 +98,6 @@ struct MusicSwipeView: View {
     @State private var showDatePicker = false
     @State private var dateSpan: (oldest: Date, newest: Date)?
     @State private var isJumping = false
-
-    @Environment(\.openURL) private var openURL
 
     // Accent frozen the moment a toast is set, so its icon stays tinted by the
     // song that was just sorted rather than the next card (whose live accent
@@ -134,18 +125,31 @@ struct MusicSwipeView: View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
-            if !viewModel.isLoading {
+            if shouldShowSwipeGuide {
+                // The first-run guide REPLACES the deck rather than layering over
+                // it: while it's up, the heavy card stack isn't built at all, so
+                // the screen never composites the full swipe session AND the guide
+                // at once (that double layer was the on-device lag). The guide
+                // first; on dismiss, the swipe session crossfades in.
+                SwipeGuideOverlay(artwork: viewModel.currentSong?.artwork) {
+                    hasSeenSwipeGuide = true
+                }
+                .transition(.opacity)
+            } else if !viewModel.isLoading {
                 if viewModel.isEmpty {
                     EmptyStateView(onRefresh: { Task { await viewModel.reload() } })
                         .transition(.opacity)
-                } else {
+                } else if !swipeGuidePending {
                     swipeContent
                         .transition(.opacity)
                 }
             }
         }
         .overlay(alignment: .topLeading) {
-            if let onBack {
+            // Hidden while the guide is up — the guide is now primary content
+            // (not an overlay it sits under), so without this the back chevron
+            // would float on top of the focused first-run screen.
+            if let onBack, !shouldShowSwipeGuide {
                 Button {
                     // Cut the preview the instant the user taps back — the
                     // exit spring runs ~0.55s, and `.onDisappear` only fires
@@ -177,25 +181,10 @@ struct MusicSwipeView: View {
                 .zIndex(10)
             }
         }
-        .overlay {
-            // First-run gesture guide. Animation is scoped to this ZStack (not
-            // the whole body) so its fade can't sweep the deck's first-render
-            // settle into the same transaction — that coupling was the cold-launch
-            // jank. Insertion is delayed so it lands a beat after the hero morph;
-            // removal is quicker.
-            ZStack {
-                if shouldShowSwipeGuide {
-                    SwipeGuideOverlay {
-                        hasSeenSwipeGuide = true
-                    }
-                    .transition(.asymmetric(
-                        insertion: .opacity.animation(.easeOut(duration: 0.35).delay(0.25)),
-                        removal: .opacity.animation(.easeOut(duration: 0.25))
-                    ))
-                }
-            }
-            .animation(.easeOut(duration: 0.3), value: shouldShowSwipeGuide)
-        }
+        // Crossfade between the guide and the swipe session (and the
+        // loading/empty states). The guide and deck are mutually-exclusive
+        // branches of the ZStack, so this is a clean single-layer swap.
+        .animation(.easeOut(duration: 0.3), value: shouldShowSwipeGuide)
         .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
         .environment(\.appAccent, effectiveAccent.primary)
@@ -372,22 +361,6 @@ struct MusicSwipeView: View {
             .padding(.bottom, 32)
             .opacity(chromeOpacity)
         }
-        .overlay(alignment: .top) {
-            if shouldShowDismissedLongPressTip {
-                dismissedLongPressTip
-                    .padding(.top, 60)
-                    .padding(.horizontal, 20)
-                    .opacity(chromeOpacity)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-    }
-
-    private var shouldShowDismissedLongPressTip: Bool {
-        viewModel.config.mode == .dismissed
-            && !hasSeenDismissedLongPressTip
-            && !viewModel.isEmpty
-            && !viewModel.isLoading
     }
 
     /// The one-time gesture guide shows once the deck has actually settled on a
@@ -395,28 +368,27 @@ struct MusicSwipeView: View {
     /// something to swipe. Gating on `chromeRevealed` keeps it from flashing over
     /// the hero mid-morph.
     private var shouldShowSwipeGuide: Bool {
-        chromeRevealed
-            && !hasSeenSwipeGuide
+        chromeRevealed && swipeGuidePending
+    }
+
+    /// The guide is owed (first run, real content) but may not have rendered
+    /// yet because it also waits on `chromeRevealed`. We suppress the deck for
+    /// that whole window — not just once the chrome reveals — so the swipe
+    /// session can't flash for a frame before the guide takes the screen.
+    private var swipeGuidePending: Bool {
+        !hasSeenSwipeGuide
             && !viewModel.isEmpty
             && !viewModel.isLoading
     }
 
-    @ViewBuilder
-    private var dismissedLongPressTip: some View {
-        CoachTip(icon: "hand.tap.fill", text: "Long-press a card for cleanup options") {
-            withAnimation(.easeOut(duration: 0.25)) {
-                hasSeenDismissedLongPressTip = true
-            }
-        }
-    }
-
-    /// Card stack with the right gesture set for the current mode. Dismissed
-    /// mode swaps the long-press sidebar preview for a `.contextMenu` so the
-    /// destructive long-press menu can fire without competing with a 0.3s
-    /// LongPressGesture claiming the touch first.
+    /// Card stack with its gestures: double-tap to skip, drag to swipe, and a
+    /// long-press that previews the playlist sidebar. Uniform across every mode
+    /// now — Dismissed mode used to swap this for a cleanup `.contextMenu`, but
+    /// that menu's headline action (remove from playlists) only worked on
+    /// Culla-made playlists, so it was dropped.
     @ViewBuilder
     private var cardStackWithGestures: some View {
-        let base = cardStack
+        cardStack
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
                 flyOff(y: 700) {
@@ -425,136 +397,7 @@ struct MusicSwipeView: View {
                 }
             }
             .highPriorityGesture(dragGesture)
-
-        if viewModel.config.mode == .dismissed {
-            base
-                // `contentShape(.contextMenuPreview, …)` defines the shape iOS
-                // uses for the press-in lift, separately from the view's hit
-                // area. Without it, the lift snapshots the full-bleed
-                // SongCardView (which `.ignoresSafeArea()`s) and clips
-                // against the screen edges. A rounded rect over the whole
-                // card gives a clean card-like silhouette. We can't shrink
-                // it to just the cover — iOS clips the entire source view
-                // to this shape during the press, which would hide the
-                // title/artist/chips for the duration of the hold.
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 28))
-                .contextMenu {
-                    dismissedMenuItems
-                } preview: {
-                    if let current = viewModel.currentSong {
-                        removalPreview(
-                            song: current,
-                            memberships: viewModel.playlistMemberships(for: current)
-                        )
-                    }
-                }
-                .simultaneousGesture(
-                    // Fires alongside the system context menu's own long-press
-                    // recognizer. 0.45s lines up with when the menu actually
-                    // appears, so the heavy impact reads as the menu's own
-                    // opening feedback. Doubles as the signal to retire the
-                    // one-time discoverability tip.
-                    LongPressGesture(minimumDuration: 0.45)
-                        .onEnded { _ in
-                            Haptics.contextMenuOpen()
-                            if !hasSeenDismissedLongPressTip {
-                                withAnimation(.easeOut(duration: 0.3)) {
-                                    hasSeenDismissedLongPressTip = true
-                                }
-                            }
-                        }
-                )
-                .sheet(isPresented: $showRemovalSheet) {
-                    if let current = viewModel.currentSong {
-                        RemoveFromPlaylistsSheet(
-                            song: current,
-                            memberships: viewModel.playlistMemberships(for: current),
-                            onRemove: { selected in
-                                viewModel.removeFromPlaylists(selected)
-                            }
-                        )
-                    }
-                }
-        } else {
-            base.gesture(longPressGesture)
-        }
-    }
-
-    /// Shown above the dismissed-mode context menu so the user can see what
-    /// they're about to act on — the song plus every playlist it lives in —
-    /// before tapping "Remove from all".
-    @ViewBuilder
-    private func removalPreview(song: Song, memberships: [Playlist]) -> some View {
-        VStack(spacing: 14) {
-            if let artwork = song.artwork {
-                ArtworkImage(artwork, width: 140, height: 140)
-                    .frame(width: 140, height: 140)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
-            VStack(spacing: 4) {
-                Text(song.title)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                Text(song.artistName)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            if memberships.isEmpty {
-                Text("Not in any of your playlists")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 6) {
-                    Text("In \(memberships.count) playlist\(memberships.count == 1 ? "" : "s")")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    Text(memberships.map(\.name).joined(separator: " · "))
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                }
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: 320)
-    }
-
-    @ViewBuilder
-    private var dismissedMenuItems: some View {
-        if let current = viewModel.currentSong {
-            let memberships = viewModel.playlistMemberships(for: current)
-            if !memberships.isEmpty {
-                Button(role: .destructive) {
-                    showRemovalSheet = true
-                } label: {
-                    Label(
-                        "Remove from playlists… (\(memberships.count))",
-                        systemImage: "trash"
-                    )
-                }
-            }
-            Button {
-                viewModel.forgetCurrentDismissal()
-            } label: {
-                Label("Forget dismissal", systemImage: "tray.and.arrow.up")
-            }
-            Button {
-                openSongInAppleMusic(current)
-            } label: {
-                Label("Open in Apple Music", systemImage: "arrow.up.right.square")
-            }
-        }
-    }
-
-    private func openSongInAppleMusic(_ song: Song) {
-        if let url = song.url {
-            openURL(url)
-        } else {
-            viewModel.toastKind = .error
-            viewModel.toastMessage = "Couldn't open in Apple Music"
-        }
+            .gesture(longPressGesture)
     }
 
     @ViewBuilder

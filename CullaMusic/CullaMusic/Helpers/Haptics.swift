@@ -9,7 +9,6 @@ enum Haptics {
     static func tap()        { impact(.light)  }
     static func scrubTick()  { selection() }       // scrub start / end
     static func confirm()    { notification(.success) }
-    static func contextMenuOpen() { impact(.heavy) }  // long-press in Dismissed mode
     static func undo()       { selection() }       // undo tap (light tick)
 
     /// Haptics default to ON unless the user explicitly turned them off in

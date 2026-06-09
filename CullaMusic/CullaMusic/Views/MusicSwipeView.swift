@@ -33,7 +33,11 @@ struct MusicSwipeView: View {
     /// One-time discovery hint for the long-press cleanup menu. Flips to true
     /// the first time the user successfully long-presses in Dismissed mode (or
     /// taps the banner's close button).
-    @AppStorage("hasSeenDismissedLongPressTip") private var hasSeenDismissedLongPressTip: Bool = false
+    @AppStorage(OnboardingFlags.dismissedLongPress) private var hasSeenDismissedLongPressTip: Bool = false
+
+    /// One-time gesture guide over the deck. Flips to true the first time the
+    /// user lands on a populated swipe session and dismisses the overlay.
+    @AppStorage(OnboardingFlags.swipeGuide) private var hasSeenSwipeGuide: Bool = false
 
     /// The swipe sidebar inherits whatever sort the user picked for the Sidebar
     /// segment in `ManagePlaylistsSheet` — same `@AppStorage` keys, read here so
@@ -172,6 +176,25 @@ struct MusicSwipeView: View {
                 // any chance the drag gesture claims an edge-case tap first.
                 .zIndex(10)
             }
+        }
+        .overlay {
+            // First-run gesture guide. Animation is scoped to this ZStack (not
+            // the whole body) so its fade can't sweep the deck's first-render
+            // settle into the same transaction — that coupling was the cold-launch
+            // jank. Insertion is delayed so it lands a beat after the hero morph;
+            // removal is quicker.
+            ZStack {
+                if shouldShowSwipeGuide {
+                    SwipeGuideOverlay {
+                        hasSeenSwipeGuide = true
+                    }
+                    .transition(.asymmetric(
+                        insertion: .opacity.animation(.easeOut(duration: 0.35).delay(0.25)),
+                        removal: .opacity.animation(.easeOut(duration: 0.25))
+                    ))
+                }
+            }
+            .animation(.easeOut(duration: 0.3), value: shouldShowSwipeGuide)
         }
         .animation(.easeOut(duration: 0.45), value: viewModel.isLoading)
         .animation(.easeOut(duration: 0.35), value: viewModel.isEmpty)
@@ -367,31 +390,24 @@ struct MusicSwipeView: View {
             && !viewModel.isLoading
     }
 
+    /// The one-time gesture guide shows once the deck has actually settled on a
+    /// card — after the Home→Swipe morph (`chromeRevealed`) and only when there's
+    /// something to swipe. Gating on `chromeRevealed` keeps it from flashing over
+    /// the hero mid-morph.
+    private var shouldShowSwipeGuide: Bool {
+        chromeRevealed
+            && !hasSeenSwipeGuide
+            && !viewModel.isEmpty
+            && !viewModel.isLoading
+    }
+
     @ViewBuilder
     private var dismissedLongPressTip: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "hand.tap.fill")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text("Long-press a card for cleanup options")
-                .font(.footnote)
-                .foregroundStyle(.primary)
-            Button {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    hasSeenDismissedLongPressTip = true
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(4)
-                    .contentShape(Rectangle())
+        CoachTip(icon: "hand.tap.fill", text: "Long-press a card for cleanup options") {
+            withAnimation(.easeOut(duration: 0.25)) {
+                hasSeenDismissedLongPressTip = true
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassSurface(in: Capsule())
     }
 
     /// Card stack with the right gesture set for the current mode. Dismissed

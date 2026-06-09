@@ -21,4 +21,23 @@ enum DebugFlags {
 
     /// ⬇︎ Flip this to `true` to preview the legacy fallback, back to `false` when done.
     private static let previewLegacyUI = false
+
+    // MARK: - Onboarding tips
+
+    /// When `true`, every one-time onboarding flag is cleared at launch, so the
+    /// swipe guide and coach-tips replay — handy for reviewing them on device
+    /// without deleting the app. Stays cleared each launch while the flag is on,
+    /// so the tips show every time until you flip it back to `false`.
+    /// `#if DEBUG`-gated, so it can never reset anything in a Release build.
+    static func resetOnboardingTipsIfRequested() {
+        #if DEBUG
+        guard replayOnboardingTips else { return }
+        for key in OnboardingFlags.allKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        #endif
+    }
+
+    /// ⬇︎ Flip this to `true` to replay the onboarding tips, back to `false` when done.
+    private static let replayOnboardingTips = true
 }

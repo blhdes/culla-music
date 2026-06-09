@@ -346,6 +346,11 @@ struct HomeView: View {
     /// per-card "Dismissed Xmo ago" chip identifies them when they appear.
     @AppStorage("music.includeDismissedInScope") private var includeDismissedInScope: Bool = false
 
+    /// One-time hint under the hero — the fanned covers are draggable (peek
+    /// ahead) and tappable (open the full-screen browser), neither of which is
+    /// obvious from a static-looking stack.
+    @AppStorage(OnboardingFlags.homeHeroHint) private var hasSeenHomeHeroHint: Bool = false
+
     var body: some View {
         ZStack {
             HomeAmbientBackground(tint: ambientTint)
@@ -364,12 +369,37 @@ struct HomeView: View {
                     includeDismissedInScope: includeDismissedInScope,
                     onPrimaryArtworkResolved: { heroArtwork = $0 },
                     onHeroTap: {
+                        // Opening the carousel IS the action the hint points to
+                        // ("tap to browse covers"), so retire the hint here too —
+                        // otherwise it reappears the next time the user lands on
+                        // Home. No animation needed: the `!showCarousel` gate
+                        // already hides it the moment the carousel opens.
+                        hasSeenHomeHeroHint = true
                         withAnimation(.easeInOut(duration: 0.28)) {
                             showCarousel = true
                         }
                     },
                     preferredFrontSongID: lastCenteredCarouselSongID
                 )
+                // One-time discoverability hint for the hero's hidden gestures.
+                // Floated as an overlay (not a row in the VStack) so dismissing it
+                // just fades it out — it never reserved layout space, so the
+                // screen doesn't reflow/jump. Gated on real artwork so it never
+                // shows over the skeleton, and hidden while the carousel it points
+                // to is open.
+                .overlay(alignment: .bottom) {
+                    if !hasSeenHomeHeroHint, heroArtwork != nil, !showCarousel {
+                        CoachTip(icon: "hand.draw", text: "Drag to peek · tap to browse covers") {
+                            withAnimation(.smooth(duration: 0.4)) {
+                                hasSeenHomeHeroHint = true
+                            }
+                        }
+                        .padding(.bottom, 6)
+                        // Dissolve + a small settle downward, rather than a flat
+                        // opacity cut, so the dismissal reads as gentle.
+                        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
+                    }
+                }
                 .padding(.bottom, 22)
 
                 // Mode tiles disappear once a scope is picked — at that point

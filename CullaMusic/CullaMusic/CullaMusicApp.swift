@@ -21,6 +21,10 @@ struct CullaMusicApp: App {
         // Carry saved sorts from the old combined keys to the new
         // (field, direction) pair before any view reads them.
         SortPreferenceMigration.run()
+
+        // DEBUG-only: replay the onboarding tips when the flag is set, before
+        // any view reads the "have they seen this?" flags. No-op in Release.
+        DebugFlags.resetOnboardingTipsIfRequested()
     }
 
     var body: some Scene {

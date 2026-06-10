@@ -39,5 +39,5 @@ enum DebugFlags {
     }
 
     /// ⬇︎ Flip this to `true` to replay the onboarding tips, back to `false` when done.
-    private static let replayOnboardingTips = true
+    private static let replayOnboardingTips = false
 }

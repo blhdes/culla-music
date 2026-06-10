@@ -287,19 +287,6 @@ struct MusicSwipeView: View {
 
     // MARK: - Content
 
-    /// `viewModel.sidebarPlaylists` (the in-sidebar set, in `displayOrder`)
-    /// reordered by the user's saved Sidebar sort. `.sidebarOrder` maps to a nil
-    /// field, so the shared sorter returns that displayOrder untouched.
-    private var orderedSidebarPlaylists: [Playlist] {
-        let field = SidebarSortField(rawValue: sidebarSortFieldRaw) ?? .sidebarOrder
-        return viewModel.sidebarPlaylists.sortedBy(
-            field: field.playlistField,
-            descending: sidebarSortDescending
-        ) {
-            viewModel.membershipIndex.trackCount(forPlaylistAMID: $0.appleMusicPlaylistID) ?? 0
-        }
-    }
-
     @ViewBuilder
     private var swipeContent: some View {
         GeometryReader { geo in
@@ -309,7 +296,12 @@ struct MusicSwipeView: View {
                     HStack(spacing: 0) {
                         Spacer()
                         PlaylistSidebarView(
-                            playlists: orderedSidebarPlaylists,
+                            // Memoized on the VM — this body re-runs on every
+                            // drag tick, so the filter + sorts must not.
+                            playlists: viewModel.orderedSidebarPlaylists(
+                                fieldRaw: sidebarSortFieldRaw,
+                                descending: sidebarSortDescending
+                            ),
                             highlightedID: highlightedID,
                             dragProgress: progress
                         )

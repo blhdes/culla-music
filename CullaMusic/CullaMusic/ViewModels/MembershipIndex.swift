@@ -55,6 +55,12 @@ final class MembershipIndex {
     /// whenever `index` mutates.
     private var countsCache: [String: Int]?
 
+    /// Bumped on every index mutation (anywhere `countsCache` is cleared).
+    /// `MusicSwipeViewModel` keys its memoized sidebar ordering on this, so a
+    /// count-sorted sidebar reorders exactly when counts move — without the
+    /// view re-sorting on every drag frame.
+    private(set) var countsGeneration: Int = 0
+
     private let service: MusicLibraryService
 
     /// Lookup closure that returns the current `playlists` array from the VM.
@@ -87,6 +93,7 @@ final class MembershipIndex {
         index = [:]
         cache.removeAll(keepingCapacity: true)
         countsCache = nil
+        countsGeneration += 1
         hasEverLoaded = false
     }
 
@@ -129,6 +136,7 @@ final class MembershipIndex {
         index = newIndex
         cache.removeAll(keepingCapacity: true)
         countsCache = nil
+        countsGeneration += 1
         hasEverLoaded = true
         schedulePersist()
     }
@@ -143,6 +151,7 @@ final class MembershipIndex {
         }
         cache.removeValue(forKey: songID)
         countsCache = nil
+        countsGeneration += 1
         hasEverLoaded = true
         schedulePersist()
     }
@@ -157,6 +166,7 @@ final class MembershipIndex {
         }
         cache.removeValue(forKey: songID)
         countsCache = nil
+        countsGeneration += 1
         schedulePersist()
     }
 

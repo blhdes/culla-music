@@ -202,59 +202,12 @@ final class HomeViewModel {
 
     private func syncPlaylistsFromAppleMusic() async {
         do {
-            let amPlaylists = try await MusicLibraryService.shared.refreshUserPlaylists()
-            let local = fetchLocalPlaylists()
-            let localByAMID = Dictionary(
-                uniqueKeysWithValues: local.compactMap { playlist -> (String, Playlist)? in
-                    guard let appleMusicPlaylistID = playlist.appleMusicPlaylistID else { return nil }
-                    return (appleMusicPlaylistID, playlist)
-                }
-            )
-            var nextOrder = (local.map(\.displayOrder).max() ?? -1) + 1
-
-            for amPlaylist in amPlaylists {
-                let editable = computeEditability(for: amPlaylist)
-
-                if let existing = localByAMID[amPlaylist.id.rawValue] {
-                    // Editability mirrors Apple's current kind/name every sync —
-                    // no local latch, so it can never get stuck read-only.
-                    existing.isEditable = editable
-                    existing.name = amPlaylist.name
-                } else {
-                    let row = Playlist(
-                        name: amPlaylist.name,
-                        displayOrder: nextOrder,
-                        appleMusicPlaylistID: amPlaylist.id.rawValue,
-                        isEditable: editable
-                    )
-                    modelContext.insert(row)
-                    nextOrder += 1
-                }
-            }
-
-            // Prune local rows whose Apple Music source no longer exists —
-            // without this, playlists deleted from Apple Music stick around
-            // forever in the picker and sidebar. SwiftData cascades the
-            // delete to their SortedSong records, which is correct: that
-            // history is meaningless once the destination playlist is gone.
-            let liveAMIDs = Set(amPlaylists.map { $0.id.rawValue })
-            // Never prune the Loved target. Every up-swipe is a SortedSong on
-            // this playlist, so the cascade delete would erase all loved history.
-            // And `refreshUserPlaylists` legitimately omits it sometimes — Apple's
-            // library is eventually consistent right after we create "Culla Loves",
-            // and the smart "Favorites" playlist is filtered out of that fetch
-            // entirely — so a missing-from-Apple result here is not proof it's gone.
-            let lovedAMID = UserDefaults.standard.string(forKey: LovedPlaylistResolver.defaultsKey)
-            for playlist in local {
-                guard let amID = playlist.appleMusicPlaylistID else { continue }
-                if amID == lovedAMID { continue }
-                if !liveAMIDs.contains(amID) {
-                    modelContext.delete(playlist)
-                }
-            }
-
-            try? modelContext.save()
-            playlists = fetchLocalPlaylists()
+            // Shared routine (PlaylistSyncer) — same sync the swipe session
+            // runs, so Home also demotes playlists that turned read-only and
+            // the session also prunes deleted ones; the two inline copies had
+            // drifted apart. No sidebar seeding here — that decision stays
+            // with the first swipe session, as before.
+            playlists = try await PlaylistSyncer.sync(modelContext: modelContext)
         } catch {
             playlists = fetchLocalPlaylists()
             print("Playlist sync failed: \(error)")
@@ -953,32 +906,61 @@ struct HomeView: View {
         }
     }
 
+    /// Two-state Keep/Move chip, mirroring `orderRow` and `includeDismissedRow`
+    /// so all three scope-time controls share one vocabulary. Replaces the old
+    /// segmented control — the only stock control left on the screen, and a
+    /// full-width band for what is a 2-state flip. Move out removes from the
+    /// source, which Apple only allows on playlists Culla created, so the chip
+    /// is locked to Keep (dimmed, non-tappable) everywhere else; the footer
+    /// line explains why.
     private var sourceTransferPicker: some View {
-        // Move out removes from the source. Apple only allows that on playlists
-        // Culla created, so the toggle is enabled only for those; read-only and
-        // imported / Music-app playlists are forced to Keep.
         let isReadOnly = selectedSourceIsReadOnly
         let canRemove = selectedSourceCanRemove
         let storedMode = SourceTransferMode(rawValue: sourceTransferModeRaw) ?? .copy
         let displayMode: SourceTransferMode = canRemove ? storedMode : .copy
 
         return VStack(spacing: 6) {
-            Picker("Source behavior", selection: Binding(
-                get: { displayMode },
-                set: { sourceTransferModeRaw = $0.rawValue }
-            )) {
-                ForEach(SourceTransferMode.allCases, id: \.self) { mode in
-                    Text(mode.label).tag(mode)
+            HStack(spacing: 8) {
+                Text("Source songs")
+                    .font(.system(.footnote, design: .rounded).weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    let next: SourceTransferMode = displayMode == .copy ? .move : .copy
+                    withAnimation(.snappy(duration: 0.22)) {
+                        sourceTransferModeRaw = next.rawValue
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: displayMode == .copy ? "square.on.square" : "arrow.up.right.square")
+                            .font(.caption.weight(.bold))
+                            .contentTransition(.symbolEffect(.replace))
+                        Text(displayMode.label)
+                            .font(.system(.footnote, design: .rounded).weight(.semibold))
+                            .contentTransition(.opacity)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .contentShape(Capsule())
+                    .glassSurface(in: Capsule(), interactive: true)
+                    // Like the include-dismissed chip, this only exists once a
+                    // playlist source is picked — materialize it as glass.
+                    .glassMorphID("home.transferMode", in: glassMorph)
+                    .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
                 }
+                .buttonStyle(.plain)
+                .disabled(!canRemove)
+                .opacity(canRemove ? 1.0 : 0.45)
             }
-            .pickerStyle(.segmented)
-            .disabled(!canRemove)
 
             Text(transferModeFooter(isReadOnly: isReadOnly, canRemove: canRemove, mode: displayMode))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentTransition(.opacity)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 20)
     }
 
     private func transferModeFooter(isReadOnly: Bool, canRemove: Bool, mode: SourceTransferMode) -> String {

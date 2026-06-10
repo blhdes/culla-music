@@ -37,6 +37,34 @@ final class MusicSwipeViewModel {
     var sidebarCount: Int { sidebarPlaylists.count }
     var canAddToSidebar: Bool { sidebarCount < Self.maxSidebar }
 
+    /// Memo for `orderedSidebarPlaylists(fieldRaw:descending:)`. The swipe
+    /// view's body re-evaluates on every drag tick (its `cardOffset` is
+    /// `@State`), and re-running the sidebar filter + sorts per frame was
+    /// wasted work for a list that only changes on a playlist mutation, a sort
+    /// pref change, or a membership-count change. `@ObservationIgnored` so the
+    /// lazy fill during a body read doesn't register as an observable write.
+    @ObservationIgnored private var sidebarOrderKey: String?
+    @ObservationIgnored private var sidebarOrderValue: [Playlist] = []
+
+    /// The sidebar set ordered by the user's saved Sidebar sort, memoized.
+    /// The key folds in `membershipIndex.countsGeneration` so a count-sorted
+    /// sidebar reorders when counts move; playlist-table changes invalidate
+    /// via `refreshLocalPlaylists`.
+    func orderedSidebarPlaylists(fieldRaw: String, descending: Bool) -> [Playlist] {
+        let key = "\(fieldRaw):\(descending):\(membershipIndex.countsGeneration)"
+        if key == sidebarOrderKey { return sidebarOrderValue }
+        let field = SidebarSortField(rawValue: fieldRaw) ?? .sidebarOrder
+        let ordered = sidebarPlaylists.sortedBy(
+            field: field.playlistField,
+            descending: descending
+        ) {
+            membershipIndex.trackCount(forPlaylistAMID: $0.appleMusicPlaylistID) ?? 0
+        }
+        sidebarOrderKey = key
+        sidebarOrderValue = ordered
+        return ordered
+    }
+
     private(set) var sessionSortedCount: Int = 0
     private(set) var sessionDismissedCount: Int = 0
     private(set) var sessionSkippedCount: Int = 0
@@ -299,56 +327,13 @@ final class MusicSwipeViewModel {
 
     func syncPlaylistsFromAppleMusic() async {
         do {
-            let amPlaylists = try await service.refreshUserPlaylists()
-            let local = fetchLocalPlaylists()
-            let localByAMID = Dictionary(
-                uniqueKeysWithValues: local.compactMap { p -> (String, Playlist)? in
-                    guard let amID = p.appleMusicPlaylistID else { return nil }
-                    return (amID, p)
-                }
+            // Shared routine (PlaylistSyncer) — same sync Home runs at launch,
+            // so this path also prunes playlists deleted in Music and Home also
+            // demotes read-only flips; the two inline copies had drifted apart.
+            try await PlaylistSyncer.sync(
+                modelContext: modelContext,
+                seedSidebarLimit: Self.maxSidebar
             )
-            var nextOrder = (local.map(\.displayOrder).max() ?? -1) + 1
-
-            for amPlaylist in amPlaylists {
-                let amID = amPlaylist.id.rawValue
-                let editable = computeEditability(for: amPlaylist)
-
-                if let existing = localByAMID[amID] {
-                    let wasEditable = existing.isEditable
-                    // Editability mirrors Apple's current kind/name every sync —
-                    // no local latch, so it can never get stuck read-only.
-                    existing.isEditable = editable
-                    existing.name = amPlaylist.name
-
-                    if wasEditable && !editable {
-                        if existing.isInSidebar { existing.isInSidebar = false }
-                        let defaults = UserDefaults.standard
-                        if defaults.string(forKey: LovedPlaylistResolver.defaultsKey) == amID {
-                            defaults.removeObject(forKey: LovedPlaylistResolver.defaultsKey)
-                        }
-                    }
-                } else {
-                    let row = Playlist(
-                        name: amPlaylist.name,
-                        displayOrder: nextOrder,
-                        appleMusicPlaylistID: amID,
-                        isEditable: editable
-                    )
-                    modelContext.insert(row)
-                    nextOrder += 1
-                }
-            }
-            try? modelContext.save()
-
-            let refreshed = fetchLocalPlaylists()
-            // First-launch: auto-select the first few editable playlists for the sidebar.
-            if refreshed.allSatisfy({ !$0.isInSidebar }), !refreshed.isEmpty {
-                for p in refreshed.filter(\.isEditable).prefix(Self.maxSidebar) {
-                    p.isInSidebar = true
-                }
-                try? modelContext.save()
-            }
-
             refreshLocalPlaylists()
         } catch {
             print("syncPlaylistsFromAppleMusic failed: \(error)")
@@ -367,6 +352,7 @@ final class MusicSwipeViewModel {
     private func refreshLocalPlaylists() {
         playlists = fetchLocalPlaylists()
         membershipIndex.invalidateCache()
+        sidebarOrderKey = nil
     }
 
     func setSidebar(_ playlist: Playlist, included: Bool) {

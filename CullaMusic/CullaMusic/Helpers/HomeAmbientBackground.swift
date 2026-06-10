@@ -13,10 +13,18 @@ import UIKit
 struct HomeAmbientBackground: View {
     let tint: Color
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Cached grain texture — generated once on first appearance and reused
     /// as a tile pattern. Regenerating it per frame would burn CPU for no
     /// visible benefit since film grain is supposed to look "frozen."
     @State private var grain: Image?
+
+    /// Breathing cycle length for the glow, in seconds. Deliberately long —
+    /// the motion should be sub-perceptual, something you'd only notice had
+    /// stopped if you stared. Anything faster starts reading as animation,
+    /// which is exactly the lava-lamp feel the old mesh was removed for.
+    private static let breathePeriod: Double = 18
 
     /// Tames the raw `Artwork.backgroundColor` before painting the glow.
     /// Album-art dominant colors swing from "barely a tint" (monochrome
@@ -53,12 +61,22 @@ struct HomeAmbientBackground: View {
                 // wash, not a shape. The overlay can paint outside the Color's
                 // bounds since SwiftUI overlays don't clip by default, so the
                 // wash still bleeds to the safe-area extension below.
-                Circle()
-                    .fill(clampedTint)
-                    .frame(width: 540, height: 540)
-                    .blur(radius: 160)
-                    .opacity(0.30)
-                    .offset(y: -250)
+                //
+                // The wash breathes: opacity 0.27→0.33 and ±3% scale on an
+                // 18-second sine. Under Reduce Motion the timeline freezes
+                // (`minimumInterval: .infinity`) and `t = 0` renders the one
+                // static frame — phase 0 is exactly the old fixed 0.30 glow.
+                TimelineView(.animation(minimumInterval: reduceMotion ? .infinity : 1.0 / 20.0)) { timeline in
+                    let t = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                    let phase = sin(t * 2 * .pi / Self.breathePeriod)
+                    Circle()
+                        .fill(clampedTint)
+                        .frame(width: 540, height: 540)
+                        .blur(radius: 160)
+                        .scaleEffect(1 + 0.03 * phase)
+                        .opacity(0.30 + 0.03 * phase)
+                        .offset(y: -250)
+                }
             }
             .overlay {
                 if let grain {

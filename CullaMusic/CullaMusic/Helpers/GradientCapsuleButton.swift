@@ -37,7 +37,11 @@ struct GradientCapsuleButton: View {
                 Text(title)
                     .font(.system(.headline, design: .rounded).weight(.bold))
             }
-            .foregroundStyle(.white)
+            // Computed contrast foreground, not hardcoded white — the accent
+            // palette includes light swatches (Amber, Rose) where white text
+            // fails contrast. Same helper the selected ModeTile uses, so the
+            // CTA and tiles flip to near-black on the same swatches.
+            .foregroundStyle(appAccent.idealForeground)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .background {

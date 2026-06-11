@@ -228,9 +228,7 @@ struct SettingsView: View {
 
     private var copyrightFooter: some View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         let year = Calendar.current.component(.year, from: Date())
-        let versionText = build.isEmpty ? version : "\(version) (\(build))"
 
         // One quiet line: the wordmark carries a touch of emphasis, the version
         // and copyright trail off in tertiary. Middle dots keep it elegant
@@ -238,7 +236,7 @@ struct SettingsView: View {
         let name = Text("CullaMusic")
             .font(.system(.caption, design: .rounded).weight(.semibold))
             .foregroundStyle(.secondary)
-        let trail = Text("  ·  \(versionText)  ·  © \(String(year))")
+        let trail = Text("  ·  \(version)  ·  © \(String(year))")
             .font(.system(.caption2, design: .rounded))
             .foregroundStyle(.tertiary)
 

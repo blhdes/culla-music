@@ -79,7 +79,7 @@ struct DateJumpControl: View {
         // Override the composed icon/chevron readout with one clear control
         // label; the value carries the anchored date (or the jump state).
         .accessibilityLabel("Jump to a date")
-        .accessibilityValue(isJumping ? "Jumping" : displayDate.formatted(Self.dateLabelStyle))
+        .accessibilityValue(isJumping ? String(localized: "Jumping") : displayDate.formatted(Self.dateLabelStyle))
     }
 }
 

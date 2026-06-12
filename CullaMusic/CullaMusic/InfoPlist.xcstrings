@@ -1,0 +1,72 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "shouldTranslate" : false,
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "CullaMusic"
+          }
+        }
+      }
+    },
+    "NSAppleMusicUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music benötigt Zugriff auf deine Apple Music-Mediathek, damit du Titel per Wisch in Playlists einsortieren kannst."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music needs access to your Apple Music library so you can swipe songs into playlists."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music necesita acceso a tu biblioteca de Apple Music para que puedas deslizar canciones a tus playlists."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music a besoin d'accéder à votre bibliothèque Apple Music pour que vous puissiez classer vos titres dans des playlists d'un balayage."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music ha bisogno di accedere alla tua libreria di Apple Music per permetterti di smistare i brani nelle playlist con uno swipe."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プレイリストへ曲をスワイプで振り分けるために、Culla MusicはApple Musicライブラリへのアクセスを必要とします。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Culla Music precisa de acesso à sua biblioteca do Apple Music para que você possa deslizar músicas para playlists."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Culla Music 需要访问你的 Apple Music 资料库，以便你将歌曲滑动到播放列表中。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

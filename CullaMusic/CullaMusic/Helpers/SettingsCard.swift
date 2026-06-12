@@ -6,7 +6,7 @@ import SwiftUI
 /// app's louder glass vocabulary (Home, ManagePlaylists, ArtistDetail) keeps
 /// using `GlassPanel`.
 struct SettingsCard<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     @ViewBuilder var content: () -> Content
 
     var body: some View {

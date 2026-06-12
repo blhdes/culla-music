@@ -40,7 +40,9 @@ struct SourceScopePickerSheet: View {
         case artists
 
         var id: String { rawValue }
-        var label: String { self == .playlists ? "Playlists" : "Artists" }
+        var label: String {
+            self == .playlists ? String(localized: "Playlists") : String(localized: "Artists")
+        }
     }
 
     var body: some View {
@@ -138,7 +140,7 @@ struct SourceScopePickerSheet: View {
     /// Anchoring the menu here — directly above the rows it reorders — replaces
     /// the old floating chip that sat in a detached band under the segmented
     /// control. `showsSpinner` surfaces the artist-count backfill inline.
-    private func sortHeader(_ title: String, showsSpinner: Bool = false) -> some View {
+    private func sortHeader(_ title: LocalizedStringKey, showsSpinner: Bool = false) -> some View {
         HStack {
             Text(title)
             Spacer()
@@ -177,7 +179,7 @@ struct SourceScopePickerSheet: View {
     /// we don't want it taking the top slot when the user is hunting a name.
     private var showsAllLibraryRow: Bool {
         guard !trimmedQuery.isEmpty else { return true }
-        return "All Library".localizedStandardContains(trimmedQuery)
+        return String(localized: "All Library").localizedStandardContains(trimmedQuery)
     }
 
     private func computeFilteredSortedPlaylists() -> [Playlist] {
@@ -445,9 +447,9 @@ enum PlaylistSortField: String, CaseIterable, Identifiable, SortFieldProtocol {
 
     var label: String {
         switch self {
-        case .alphabetical: "Name"
-        case .modifiedDate: "Date Modified"
-        case .trackCount:   "Song Count"
+        case .alphabetical: String(localized: "Name")
+        case .modifiedDate: String(localized: "Date Modified")
+        case .trackCount:   String(localized: "Song Count")
         }
     }
 
@@ -468,8 +470,8 @@ enum ArtistSortField: String, CaseIterable, Identifiable, SortFieldProtocol {
 
     var label: String {
         switch self {
-        case .alphabetical: "Name"
-        case .trackCount:   "Song Count"
+        case .alphabetical: String(localized: "Name")
+        case .trackCount:   String(localized: "Song Count")
         }
     }
 

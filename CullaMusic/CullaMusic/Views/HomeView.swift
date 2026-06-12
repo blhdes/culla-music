@@ -965,14 +965,14 @@ struct HomeView: View {
 
     private func transferModeFooter(isReadOnly: Bool, canRemove: Bool, mode: SourceTransferMode) -> String {
         if isReadOnly {
-            return "This playlist is read-only — sorted songs stay where they are."
+            return String(localized: "This playlist is read-only — sorted songs stay where they are.")
         }
         if !canRemove {
-            return "Songs can only be moved out of playlists Culla created — they'll stay here."
+            return String(localized: "Songs can only be moved out of playlists Culla created — they'll stay here.")
         }
         return mode == .copy
-            ? "Sorted songs stay in the source playlist too."
-            : "Sorted songs are removed from the source playlist."
+            ? String(localized: "Sorted songs stay in the source playlist too.")
+            : String(localized: "Sorted songs are removed from the source playlist.")
     }
 
     private func count(for mode: ReviewMode) -> Int? {

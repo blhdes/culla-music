@@ -10,7 +10,7 @@ import SwiftUI
 /// bold and opaque so it wins the visual hierarchy. The glass surfaces frame
 /// the *path* to the CTA, not the CTA itself.
 struct GradientCapsuleButton: View {
-    let title: String
+    let title: LocalizedStringKey
     var icon: String? = nil
     var iconEffect: IconEffect = .none
     let action: () -> Void

@@ -235,12 +235,12 @@ private struct HistoryRow: View {
                     SkeletonShape(shape: Capsule()).frame(width: 150, height: 11)
                     SkeletonShape(shape: Capsule()).frame(width: 92, height: 9)
                 } else {
-                    Text(entry.song?.title ?? "Track unavailable")
+                    Text(entry.song?.title ?? String(localized: "Track unavailable"))
                         .font(.system(.subheadline, design: .rounded).weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Text(entry.song?.artistName ?? "No longer in your library")
+                    Text(entry.song?.artistName ?? String(localized: "No longer in your library"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -296,12 +296,12 @@ private struct HistoryRow: View {
         switch entry.movement {
         case .sorted(let playlistName, let loved, _):
             if loved {
-                label(icon: "heart.fill", text: "Loved", color: .pink)
+                label(icon: "heart.fill", text: String(localized: "Loved"), color: .pink)
             } else {
                 label(icon: "text.badge.plus", text: playlistName, color: appAccent)
             }
         case .dismissed:
-            label(icon: "xmark", text: "Dismissed", color: .red)
+            label(icon: "xmark", text: String(localized: "Dismissed"), color: .red)
         }
     }
 

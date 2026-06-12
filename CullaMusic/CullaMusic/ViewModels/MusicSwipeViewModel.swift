@@ -384,7 +384,7 @@ final class MusicSwipeViewModel {
             sessionExclusionSet.insert(songID)
             dismissedStore.set(songID: songID, date: existing.dismissedAt)
             sessionDismissedCount += 1
-            setToast("Dismissed", kind: .dismissed)
+            setToast(String(localized: "Dismissed"), kind: .dismissed)
             advance()
             return
         }
@@ -401,7 +401,7 @@ final class MusicSwipeViewModel {
         if config.isPlaylistSource {
             classifyDismissedTrack(recordID: record.id, song: song)
         }
-        setToast("Dismissed", kind: .dismissed)
+        setToast(String(localized: "Dismissed"), kind: .dismissed)
         advance()
     }
 
@@ -412,14 +412,14 @@ final class MusicSwipeViewModel {
         sessionExclusionSet.insert(song.id.rawValue)
         sessionSkippedCount += 1
         undoCoordinator.record(.skipped(song: song))
-        setToast("Skipped", kind: .skipped)
+        setToast(String(localized: "Skipped"), kind: .skipped)
         advance()
     }
 
     func assignToPlaylist(_ playlist: Playlist) {
         guard let song = currentSong else { return }
         guard let amIDString = playlist.appleMusicPlaylistID else {
-            setToast("Playlist not synced — try again", kind: .error)
+            setToast(String(localized: "Playlist not synced — try again"), kind: .error)
             return
         }
         let amID = MusicItemID(amIDString)
@@ -447,12 +447,12 @@ final class MusicSwipeViewModel {
             ))
             sessionSortedCount += 1
             addMembership(songID: song.id.rawValue, playlistAMID: amID)
-            setToast("Added to \(playlist.name)", kind: .added)
+            setToast(String(localized: "Added to \(playlist.name)"), kind: .added)
             advance()
 
             Task { @MainActor in
                 do { try await service.addSong(song, toPlaylistID: amID) }
-                catch { setToast("Couldn't add to \(playlist.name)", kind: .error) }
+                catch { setToast(String(localized: "Couldn't add to \(playlist.name)"), kind: .error) }
             }
             return
         }
@@ -485,14 +485,14 @@ final class MusicSwipeViewModel {
         sessionExclusionSet.insert(song.id.rawValue)
         sessionSortedCount += 1
         addMembership(songID: song.id.rawValue, playlistAMID: amID)
-        setToast("Added to \(playlist.name)", kind: .added)
+        setToast(String(localized: "Added to \(playlist.name)"), kind: .added)
         advance()
 
         Task { @MainActor in
             do {
                 try await service.addSong(song, toPlaylistID: amID)
             } catch {
-                setToast("Couldn't add to \(playlist.name)", kind: .error)
+                setToast(String(localized: "Couldn't add to \(playlist.name)"), kind: .error)
                 return
             }
             // The add landed. In Move mode we also strip the song from the
@@ -504,8 +504,8 @@ final class MusicSwipeViewModel {
             do {
                 try await removeFromSourceIfNeeded(song: song, destinationPlaylist: playlist)
             } catch {
-                let sourceName = config.sourcePlaylistName ?? "source playlist"
-                setToast("Couldn't remove from \(sourceName)", kind: .error)
+                let sourceName = config.sourcePlaylistName ?? String(localized: "source playlist")
+                setToast(String(localized: "Couldn't remove from \(sourceName)"), kind: .error)
             }
         }
     }
@@ -525,9 +525,9 @@ final class MusicSwipeViewModel {
             modelContext.insert(local)
             try? modelContext.save()
             refreshLocalPlaylists()
-            setToast("Created \(name)", kind: .created)
+            setToast(String(localized: "Created \(name)"), kind: .created)
         } catch {
-            setToast("Couldn't create playlist", kind: .error)
+            setToast(String(localized: "Couldn't create playlist"), kind: .error)
         }
     }
 
@@ -540,7 +540,7 @@ final class MusicSwipeViewModel {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != playlist.name else { return }
         guard let amIDString = playlist.appleMusicPlaylistID else {
-            setToast("Playlist not synced — try again", kind: .error)
+            setToast(String(localized: "Playlist not synced — try again"), kind: .error)
             return
         }
         do {
@@ -548,9 +548,9 @@ final class MusicSwipeViewModel {
             playlist.name = trimmed
             try? modelContext.save()
             refreshLocalPlaylists()
-            setToast("Renamed to \(trimmed)", kind: .renamed)
+            setToast(String(localized: "Renamed to \(trimmed)"), kind: .renamed)
         } catch {
-            setToast("Apple only lets Culla rename playlists it made", kind: .error)
+            setToast(String(localized: "Apple only lets Culla rename playlists it made"), kind: .error)
         }
     }
 
@@ -565,12 +565,12 @@ final class MusicSwipeViewModel {
 
         Task { @MainActor in
             guard let playlist = await lovedResolver.resolveOrCreate() else {
-                setToast("Couldn't open Loved playlist", kind: .error)
+                setToast(String(localized: "Couldn't open Loved playlist"), kind: .error)
                 return
             }
 
             guard let amIDString = playlist.appleMusicPlaylistID else {
-                setToast("Loved playlist not synced — try again", kind: .error)
+                setToast(String(localized: "Loved playlist not synced — try again"), kind: .error)
                 return
             }
             let amID = MusicItemID(amIDString)
@@ -578,7 +578,7 @@ final class MusicSwipeViewModel {
             // Already loved? Skip silently — chip + a toast tell the user.
             let existing = membershipIndex.index[song.id.rawValue] ?? []
             if existing.contains(amID) {
-                setToast("Already loved", kind: .loved)
+                setToast(String(localized: "Already loved"), kind: .loved)
                 advance()
                 return
             }
@@ -613,7 +613,7 @@ final class MusicSwipeViewModel {
             sessionExclusionSet.insert(songID)
             sessionSortedCount += 1
             addMembership(songID: songID, playlistAMID: amID)
-            setToast(originalDismissedAt == nil ? "Loved" : "Loved & restored", kind: .loved)
+            setToast(originalDismissedAt == nil ? String(localized: "Loved") : String(localized: "Loved & restored"), kind: .loved)
             advance()
 
             do {
@@ -639,14 +639,14 @@ final class MusicSwipeViewModel {
                     // editability alone lets the next up-swipe (this session
                     // or next launch) hit the same playlist instead of
                     // creating a fresh duplicate every time.
-                    setToast("Couldn't reach \(playlist.name) — try again", kind: .error)
+                    setToast(String(localized: "Couldn't reach \(playlist.name) — try again"), kind: .error)
                 } else {
                     // A real write failure on a playlist we didn't just create.
                     // Drop the loved-target pointer so the next up-swipe picks a
                     // fresh target; we don't brand it read-only off one failure.
                     let displayName = playlist.name
                     lovedResolver.forgetLovedTarget(playlist)
-                    setToast("Couldn't add to \(displayName)", kind: .error)
+                    setToast(String(localized: "Couldn't add to \(displayName)"), kind: .error)
                 }
             }
         }
@@ -803,7 +803,7 @@ final class MusicSwipeViewModel {
         // error. Skip the doomed call and tell the truth: the song is back in
         // the deck, but it's still in that playlist because we can't pull it.
         guard playlist.createdByApp else {
-            setToast("Undo works only on Culla lists", kind: .info)
+            setToast(String(localized: "Undo works only on Culla lists"), kind: .info)
             return
         }
 
@@ -811,9 +811,9 @@ final class MusicSwipeViewModel {
         Task { @MainActor in
             do {
                 try await service.removeSong(song, fromPlaylistID: amID)
-                setToast("Removed from \(playlist.name)", kind: .removed)
+                setToast(String(localized: "Removed from \(playlist.name)"), kind: .removed)
             } catch {
-                setToast("Couldn't remove from \(playlist.name)", kind: .error)
+                setToast(String(localized: "Couldn't remove from \(playlist.name)"), kind: .error)
             }
         }
     }
@@ -1043,12 +1043,12 @@ final class MusicSwipeViewModel {
               sourcePlaylistID != destinationPlaylist.appleMusicPlaylistID
         else { return }
 
-        let sourceName = config.sourcePlaylistName ?? "source playlist"
+        let sourceName = config.sourcePlaylistName ?? String(localized: "source playlist")
         Task { @MainActor in
             do {
                 try await service.addSong(song, toPlaylistID: MusicItemID(sourcePlaylistID))
             } catch {
-                setToast("Couldn't restore to \(sourceName)", kind: .error)
+                setToast(String(localized: "Couldn't restore to \(sourceName)"), kind: .error)
             }
         }
     }

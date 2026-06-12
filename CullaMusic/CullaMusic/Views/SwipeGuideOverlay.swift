@@ -277,7 +277,7 @@ private enum Dir {
         }
     }
 
-    var label: String {
+    var label: LocalizedStringKey {
         switch self {
         case .up: "Love"
         case .down: "Share"

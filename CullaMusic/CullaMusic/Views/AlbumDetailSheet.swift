@@ -22,7 +22,7 @@ struct AlbumDetailSheet: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle(song.albumTitle ?? "Album")
+                .navigationTitle(song.albumTitle ?? String(localized: "Album"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
@@ -246,7 +246,7 @@ private struct AlbumLinerNotesView: View {
         }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
         HStack {
             Text(title)
                 .font(.system(.headline, design: .rounded).weight(.bold))
@@ -313,7 +313,7 @@ private struct AlbumLinerNotesView: View {
     private func sleeveLine(count: Int) -> String {
         var parts: [String] = []
         if let releaseYear { parts.append(releaseYear) }
-        parts.append("\(count) \(count == 1 ? "song" : "songs")")
+        parts.append(String(localized: "\(count) songs"))
         if totalRuntime > 0 { parts.append(formatRuntime(totalRuntime)) }
         return parts.joined(separator: "  ·  ")
     }
@@ -552,7 +552,7 @@ private struct AlbumUnavailableView: View {
     var body: some View {
         VStack(spacing: 16) {
             HeroIconTile(systemName: "opticaldisc", size: 140, foreground: .secondary)
-            Text(title.isEmpty ? "Album" : title)
+            Text(title.isEmpty ? String(localized: "Album") : title)
                 .font(.system(.title3, design: .rounded).weight(.bold))
                 .multilineTextAlignment(.center)
             Text("No liner notes from Apple Music for this album.")

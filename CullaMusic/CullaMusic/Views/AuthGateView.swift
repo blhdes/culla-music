@@ -48,7 +48,7 @@ struct AuthGateView: View {
                 Spacer(minLength: 0)
 
                 VStack(spacing: 22) {
-                    if !buttonTitle.isEmpty {
+                    if let buttonTitle {
                         GradientCapsuleButton(
                             title: buttonTitle,
                             icon: buttonIcon,
@@ -82,7 +82,7 @@ struct AuthGateView: View {
         }
     }
 
-    private var message: String {
+    private var message: LocalizedStringKey {
         switch status {
         case .notDetermined:
             return "To swipe-sort your songs, CullaMusic needs to read your library and edit your playlists."
@@ -95,12 +95,12 @@ struct AuthGateView: View {
         }
     }
 
-    private var buttonTitle: String {
+    private var buttonTitle: LocalizedStringKey? {
         switch status {
         case .notDetermined:        return "Continue"
         case .denied, .restricted:  return "Open Settings"
-        case .authorized:           return ""
-        @unknown default:           return ""
+        case .authorized:           return nil
+        @unknown default:           return nil
         }
     }
 

@@ -36,9 +36,9 @@ struct SettingsView: View {
 
     private var themeLabel: String {
         switch colorSchemeRaw {
-        case "light": "Light"
-        case "dark":  "Dark"
-        default:      "System"
+        case "light": String(localized: "Light")
+        case "dark":  String(localized: "Dark")
+        default:      String(localized: "System")
         }
     }
 
@@ -130,12 +130,39 @@ struct SettingsView: View {
         SettingsCard(title: "Personal") {
             lovedRow
             rowDivider
+            languageRow
+            rowDivider
             TextField("Your name", text: $authorDisplayName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled(true)
                 .font(.system(.body, design: .rounded))
                 .padding(.vertical, 4)
         }
+    }
+
+    /// Deep-links to the system's per-app language page (Settings → CullaMusic),
+    /// which appears automatically once the app ships ≥2 localizations. iOS
+    /// relaunches the app in the chosen language — no custom picker needed.
+    private var languageRow: some View {
+        Button {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "globe")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(appAccent)
+                Text("Language")
+                    .font(.system(.body, design: .rounded))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Rows
@@ -189,7 +216,7 @@ struct SettingsView: View {
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.primary)
                 Spacer()
-                Text(selectedLovedPlaylist?.name ?? "Auto")
+                Text(selectedLovedPlaylist?.name ?? String(localized: "Auto"))
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -202,7 +229,7 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func menuRowLabel(title: String, value: String) -> some View {
+    private func menuRowLabel(title: LocalizedStringKey, value: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
                 .font(.system(.body, design: .rounded))

@@ -65,17 +65,17 @@ enum ReviewMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .library:   "Library"
-        case .unsorted:  "Unsorted"
-        case .dismissed: "Dismissed"
+        case .library:   String(localized: "Library")
+        case .unsorted:  String(localized: "Unsorted")
+        case .dismissed: String(localized: "Dismissed")
         }
     }
 
     var description: String {
         switch self {
-        case .library:   "Everything"
-        case .unsorted:  "Not in any playlist"
-        case .dismissed: "Previously skipped"
+        case .library:   String(localized: "Everything")
+        case .unsorted:  String(localized: "Not in any playlist")
+        case .dismissed: String(localized: "Previously skipped")
         }
     }
 
@@ -94,8 +94,8 @@ enum SortOrder: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .newestFirst: "Newest first"
-        case .oldestFirst: "Oldest first"
+        case .newestFirst: String(localized: "Newest first")
+        case .oldestFirst: String(localized: "Oldest first")
         }
     }
 
@@ -108,8 +108,8 @@ enum SourceTransferMode: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .copy: "Keep in playlist"
-        case .move: "Move out"
+        case .copy: String(localized: "Keep in playlist")
+        case .move: String(localized: "Move out")
         }
     }
 }

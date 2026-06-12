@@ -114,10 +114,10 @@ struct SortChip<Field: SortFieldProtocol>: View where Field.AllCases: RandomAcce
 
     private var accessibilityValue: String {
         var value = field.defaultDescending != nil
-            ? "\(field.label), \(descending ? "descending" : "ascending")"
+            ? "\(field.label), \(descending ? String(localized: "descending") : String(localized: "ascending"))"
             : field.label
         if selectedFirst?.wrappedValue == true {
-            value += ", selected first"
+            value += String(localized: ", selected first")
         }
         return value
     }

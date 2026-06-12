@@ -65,10 +65,10 @@ enum SidebarSortField: String, CaseIterable, Identifiable, SortFieldProtocol {
 
     var label: String {
         switch self {
-        case .sidebarOrder: "Sidebar Order"
-        case .alphabetical: "Name"
-        case .modifiedDate: "Date Modified"
-        case .trackCount:   "Song Count"
+        case .sidebarOrder: String(localized: "Sidebar Order")
+        case .alphabetical: String(localized: "Name")
+        case .modifiedDate: String(localized: "Date Modified")
+        case .trackCount:   String(localized: "Song Count")
         }
     }
 

@@ -27,7 +27,7 @@ enum OnboardingFlags {
 /// view just renders and reports the close tap via `onClose`.
 struct CoachTip: View {
     let icon: String
-    let text: String
+    let text: LocalizedStringKey
     var onClose: () -> Void
 
     var body: some View {

@@ -78,8 +78,8 @@ struct ManagePlaylistsSheet: View {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .sidebar: "Sidebar"
-            case .filter:  "Filter queue"
+            case .sidebar: String(localized: "Sidebar")
+            case .filter:  String(localized: "Filter queue")
             }
         }
     }
@@ -90,7 +90,9 @@ struct ManagePlaylistsSheet: View {
         case playlists
         case artists
         var id: String { rawValue }
-        var label: String { self == .playlists ? "Playlists" : "Artists" }
+        var label: String {
+            self == .playlists ? String(localized: "Playlists") : String(localized: "Artists")
+        }
         var icon: String { self == .playlists ? "music.note.list" : "music.mic" }
     }
 
@@ -474,7 +476,7 @@ struct ManagePlaylistsSheet: View {
                 selectedFirst: $filterSelectedFirst,
                 showsChip: !filterablePlaylists.isEmpty,
                 hiddenCount: count,
-                noun: "playlist"
+                hiddenLabel: Text("\(count) playlists hidden in Library mode")
             )
         } footer: {
             filterFooter()
@@ -559,7 +561,7 @@ struct ManagePlaylistsSheet: View {
                 selectedFirst: $artistFilterSelectedFirst,
                 showsChip: !artistStore.artists.isEmpty,
                 hiddenCount: count,
-                noun: "artist"
+                hiddenLabel: Text("\(count) artists hidden in Library mode")
             )
         } footer: {
             filterFooter()
@@ -736,7 +738,7 @@ struct ManagePlaylistsSheet: View {
     /// the same way. The chip hides when there's nothing to sort. `countValue`
     /// drives the numeric tick so toggling a row reads as one motion.
     private func sortHeader<Field>(
-        _ title: String,
+        _ title: LocalizedStringKey,
         field: Binding<Field>,
         descending: Binding<Bool>,
         showsChip: Bool,
@@ -803,7 +805,7 @@ struct ManagePlaylistsSheet: View {
         selectedFirst: Binding<Bool>,
         showsChip: Bool,
         hiddenCount: Int,
-        noun: String
+        hiddenLabel: Text
     ) -> some View where Field: SortFieldProtocol, Field.AllCases: RandomAccessCollection {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -817,7 +819,7 @@ struct ManagePlaylistsSheet: View {
             // loading there's nothing to count, so the line stays hidden and the
             // header is just the scope chip.
             if showsChip {
-                Text("\(hiddenCount) \(noun)\(hiddenCount == 1 ? "" : "s") hidden in Library mode")
+                hiddenLabel
                     .monospacedDigit()
                     .contentTransition(.numericText(countsDown: false))
                     .animation(.snappy, value: hiddenCount)
@@ -839,7 +841,7 @@ struct ManagePlaylistsSheet: View {
     /// Native empty state rendered as a clear list row — same vocabulary as
     /// `SourceScopePickerSheet`'s no-results row, replacing the old custom glass
     /// card so the sheet keeps no bespoke surfaces.
-    private func emptyRow(title: String, detail: String, icon: String) -> some View {
+    private func emptyRow(title: LocalizedStringKey, detail: LocalizedStringKey, icon: String) -> some View {
         ContentUnavailableView {
             Label(title, systemImage: icon)
         } description: {

@@ -31,39 +31,39 @@ enum AccentPalette: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .blue:     "Sky"
-        case .coral:    "Coral"
-        case .mint:     "Mint"
-        case .lavender: "Lavender"
-        case .neon:     "Amber"
-        case .rose:     "Rose"
-        case .crimson:  "Crimson"
-        case .plum:     "Plum"
-        case .indigo:   "Indigo"
-        case .ocean:    "Ocean"
-        case .teal:     "Teal"
-        case .emerald:  "Emerald"
-        case .sunset:   "Sunset"
-        case .cobalt:    "Cobalt"
-        case .fuchsia:   "Fuchsia"
-        case .wine:      "Wine"
-        case .mulberry:  "Mulberry"
-        case .grape:     "Grape"
-        case .aubergine: "Aubergine"
-        case .mauve:     "Mauve"
-        case .slate:     "Slate"
-        case .storm:     "Storm"
-        case .forest:    "Forest"
-        case .moss:      "Moss"
-        case .olive:     "Olive"
-        case .rust:      "Rust"
-        case .raspberry: "Raspberry"
-        case .ochre:     "Ochre"
-        case .chartreuse: "Chartreuse"
-        case .aqua:       "Aqua"
-        case .lime:       "Lime"
-        case .tangerine:  "Tangerine"
-        case .flamingo:   "Flamingo"
+        case .blue:     String(localized: "Sky")
+        case .coral:    String(localized: "Coral")
+        case .mint:     String(localized: "Mint")
+        case .lavender: String(localized: "Lavender")
+        case .neon:     String(localized: "Amber")
+        case .rose:     String(localized: "Rose")
+        case .crimson:  String(localized: "Crimson")
+        case .plum:     String(localized: "Plum")
+        case .indigo:   String(localized: "Indigo")
+        case .ocean:    String(localized: "Ocean")
+        case .teal:     String(localized: "Teal")
+        case .emerald:  String(localized: "Emerald")
+        case .sunset:   String(localized: "Sunset")
+        case .cobalt:    String(localized: "Cobalt")
+        case .fuchsia:   String(localized: "Fuchsia")
+        case .wine:      String(localized: "Wine")
+        case .mulberry:  String(localized: "Mulberry")
+        case .grape:     String(localized: "Grape")
+        case .aubergine: String(localized: "Aubergine")
+        case .mauve:     String(localized: "Mauve")
+        case .slate:     String(localized: "Slate")
+        case .storm:     String(localized: "Storm")
+        case .forest:    String(localized: "Forest")
+        case .moss:      String(localized: "Moss")
+        case .olive:     String(localized: "Olive")
+        case .rust:      String(localized: "Rust")
+        case .raspberry: String(localized: "Raspberry")
+        case .ochre:     String(localized: "Ochre")
+        case .chartreuse: String(localized: "Chartreuse")
+        case .aqua:       String(localized: "Aqua")
+        case .lime:       String(localized: "Lime")
+        case .tangerine:  String(localized: "Tangerine")
+        case .flamingo:   String(localized: "Flamingo")
         }
     }
 

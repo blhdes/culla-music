@@ -89,13 +89,13 @@ struct PlaylistMembershipChips: View {
     static func relativeAge(from date: Date) -> String {
         let seconds = max(Date().timeIntervalSince(date), 0)
         let hours = Int(seconds / 3_600)
-        if hours < 1 { return "just now" }
-        if hours < 24 { return "\(hours)h ago" }
+        if hours < 1 { return String(localized: "just now") }
+        if hours < 24 { return String(localized: "\(hours)h ago") }
         let days = hours / 24
-        if days < 7 { return "\(days)d ago" }
-        if days < 30 { return "\(days / 7)w ago" }
-        if days < 365 { return "\(days / 30)mo ago" }
-        return "\(days / 365)y ago"
+        if days < 7 { return String(localized: "\(days)d ago") }
+        if days < 30 { return String(localized: "\(days / 7)w ago") }
+        if days < 365 { return String(localized: "\(days / 30)mo ago") }
+        return String(localized: "\(days / 365)y ago")
     }
 
     @ViewBuilder

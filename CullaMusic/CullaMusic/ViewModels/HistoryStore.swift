@@ -248,11 +248,11 @@ final class HistoryStore {
         switch entry.movement {
         case .dismissed:
             deleteDismissedRow(id: entry.id)
-            toast = "Dismissal undone"
+            toast = String(localized: "Dismissal undone")
 
         case .sorted(let playlistName, let loved, _):
             let removal = deleteSortedRow(id: entry.id)
-            let displayName = loved ? "Loved" : playlistName
+            let displayName = loved ? String(localized: "Loved") : playlistName
 
             // Apple only permits track removal on playlists Culla created
             // (`MusicLibrary.shared.edit` rejects every other library playlist
@@ -262,12 +262,12 @@ final class HistoryStore {
             // false "Couldn't remove" error. Mirrors the swipe-deck undo.
             guard let removal, removal.createdByApp else {
                 toast = removal == nil
-                    ? "Removed from \(displayName)"
-                    : "Undone — still in \(displayName)"
+                    ? String(localized: "Removed from \(displayName)")
+                    : String(localized: "Undone — still in \(displayName)")
                 return
             }
 
-            toast = "Removed from \(displayName)"
+            toast = String(localized: "Removed from \(displayName)")
             // Pull it from the Apple Music playlist too. Needs the resolved
             // Song; if the song is gone from the library we can only delete the
             // local record (the playlist keeps the track, but that's an orphan
@@ -276,7 +276,7 @@ final class HistoryStore {
                 do {
                     try await service.removeSong(song, fromPlaylistID: MusicItemID(removal.amID))
                 } catch {
-                    toast = "Couldn't remove from \(displayName)"
+                    toast = String(localized: "Couldn't remove from \(displayName)")
                 }
             }
         }
@@ -328,8 +328,8 @@ final class HistoryStore {
     }()
 
     private static func sectionTitle(for day: Date, calendar: Calendar) -> String {
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        if calendar.isDateInToday(day) { return String(localized: "Today") }
+        if calendar.isDateInYesterday(day) { return String(localized: "Yesterday") }
         if calendar.isDate(day, equalTo: .now, toGranularity: .year) {
             return sameYearFormatter.string(from: day)
         }

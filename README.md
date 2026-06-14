@@ -56,6 +56,17 @@ On first launch the app asks for Apple Music authorization. Grant it once and th
 
 ---
 
+## Portfolio screenshots
+
+A single dev flag, `cullaScreenshotMode` (top of `Views/PlaylistSidebarView.swift`, default `false`), prepares the app for clean marketing/portfolio shots without risking real data. When `true`:
+
+- the right-drag **sidebar** shows dressed-up sample playlists (genre names + photo covers) instead of your live playlists;
+- the swipe deck is **guarded** so no release can dismiss / love / assign / share — you can frame the shot freely and never lose a song.
+
+The sample covers are referenced by name (`shot_*`) and are **not** bundled. To use them, drop matching images into `Assets.xcassets` (the names live in the `samples` array), flip the flag to `true`, shoot, then flip it back to `false`.
+
+---
+
 ## Project layout
 
 ```

@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// 📸 Portfolio-screenshot toggle.
+///
+/// `false` → the real app: the sidebar renders the user's actual playlists and
+/// the swipe deck behaves normally.
+///
+/// `true`  → screenshot-demo build: the sidebar shows hand-picked, dressed-up
+/// sample playlists (genre names + photo covers) and `MusicSwipeView` blocks
+/// every release from mutating the real library, so you can frame the shot
+/// without losing songs. Requires the `shot_*` images in Assets.xcassets.
+///
+/// Flip this one flag to rebuild the screenshot sidebar in the future.
+let cullaScreenshotMode = false
+
 /// Right-edge panel that splits evenly among the user's selected playlists during a right-drag.
 /// Capped externally — caller passes only the playlists already filtered to sidebar membership.
 struct PlaylistSidebarView: View {
@@ -14,7 +27,9 @@ struct PlaylistSidebarView: View {
 
     var body: some View {
         Group {
-            if playlists.isEmpty {
+            if cullaScreenshotMode {
+                screenshotBody
+            } else if playlists.isEmpty {
                 emptyState
             } else {
                 VStack(spacing: 0) {
@@ -94,6 +109,48 @@ struct PlaylistSidebarView: View {
         .opacity(0.85 + 0.15 * dragProgress)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    // MARK: - Screenshot-demo body (only used when `cullaScreenshotMode` is true)
+
+    private struct SampleRow: Identifiable {
+        let id = UUID()
+        let name: String
+        let genre: String
+        let image: String
+    }
+
+    private let samples: [SampleRow] = [
+        .init(name: "night drive",   genre: "darkwave",        image: "shot_drive"),
+        .init(name: "after hours",   genre: "techno",          image: "shot_festival"),
+        .init(name: "afterglow",     genre: "melodic techno",  image: "shot_golden"),
+        .init(name: "static",        genre: "electronica",     image: "shot_jazz"),
+        .init(name: "slow burn",     genre: "indie rock",      image: "shot_heartbreak"),
+        .init(name: "deep focus",    genre: "minimal",         image: "shot_focus"),
+        .init(name: "beast mode",    genre: "hard rock",       image: "shot_gym"),
+        .init(name: "open road",     genre: "krautrock",       image: "shot_roadtrip"),
+        .init(name: "warehouse",     genre: "acid techno",     image: "shot_coffee"),
+        .init(name: "neon bloom",    genre: "electro",         image: "shot_friday"),
+    ]
+
+    // Index of the row shown in the "drop target" highlighted state.
+    private let highlightedIndex = 2
+
+    private var screenshotBody: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(samples.enumerated()), id: \.element.id) { index, row in
+                SampleSidebarItem(
+                    name: row.name,
+                    genre: row.genre,
+                    image: row.image,
+                    isHighlighted: index == highlightedIndex,
+                    isDragging: isDragging,
+                    dragProgress: dragProgress
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(panelTint)
+    }
 }
 
 // MARK: - Single playlist row
@@ -163,6 +220,86 @@ struct PlaylistSidebarItem: View {
     /// flips. At rest = 0.5; full drag, non-highlighted = 0.7; full drag,
     /// highlighted = 1.0. The previous version stepped 0.5 → 0.7 on the
     /// first millisecond of drag, which read as a small pop.
+    private var textOpacity: Double {
+        let p = Double(max(0, min(1, dragProgress)))
+        let target: Double = isHighlighted ? 1.0 : 0.7
+        return 0.5 + (target - 0.5) * p
+    }
+}
+
+// MARK: - Screenshot-demo row (icon/photo cover + genre — only used in screenshot mode)
+
+private struct SampleSidebarItem: View {
+    let name: String
+    let genre: String
+    let image: String
+    let isHighlighted: Bool
+    let isDragging: Bool
+    let dragProgress: CGFloat
+
+    @Environment(\.appAccent) private var appAccent
+    @Environment(\.appAccentSecondary) private var appAccentSecondary
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(Double(dragProgress))
+
+            LinearGradient(
+                colors: [appAccent, appAccentSecondary ?? appAccent],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .opacity(isHighlighted ? 0.6 : 0)
+
+            Rectangle()
+                .fill(appAccent)
+                .frame(width: 3)
+                .opacity(isHighlighted ? 1.0 : 0.0)
+
+            HStack(spacing: 12) {
+                cover
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.system(.headline, design: .rounded))
+                        .lineLimit(1)
+                    Text(genre)
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                        .foregroundStyle(isHighlighted ? Color.white.opacity(0.85) : .secondary)
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(textColor)
+            .padding(.leading, 16)
+            .padding(.trailing, 12)
+            .opacity(textOpacity)
+            .scaleEffect(isHighlighted ? 1.06 : 1.0, anchor: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isHighlighted)
+        .animation(.easeInOut(duration: 0.2), value: isDragging)
+    }
+
+    private var cover: some View {
+        Image(image)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+    }
+
+    private var textColor: Color {
+        if isHighlighted { return .white }
+        return isDragging ? .primary : .secondary
+    }
+
     private var textOpacity: Double {
         let p = Double(max(0, min(1, dragProgress)))
         let target: Double = isHighlighted ? 1.0 : 0.7

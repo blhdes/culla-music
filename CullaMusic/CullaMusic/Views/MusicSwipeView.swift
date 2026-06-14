@@ -499,6 +499,17 @@ struct MusicSwipeView: View {
     }
 
     private func handleSwipeEnd(_ value: DragGesture.Value) {
+        // Screenshot-demo guard. When `cullaScreenshotMode` (defined in
+        // PlaylistSidebarView.swift) is on, the sidebar shows dressed-up sample
+        // playlists for portfolio shots, so block EVERY release from mutating the
+        // real library (no dismiss / love / assign / share) — the sidebar still
+        // reveals during the drag, the card just snaps back on release. Off by
+        // default, so the real app behaves normally; flip the one flag to reuse.
+        if cullaScreenshotMode {
+            snapBack()
+            return
+        }
+
         let tx = value.translation.width
         let ty = value.translation.height
         let ptx = value.predictedEndTranslation.width

@@ -331,18 +331,19 @@ struct HomeHeroArtStack: View {
 
     // MARK: - Screenshot covers
 
-    /// Fanned deck of code-generated neutral covers, shown when
-    /// `cullaScreenshotMode` is on. Mirrors `realScrubDeck`'s non-empty branch
-    /// (same `ForEach`, `scrubLayout`, `zIndex`, and entrance pulse) so the
-    /// screenshot build is visually indistinguishable from the real hero apart
-    /// from the card art — which here is pure SwiftUI (a gradient + an SF
-    /// Symbol), carrying zero third-party copyright.
+    /// Fanned deck of neutral glass covers, shown when `cullaScreenshotMode`
+    /// is on. Mirrors `realScrubDeck`'s non-empty branch (same `ForEach`,
+    /// `scrubLayout`, `zIndex`, and entrance pulse) so the screenshot build is
+    /// visually indistinguishable from the real hero apart from the card art —
+    /// which here is just Liquid Glass plus a single music glyph, carrying zero
+    /// third-party copyright. Every card is identical on purpose: the point is
+    /// a clean "a track" placeholder, not a stand-in album.
     private var screenshotDeck: some View {
         ZStack {
-            ForEach(Array(Self.screenshotCovers.prefix(deckCapacity).enumerated()), id: \.element.id) { idx, cover in
+            ForEach(0..<deckCapacity, id: \.self) { idx in
                 let layout = scrubLayout(for: idx)
                 scrubCard(layout: layout) {
-                    screenshotCover(cover)
+                    screenshotCover
                 }
                 .zIndex(Double(layout.scale))
             }
@@ -352,40 +353,22 @@ struct HomeHeroArtStack: View {
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }
 
-    /// One neutral cover: a soft diagonal gradient under a single centred music
-    /// glyph. Fills the card frame `scrubCard` applies, so it clips to the same
-    /// rounded silhouette as a real cover.
-    private func screenshotCover(_ cover: ScreenshotCover) -> some View {
-        LinearGradient(
-            colors: cover.colors,
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .overlay {
-            Image(systemName: cover.symbol)
-                .font(.system(size: 54, weight: .light))
-                .foregroundStyle(.white.opacity(0.92))
-                .shadow(color: .black.opacity(0.22), radius: 6, y: 3)
-        }
+    /// One neutral cover: clear Liquid Glass — the app's own `glassSurface`
+    /// (real `glassEffect` on iOS 26, thin material below) — behind a single
+    /// centred `music.note`, the universal "a song" glyph. The card carries no
+    /// colour of its own, so the fan reads as frosted, transparent song
+    /// placeholders that let the ambient glow show through. Fills the card
+    /// frame `scrubCard` applies, so it clips to the same rounded silhouette as
+    /// a real cover.
+    private var screenshotCover: some View {
+        Color.clear
+            .overlay {
+                Image(systemName: "music.note")
+                    .font(.system(size: 50, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            .glassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
-
-    /// A single screenshot cover's recipe — a music glyph over a two-stop
-    /// gradient. Identity is stable (`id` minted once with the static array).
-    private struct ScreenshotCover: Identifiable {
-        let id = UUID()
-        let symbol: String
-        let colors: [Color]
-    }
-
-    /// Built once as a `static let` so the fan isn't reallocated on every body
-    /// pass (the scrub gesture re-evaluates the body at 60Hz).
-    private static let screenshotCovers: [ScreenshotCover] = [
-        .init(symbol: "waveform",            colors: [Color(red: 0.36, green: 0.32, blue: 0.86), Color(red: 0.62, green: 0.35, blue: 0.92)]),
-        .init(symbol: "music.note",          colors: [Color(red: 0.16, green: 0.55, blue: 0.64), Color(red: 0.22, green: 0.42, blue: 0.80)]),
-        .init(symbol: "music.quarternote.3", colors: [Color(red: 0.92, green: 0.43, blue: 0.46), Color(red: 0.96, green: 0.64, blue: 0.36)]),
-        .init(symbol: "pianokeys",           colors: [Color(red: 0.27, green: 0.31, blue: 0.45), Color(red: 0.20, green: 0.63, blue: 0.71)]),
-        .init(symbol: "guitars.fill",        colors: [Color(red: 0.94, green: 0.61, blue: 0.31), Color(red: 0.87, green: 0.34, blue: 0.56)]),
-    ]
 
     // MARK: - Scrub gesture
 

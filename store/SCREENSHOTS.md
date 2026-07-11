@@ -17,11 +17,16 @@ A single 6.9" set covers all smaller iPhones. No iPad set — the app doesn't ta
 
 ## Screenshot mode (before you shoot)
 
+**Why this exists**: Apple rejected earlier screenshots that showed real album artwork
+(**Guideline 5.2.1 — Intellectual Property**). Every shot must avoid third-party album
+art, artist photos, and editorial covers. That's what `cullaScreenshotMode` is for.
+
 Shoot from the **`screenshot-neutral-hero`** branch — it has `cullaScreenshotMode = true`
 (top of `Views/PlaylistSidebarView.swift`) baked in. In this mode:
 
-- the Home hero fan shows **neutral Liquid-Glass covers** with a music-note glyph
-  (no real album art in the hero);
+- the Home hero fan shows **neutral Liquid-Glass covers carrying the Culla brand mark**
+  (full-colour up front, smaller and faded behind — no real album art);
+- tapping the hero is suppressed (the fullscreen carousel would show real covers);
 - the right-drag **sidebar** shows dressed-up sample playlists (genre names) instead of
   your live playlists;
 - the swipe deck is **guarded** — no release can dismiss / love / assign / share, so you
@@ -31,12 +36,14 @@ Shoot from the **`screenshot-neutral-hero`** branch — it has `cullaScreenshotM
 `shot_drive`, `shot_festival`, `shot_golden`, `shot_jazz`, `shot_heartbreak`,
 `shot_focus`, `shot_gym`, `shot_roadtrip`, `shot_coffee`, `shot_friday` — they are
 **not bundled** (dropped in `c6a0136`). Before shooting the swipe shot, drop ten
-square-ish photos with those names into `Assets.xcassets`, or ask me to restyle the
-sidebar covers to the same neutral glass-glyph look as the hero so no photos are needed.
+square-ish photos with those names (your own photos, not album covers) into
+`Assets.xcassets`, or ask me to restyle the sidebar covers to the brand-mark glass
+look so no photos are needed.
 
-⚠️ The swipe card and the fullscreen carousel still show **real album artwork** (only
-the hero fan is neutralized). That's fine for the App Store — screenshots must show the
-actual app — but say the word if you'd rather neutralize those too.
+⚠️ **Still showing real artwork** (screenshot mode does NOT neutralize these yet): the
+swipe card's cover, the History sheet's row thumbnails, the artist hub, and the album
+liner-notes sheet. Shots of those surfaces risk another 5.2.1 rejection until they get
+the same neutral treatment — ask me to extend the mode before shooting them.
 
 Build to your device from this branch, shoot, and archive the store build from `main`.
 
@@ -46,19 +53,26 @@ Build to your device from this branch, shoot, and archive the store build from `
 2. Press **Side button + Volume Up** together → it lands in Photos.
 3. AirDrop / sync to your Mac.
 
-## The 5-shot list
+## The 5-shot list (rights-safe)
 
-1. **Hero — Home** — the mode picker with the hero fan of glass covers, ambient glow
+Chosen to tell five different stories without third-party artwork. ✅ = capturable
+today; 🔧 = needs screenshot mode extended first (small code changes, on request).
+
+1. **Hero — Home** ✅ — the mode picker with the brand-mark hero fan, ambient glow
    behind. First impression of the whole idea. Your most important shot.
-2. **The swipe** — a card mid-drag to the right, sidebar open, one playlist row
+2. **The swipe** 🔧 — a card mid-drag to the right, sidebar open, one playlist row
    highlighted as the drop target, membership chips visible. The core gesture.
-3. **Fullscreen carousel** — the cover carousel with a centred cover playing; shows
-   how you glance ahead and pick a starting song.
-4. **Artist hub** — the artist sheet: top songs, similar artists, the About bio.
-5. **History** — the History sheet with a few sorted / loved / dismissed rows (one
+   *Needs: neutral swipe-card cover + the `shot_*` sidebar images.*
+3. **Swipe up to love** 🔧 — the same card pulled upward toward the Loved drop.
+   Second gesture story, nearly free once shot 2 works.
+4. **History** 🔧 — the History sheet with a few sorted / loved / dismissed rows (one
    mid-swipe showing the undo action, if you can frame it).
+   *Needs: neutral row thumbnails.*
+5. **Settings** ✅ — the accent palette / theme cards open — the "make it yours" shot.
 
-*(Optional 6th: Settings with the accent palette open — "make it yours".)*
+*(The fullscreen carousel and the artist hub photograph beautifully but are built
+around real covers and artist photos — skip them until/unless we neutralize those
+surfaces too.)*
 
 ## Caption copy (overlay text) — optional
 
@@ -66,10 +80,9 @@ One idea per screen, 2–4 words, English only for now:
 
 1. Home → **Your library, by feel.**
 2. Swipe → **Swipe right to playlist.**
-3. Carousel → **Glance ahead.**
-4. Artist hub → **Meet the artist.**
-5. History → **Undo anything.**
-6. (Settings → **Make it yours.**)
+3. Love → **Swipe up to love.**
+4. History → **Undo anything.**
+5. Settings → **Make it yours.**
 
 ### Design notes
 - Same size, weight, and y-position on every shot — reads as one family.

@@ -291,6 +291,14 @@ struct HomeHeroArtStack: View {
         }
     }
 
+    /// Continuous "centre-ness" of a card: 1.0 at the centre slot's scale,
+    /// fading to 0 as the card shrinks toward the side scales. Drives the
+    /// depth shadow in `scrubCard`, and in screenshot mode the brand mark's
+    /// size/strength, so both track the drag the same way.
+    private static func centreness(of layout: ScrubLayout) -> CGFloat {
+        max(0, min(1, (layout.scale - 0.92) / (1.0 - 0.92)))
+    }
+
     /// Shared card chrome around whatever fills a scrub slot — the frame,
     /// rounded clip, hairline border, the layout-driven
     /// scale/rotation/offset/opacity, and the centre-tracking depth shadow.
@@ -301,11 +309,7 @@ struct HomeHeroArtStack: View {
         layout: ScrubLayout,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        // Continuous "centre-ness": 1.0 at the centre slot's scale, fading
-        // to 0 as the card shrinks toward the side scales. Used to scale
-        // the plain depth shadow up as the user drags a new cover into
-        // focus.
-        let centreness = max(0, min(1, (layout.scale - 0.92) / (1.0 - 0.92)))
+        let centreness = Self.centreness(of: layout)
 
         return content()
             .frame(width: size, height: size)
@@ -335,15 +339,16 @@ struct HomeHeroArtStack: View {
     /// is on. Mirrors `realScrubDeck`'s non-empty branch (same `ForEach`,
     /// `scrubLayout`, `zIndex`, and entrance pulse) so the screenshot build is
     /// visually indistinguishable from the real hero apart from the card art —
-    /// which here is just Liquid Glass plus a single music glyph, carrying zero
-    /// third-party copyright. Every card is identical on purpose: the point is
-    /// a clean "a track" placeholder, not a stand-in album.
+    /// which here is Liquid Glass plus the Culla brand mark, carrying zero
+    /// third-party copyright. The mark fades with depth (see
+    /// `screenshotCover`), so the fan reads as a deck rather than one sticker
+    /// repeated five times.
     private var screenshotDeck: some View {
         ZStack {
             ForEach(0..<deckCapacity, id: \.self) { idx in
                 let layout = scrubLayout(for: idx)
                 scrubCard(layout: layout) {
-                    screenshotCover
+                    screenshotCover(centreness: Self.centreness(of: layout))
                 }
                 .zIndex(Double(layout.scale))
             }
@@ -354,18 +359,22 @@ struct HomeHeroArtStack: View {
     }
 
     /// One neutral cover: clear Liquid Glass — the app's own `glassSurface`
-    /// (real `glassEffect` on iOS 26, thin material below) — behind a single
-    /// centred `music.note`, the universal "a song" glyph. The card carries no
-    /// colour of its own, so the fan reads as frosted, transparent song
-    /// placeholders that let the ambient glow show through. Fills the card
-    /// frame `scrubCard` applies, so it clips to the same rounded silhouette as
-    /// a real cover.
-    private var screenshotCover: some View {
+    /// (real `glassEffect` on iOS 26, thin material below) — behind the Culla
+    /// brand mark (`CullaLogo`, the official mark ported from
+    /// `design/app-icon.svg`). The mark rides `centreness`: full-size,
+    /// full-colour, and fully opaque on the centre card, then smaller, paler,
+    /// and desaturated on the cards behind — the same depth cue the real
+    /// deck gets from its shadows, expressed in the mark itself. The card
+    /// still carries no colour of its own, so the ambient glow shows through
+    /// the glass. Fills the card frame `scrubCard` applies, so it clips to
+    /// the same rounded silhouette as a real cover.
+    private func screenshotCover(centreness: CGFloat) -> some View {
         Color.clear
             .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: 50, weight: .light))
-                    .foregroundStyle(.secondary)
+                CullaLogo()
+                    .frame(width: size * (0.38 + 0.12 * centreness))
+                    .saturation(0.25 + 0.75 * Double(centreness))
+                    .opacity(0.55 + 0.45 * Double(centreness))
             }
             .glassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }

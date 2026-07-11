@@ -981,7 +981,7 @@ final class MusicLibraryService {
     /// lives in a different namespace than catalog IDs, so a catalog request
     /// could resolve to an unrelated artist. We only trust a name-matching
     /// result, so a mismatched collision is discarded rather than shown.
-    func loadArtistEditorial(for artist: Artist) async -> String? {
+    func loadArtistEditorial(for artist: Artist) async -> AttributedString? {
         if let notes = artist.editorialNotes, let text = Self.preferredEditorial(notes) {
             return text
         }
@@ -1051,7 +1051,7 @@ final class MusicLibraryService {
     /// namespace than catalog IDs, so feeding it to a catalog request could
     /// resolve to an *unrelated* album. We only trust a result whose title
     /// matches, so a mismatched collision is discarded rather than shown.
-    func loadAlbumEditorial(for album: Album) async -> String? {
+    func loadAlbumEditorial(for album: Album) async -> AttributedString? {
         if let notes = album.editorialNotes, let text = Self.preferredEditorial(notes) {
             return text
         }
@@ -1072,10 +1072,15 @@ final class MusicLibraryService {
 
     /// Prefers the full "standard" editorial note, falling back to the short
     /// one; returns nil when both are empty so the caller can hide the section.
-    private static func preferredEditorial(_ notes: EditorialNotes) -> String? {
+    /// Notes arrive with embedded HTML (`<b>`, `<i>`, entities…), so the pick
+    /// is parsed through `EditorialHTML` — callers get render-ready rich text,
+    /// never raw tags.
+    private static func preferredEditorial(_ notes: EditorialNotes) -> AttributedString? {
         for candidate in [notes.standard, notes.short] {
-            if let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
-                return text
+            if let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty,
+               let parsed = EditorialHTML.attributedString(from: text) {
+                return parsed
             }
         }
         return nil

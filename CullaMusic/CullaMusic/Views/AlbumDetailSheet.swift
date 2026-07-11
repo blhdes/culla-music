@@ -84,7 +84,9 @@ private struct AlbumLinerNotesView: View {
     /// Apple Music editorial blurb — loaded separately from the tracks so it can
     /// fade in once it lands (like the Artist sheet's Wikipedia "About"). Nil
     /// until resolved, and stays nil when the album has no note (section hidden).
-    @State private var editorialText: String?
+    /// Rich text: the service parses the note's embedded HTML into an
+    /// `AttributedString`, so bold/italic render instead of showing raw tags.
+    @State private var editorialText: AttributedString?
     /// First tap expands the clamped note to its full length (one-way). Unlike
     /// the artist bio there's no external article, so a fully-shown note has no
     /// further action.

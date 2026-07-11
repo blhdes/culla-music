@@ -56,6 +56,12 @@ struct MusicSwipeView: View {
 
     // Drag state
     @State private var cardOffset: CGSize = .zero
+    /// Drives the double-tap skip choreography: while true, the current card
+    /// recedes — scales down, drifts a touch, and fades — as if set aside
+    /// behind the deck. Drag swipes never touch this; they keep the
+    /// velocity-continuing `flyOff`. Reset non-animated in the same commit
+    /// that advances the deck, so the incoming card mounts un-receded.
+    @State private var skipRecedes = false
     @State private var highlightedID: UUID?
     @State private var playlistFrames: [UUID: CGRect] = [:]
 
@@ -383,10 +389,7 @@ struct MusicSwipeView: View {
         cardStack
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                flyOff(y: 700) {
-                    viewModel.skipCurrent()
-                    Haptics.skip()
-                }
+                skipWithRecede()
             }
             .highPriorityGesture(dragGesture)
             .gesture(longPressGesture)
@@ -436,9 +439,21 @@ struct MusicSwipeView: View {
                     heroNamespace: heroNamespace,
                     chromeRevealed: chromeRevealed
                 )
+                // Skip recede: the acted-on card sinks behind the deck rather
+                // than flying off. Reduce Motion strips the movement and keeps
+                // only the fade.
+                .scaleEffect(skipRecedes && !reduceMotion ? 0.92 : 1.0)
+                .offset(y: skipRecedes && !reduceMotion ? 20 : 0)
+                .opacity(skipRecedes ? 0 : 1)
                 .id(current.id.rawValue)
                 .transition(.asymmetric(
-                    insertion: .opacity,
+                    // The gentle scale makes every incoming card settle
+                    // *forward* — read as "the next card was waiting beneath".
+                    // Dominated by the offset slide-in on drag swipes; it's the
+                    // whole entrance on a double-tap skip.
+                    insertion: reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.97)),
                     removal: .identity
                 ))
             }
@@ -610,7 +625,45 @@ struct MusicSwipeView: View {
         return point.x >= leftEdge
     }
 
+    /// Double-tap skip choreography. Unlike `flyOff` — whose easeOut continues
+    /// a drag's existing velocity — a skip starts from rest, so launching the
+    /// card off-screen at easeOut's full opening speed read as a teleport.
+    /// Semantically a skip is also the quietest action ("not now"), so instead
+    /// of a fling the card is *set aside*: easeIn recede (accelerating away
+    /// from rest — scale down, slight drift, fade), then the deck advances and
+    /// the next card settles forward via the insertion transition's fade+scale.
+    private func skipWithRecede() {
+        // Freeze the outgoing accent for the toast — same reason as `flyOff`.
+        pendingToastAccent = effectiveAccent.primary
+        // Acknowledge the tap immediately; the old timing (after the fly-off)
+        // made the double-tap feel unregistered for a beat.
+        Haptics.skip()
+        let recedeDuration: Double = reduceMotion ? 0.18 : 0.3
+        withAnimation(.easeIn(duration: recedeDuration)) {
+            skipRecedes = true
+        }
+        // Shares `flyOffTask` with the drag paths so rapid double-taps (or a
+        // tap racing a drag release) coalesce instead of double-advancing.
+        flyOffTask?.cancel()
+        flyOffTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(recedeDuration))
+            guard !Task.isCancelled else { return }
+            highlightedID = nil
+            // Un-recede in the same commit that swaps the card: the outgoing
+            // card is removed instantly (`removal: .identity`) so its reset
+            // never renders, and the incoming card mounts at full strength.
+            resetSkipRecede()
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                viewModel.skipCurrent()
+            }
+            bloomAccentForCurrentCard()
+        }
+    }
+
     private func flyOff(x: CGFloat = 0, y: CGFloat = 0, action: @escaping () -> Void) {
+        // A drag can land while a skip is mid-recede — clear the recede
+        // non-animated so the fling isn't performed by a half-faded card.
+        resetSkipRecede()
         // Freeze the acted-on song's accent right now, while it's still the
         // current card. The toast that `action()` raises lands a beat later as
         // the next card slides in — by then `dynamicAccent` has bloomed to the
@@ -654,10 +707,22 @@ struct MusicSwipeView: View {
     }
 
     private func snapBack() {
+        resetSkipRecede()
         withAnimation(.interpolatingSpring(stiffness: 150, damping: 15)) {
             cardOffset = .zero
         }
         highlightedID = nil
+    }
+
+    /// Non-animated recede reset for the drag paths — clears a mid-flight
+    /// skip's visual state without rendering the card "un-receding".
+    private func resetSkipRecede() {
+        guard skipRecedes else { return }
+        var staging = Transaction()
+        staging.disablesAnimations = true
+        withTransaction(staging) {
+            skipRecedes = false
+        }
     }
 
     // MARK: - Share

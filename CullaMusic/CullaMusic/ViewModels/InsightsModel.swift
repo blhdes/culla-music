@@ -12,6 +12,9 @@ final class InsightsModel {
     struct ArtistCount: Identifiable {
         let name: String
         let count: Int
+        /// The artist-page portrait, filled by `loadTopArtists` when the name
+        /// resolves to a catalog artist; nil → the view shows an initial circle.
+        var artwork: Artwork?
         var id: String { name }
     }
 
@@ -127,7 +130,7 @@ final class InsightsModel {
                 guard let song = byID[id] else { continue }
                 counts[song.artistName, default: 0] += 1
             }
-            topArtists = Array(
+            var ranked = Array(
                 counts
                     .map { ArtistCount(name: $0.key, count: $0.value) }
                     .sorted { lhs, rhs in
@@ -136,6 +139,17 @@ final class InsightsModel {
                     }
                     .prefix(3)
             )
+            // Attach portraits via the same resolver the Artist hub uses
+            // (exact-name catalog match, "Various Artists" guarded), so the
+            // face here always matches the artist page a lookup would open.
+            // The resolver wants a Song, so any resolved song by the artist
+            // seeds it; a miss just leaves the initial-letter fallback.
+            for index in ranked.indices {
+                let name = ranked[index].name
+                guard let seed = songs.first(where: { $0.artistName == name }) else { continue }
+                ranked[index].artwork = (try? await service.resolveArtist(for: seed))?.artwork
+            }
+            topArtists = ranked
         } catch {
             print("InsightsModel.loadTopArtists failed: \(error)")
             topArtists = []

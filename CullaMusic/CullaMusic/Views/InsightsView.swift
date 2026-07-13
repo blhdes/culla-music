@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Charts
+import MusicKit
 
 /// Full-screen stats view opened from Settings — the music sibling of the
 /// photo app's Insights. Everything except Top Artists is computed live from
@@ -302,16 +303,37 @@ struct InsightsView: View {
                                 .font(.system(.body, design: .rounded))
                                 .lineLimit(1)
                             Spacer(minLength: 8)
+                            artistAvatar(artist)
                             Text("\(artist.count)")
                                 .font(.system(.body, design: .rounded).weight(.medium))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 6)
                     }
                 }
             }
         }
+    }
+
+    /// Round artist-page portrait sitting just before the count. The initial
+    /// circle is layered *behind* `ArtworkImage` rather than swapped with it
+    /// (`ArtworkImage` is transparent while it loads — see the same pattern in
+    /// ManagePlaylistsSheet), and it doubles as the fallback for artists that
+    /// never resolved to a catalog page, keeping the count column aligned.
+    private func artistAvatar(_ artist: InsightsModel.ArtistCount) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.primary.opacity(0.08))
+            Text(artist.name.prefix(1).uppercased())
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let artwork = artist.artwork {
+                ArtworkImage(artwork, width: 28, height: 28)
+                    .clipShape(Circle())
+            }
+        }
+        .frame(width: 28, height: 28)
     }
 
     // MARK: - Details

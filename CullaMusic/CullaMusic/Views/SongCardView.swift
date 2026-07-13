@@ -26,24 +26,26 @@ struct SongCardView: View {
     /// the user moves through the song, so a horizontal scrub never doubles as
     /// a dismiss/assign swipe. Only wired on the front card.
     var onScrubbingChanged: ((Bool) -> Void)? = nil
-    /// Hero-morph namespace shared with Home's "Start Cullaing" button. Only
-    /// the front (current) card receives it; the preloaded next card omits it
-    /// so SwiftUI never sees two simultaneous sources for `heroStart`.
-    var heroNamespace: Namespace.ID? = nil
-    /// Gates the play-button overlay so it only appears once the artwork has
-    /// finished its hero morph from "Start Cullaing". `.overlay` aligns to the
-    /// view's *layout* frame, so without this the play button snaps to the
-    /// final center position immediately while the cover is still morphing
-    /// — making the button look unanchored from the cover during entry.
+    /// Gates the play-button reveal so it appears as a consequence of the
+    /// session-entry crossfade landing (driven from `RootView` via
+    /// `withAnimation(completion:)`) rather than popping in with the card.
     var chromeRevealed: Bool = true
-    /// True while a double-tap skip is fading this card out. Drives the
-    /// artwork-tile recede: the cover — the one element with a visible
-    /// boundary (rounded corners + shadow) — shrinks in place while the text
-    /// and controls only fade, holding their standing positions. Whole-card
-    /// geometry moves read as element drift on this full-screen layout, so
-    /// the recede is scoped to the tile (see `MusicSwipeView.skipFadesOut`).
-    /// Only wired on the front card; inert under Reduce Motion.
-    var skipReceding: Bool = false
+    /// True while this card is being set aside — a double-tap skip or the
+    /// session's back-button exit. Drives the artwork-tile recede: the cover —
+    /// the one element with a visible boundary (rounded corners + shadow) —
+    /// shrinks in place while the text and controls only fade, holding their
+    /// standing positions. Whole-card geometry moves read as element drift on
+    /// this full-screen layout, so the recede is scoped to the tile (see
+    /// `MusicSwipeView.skipFadesOut`). Only wired on the front card; inert
+    /// under Reduce Motion.
+    var tileReceding: Bool = false
+    /// True while the session's first card is arriving — the inverse of the
+    /// recede. The tile opens slightly small (0.92) and settles forward to
+    /// full size inside the same crossfade that brings the card in, so the
+    /// deck reads as coming forward to meet you rather than switching on.
+    /// Gentler than the recede's 0.88 because it rides a longer, quieter
+    /// fade. Only wired on the front card; inert under Reduce Motion.
+    var tileApproaching: Bool = false
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
@@ -82,15 +84,6 @@ struct SongCardView: View {
                         ZStack {
                             artwork(for: song, size: artworkSize)
                                 .clipShape(RoundedRectangle(cornerRadius: 24))
-                                // Only carry the matched-geometry hero while the
-                                // morph is still running. Once it lands
-                                // (`chromeRevealed`), drop it — a matched effect left
-                                // active outlives its purpose and re-resolves the
-                                // artwork's frame on every later re-render, which
-                                // made the play button jump and snap back. On exit
-                                // RootView flips `chromeRevealed` false again,
-                                // re-arming it for the dismiss morph.
-                                .matchedHero(id: "heroStart", in: chromeRevealed ? nil : heroNamespace)
                                 .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 12)
                                 .overlay(alignment: .bottom) { progressOverlay(width: artworkSize) }
 
@@ -113,13 +106,15 @@ struct SongCardView: View {
                         // centres on the cover and the box can't be stretched by a
                         // child.
                         .frame(width: artworkSize, height: artworkSize)
-                        // Skip recede: the cover (plus its riding disc/progress
-                        // chrome) shrinks about its own centre while the card
-                        // fades — the tile's visible boundary is what makes
-                        // this read as "set aside" rather than element drift.
-                        // A rendering transform only, so the disc's centred
-                        // position is never re-resolved (the old drift bug).
-                        .scaleEffect(skipReceding && !reduceMotion ? 0.88 : 1.0)
+                        // Tile choreography: the cover (plus its riding disc/
+                        // progress chrome) scales about its own centre while
+                        // the card fades — receding when set aside (skip, back
+                        // exit), settling forward on session entry. The tile's
+                        // visible boundary is what makes this read as motion
+                        // of a *thing*, not element drift. A rendering
+                        // transform only, so the disc's centred position is
+                        // never re-resolved (the old drift bug).
+                        .scaleEffect(tileScale)
 
                         timeLabels(width: artworkSize)
                             .opacity(progressOpacity)
@@ -345,6 +340,17 @@ struct SongCardView: View {
         // the saved position. Full opacity only while actually playing.
         guard !useHotPreview, playbackDuration > 0 else { return 0 }
         return isPlaying ? 1.0 : 0.55
+    }
+
+    /// Scale for the artwork tile's set-aside / arrival choreography. Recede
+    /// wins when both flags are up (backing out mid-entry keeps receding
+    /// instead of snapping forward). Reduce Motion pins it to 1.0 — the
+    /// crossfades alone carry the transition.
+    private var tileScale: CGFloat {
+        guard !reduceMotion else { return 1.0 }
+        if tileReceding { return 0.88 }
+        if tileApproaching { return 0.92 }
+        return 1.0
     }
 
     private var cardOpacity: CGFloat {

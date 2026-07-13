@@ -467,10 +467,9 @@ struct HomeArtCarouselView: View {
     /// "Start Cullaing" — same vocabulary as Home's CTA, deliberately at the
     /// same screen position so visually nothing moves when the carousel opens
     /// or closes. The button reads as a stable anchor while the covers slide
-    /// behind it. No `matchedHero` here — when the carousel dismisses for the
-    /// swipe view, Home's own startButton briefly re-renders and IT carries
-    /// the morph into the swipe card (same screen position, so the user
-    /// perceives the CTA lifting off from where it always was).
+    /// behind it; on dismiss-for-swipe, Home's own startButton re-renders at
+    /// this exact spot before the Home → Swipe crossfade, so the swap is
+    /// invisible.
     private var ctaBand: some View {
         GradientCapsuleButton(
             title: "Start Cullaing",

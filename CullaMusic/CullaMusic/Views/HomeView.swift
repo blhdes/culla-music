@@ -229,10 +229,6 @@ struct HomeView: View {
     /// can begin where the user was browsing (and the already-playing
     /// preview keeps going seamlessly).
     let onStart: (SwipeConfig, [Song]) -> Void
-    /// Namespace for the Home → Swipe hero morph. The "Start Cullaing" button
-    /// tags itself with `heroStart`; the current SongCard's artwork shares
-    /// the same id so SwiftUI interpolates between them.
-    var heroNamespace: Namespace.ID?
     /// Mode pile selection, owned by RootView so it survives Home ⇄ Swipe
     /// remounts but resets on a fresh app launch. See `RootView.selectedHomeMode`
     /// for the rationale; a local @State here would reset on every remount
@@ -449,9 +445,8 @@ struct HomeView: View {
             // Carousel overlay — covers Home while showing. Home stays
             // mounted underneath (its .task, ambient background, and source
             // state all persist), but the dim backdrop + covers visually
-            // replace it. Tapping the CTA dismisses the carousel and lets
-            // Home's startButton carry the matchedHero morph into the
-            // swipe card; tapping the backdrop returns to Home as-is.
+            // replace it. Tapping the CTA dismisses the carousel and starts
+            // the session; tapping the backdrop returns to Home as-is.
             if showCarousel {
                 HomeArtCarouselView(
                     mode: $selectedMode,
@@ -470,11 +465,11 @@ struct HomeView: View {
                         if config.source == nil, config.mode != .dismissed {
                             config.startFromDate = anchor.first?.libraryAddedDate
                         }
-                        // Dismiss the carousel synchronously so Home's
-                        // startButton re-renders before RootView's startSession
-                        // kicks off the Home → Swipe morph. The CTA's screen
-                        // position is identical in both views, so the user
-                        // doesn't see the swap — they see the CTA lift off.
+                        // Dismiss the carousel synchronously so Home is back
+                        // beneath before RootView's startSession kicks off the
+                        // Home → Swipe crossfade. The CTA's screen position is
+                        // identical in both views, so the user never sees the
+                        // swap.
                         showCarousel = false
                         onStart(config, anchor)
                     },
@@ -824,8 +819,6 @@ struct HomeView: View {
     /// Uses the shared `GradientCapsuleButton` so HomeView's CTA, AuthGate's
     /// "Continue", and EmptyState's "Refresh" all share one implementation —
     /// changes to the CTA vocabulary propagate to every screen at once.
-    /// Holds the `heroStart` matchedGeometry tag for the Home→Swipe morph
-    /// (see RootView.swift:14).
     private var startButton: some View {
         GradientCapsuleButton(
             title: "Start Cullaing",
@@ -834,7 +827,6 @@ struct HomeView: View {
         ) {
             onStart(buildSwipeConfig(), [])
         }
-        .matchedHero(id: "heroStart", in: heroNamespace)
     }
 
     /// Builds the `SwipeConfig` from the current Home selections. Extracted

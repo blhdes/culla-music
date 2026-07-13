@@ -30,17 +30,12 @@ struct RootView: View {
     /// the built-in modes' persistence. Don't promote to @AppStorage.
     @State private var selectedSourceScope: SourceScope?
 
-    /// Shared namespace for the Home → Swipe hero morph. The "Start Cullaing"
-    /// button on Home and the artwork on the current SongCard tag the same
-    /// `heroStart` id; SwiftUI interpolates the frame between them so the
-    /// button visibly grows into the card (and shrinks back on dismiss).
-    @Namespace private var heroNamespace
-
-    /// True once the entry spring has logically completed — i.e. the cover has
-    /// landed at the artwork frame. Drives the play-button reveal so it shows
-    /// as a *consequence* of the morph finishing, not on a fixed timer. Reset
-    /// inside the exit spring so the button leaves with the cover.
-    @State private var heroMorphComplete = false
+    /// True once the entry spring has logically completed — i.e. the Home →
+    /// Swipe crossfade has landed. Drives the play-button reveal (and the
+    /// first-run guide) so they show as a *consequence* of the transition
+    /// finishing, not on a fixed timer. Re-armed at the start of every
+    /// session in `startSession`.
+    @State private var entrySettled = false
 
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
@@ -68,8 +63,7 @@ struct RootView: View {
                         MusicSwipeView(
                             viewModel: vm,
                             onBack: endSession,
-                            heroNamespace: heroNamespace,
-                            chromeRevealed: heroMorphComplete
+                            chromeRevealed: entrySettled
                         )
                             // Per-VM identity so the second swipe session starts
                             // with fresh @State (cardOffset, flyOffTask, sheet
@@ -84,7 +78,6 @@ struct RootView: View {
                     } else {
                         HomeView(
                             onStart: startSession,
-                            heroNamespace: heroNamespace,
                             selectedMode: $selectedHomeMode,
                             source: $selectedSourceScope,
                             onReady: { isReady = true }
@@ -138,19 +131,19 @@ struct RootView: View {
         // completion handler so a rapid back-out → re-enter can't let a stale
         // completion flash the play button on the new session prematurely.
         let sessionID = ObjectIdentifier(vm)
-        heroMorphComplete = false
-        // withAnimation here (not on the conditional) drives both the matched
-        // hero morph and HomeView's parallaxRecede transition off the same
-        // spring. The completion handler fires when the spring logically
-        // lands, so the play button reveal is a consequence of the morph
-        // finishing — not a guessed timer.
+        entrySettled = false
+        // One spring drives the whole hand-off: the swipe screen fades in
+        // while HomeView steps back via parallaxRecede. The completion
+        // handler fires when the spring logically lands, so the play button
+        // reveal is a consequence of the transition finishing — not a
+        // guessed timer.
         withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
             activeViewModel = vm
         } completion: {
             guard let active = activeViewModel,
                   ObjectIdentifier(active) == sessionID else { return }
             withAnimation(.easeOut(duration: 0.22)) {
-                heroMorphComplete = true
+                entrySettled = true
             }
         }
         Task { @MainActor in
@@ -159,12 +152,10 @@ struct RootView: View {
     }
 
     private func endSession() {
-        // Pull the play button on a fast curve so it's gone before the cover
-        // has moved far on its way back to the "Start Cullaing" capsule —
-        // separate transaction so it doesn't ride the longer exit spring.
-        withAnimation(.easeOut(duration: 0.15)) {
-            heroMorphComplete = false
-        }
+        // The swipe screen fades out in place (its card's artwork tile is
+        // already receding — MusicSwipeView flips that before calling here)
+        // while HomeView settles forward via parallaxRecede. The play disc
+        // just rides the tile + fade; no separate pull needed.
         withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
             activeViewModel = nil
         }

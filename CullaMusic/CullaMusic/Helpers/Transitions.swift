@@ -23,17 +23,3 @@ private struct ParallaxRecedeModifier: ViewModifier {
             .opacity(opacity)
     }
 }
-
-extension View {
-    /// Applies `matchedGeometryEffect` only when a namespace is provided.
-    /// Lets call sites accept an optional `Namespace.ID` (handy for the
-    /// next-card preload that should never participate in the hero morph).
-    @ViewBuilder
-    func matchedHero(id: String, in namespace: Namespace.ID?) -> some View {
-        if let namespace {
-            self.matchedGeometryEffect(id: id, in: namespace)
-        } else {
-            self
-        }
-    }
-}

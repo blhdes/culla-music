@@ -6,14 +6,10 @@ import LinkPresentation
 struct MusicSwipeView: View {
     @Bindable var viewModel: MusicSwipeViewModel
     var onBack: (() -> Void)?
-    /// Shared namespace for the Home → Swipe hero morph. Only the *current*
-    /// card receives it — the preloaded next card never participates, so
-    /// SwiftUI never sees two simultaneous sources for `heroStart`.
-    var heroNamespace: Namespace.ID?
-    /// True once the Home → Swipe hero morph has finished. Driven from
+    /// True once the Home → Swipe entry crossfade has finished. Driven from
     /// `RootView` via `withAnimation(completion:)` so the play button's
-    /// reveal is a consequence of the spring actually landing, not a fixed
-    /// timer. Forwarded to the current `SongCardView` as `chromeRevealed`.
+    /// reveal is a consequence of the transition actually landing, not a
+    /// fixed timer. Forwarded to the current `SongCardView` as `chromeRevealed`.
     var chromeRevealed: Bool = true
 
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
@@ -67,6 +63,18 @@ struct MusicSwipeView: View {
     /// `flyOff`. Reset non-animated in the same commit that advances the
     /// deck, so the incoming card mounts at full strength.
     @State private var skipFadesOut = false
+    /// Session-exit recede: flipped as the back button fires, so the artwork
+    /// tile is already receding while `RootView`'s spring fades the whole
+    /// screen back to Home — the exit counterpart of the skip, at screen
+    /// scale. Never reset; the per-session `.id` on this view means the next
+    /// session mounts with fresh state.
+    @State private var sessionEnding = false
+    /// Flips true (animated) the moment the deck's content first appears, so
+    /// the session's first card mounts with its artwork tile slightly small
+    /// and settles it forward inside the entry crossfade — the arrival
+    /// counterpart of the skip's recede. Stays true for the rest of the
+    /// session; later cards mount at full size.
+    @State private var deckArrived = false
     @State private var highlightedID: UUID?
     @State private var playlistFrames: [UUID: CGRect] = [:]
 
@@ -153,6 +161,16 @@ struct MusicSwipeView: View {
                 } else if !swipeGuidePending {
                     swipeContent
                         .transition(.opacity)
+                        // First-card arrival: ride the same 0.45s isLoading
+                        // crossfade that brings the deck in, settling the
+                        // artwork tile forward from 0.92 (see `deckArrived`).
+                        // `onAppear` fires on the branch's first frame, so the
+                        // small scale never renders at full opacity.
+                        .onAppear {
+                            withAnimation(.easeOut(duration: 0.45)) {
+                                deckArrived = true
+                            }
+                        }
                 }
             }
         }
@@ -167,6 +185,13 @@ struct MusicSwipeView: View {
                     // at the end of it. Without this explicit stop the
                     // user hears their song bleed into the Home transition.
                     MusicLibraryService.shared.stopPreview()
+                    // Set the card aside on the way out: the artwork tile
+                    // recedes (same 0.88 language as the skip) while the
+                    // whole screen fades under RootView's exit spring. Its
+                    // own quicker curve finishes inside the spring's fade.
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        sessionEnding = true
+                    }
                     onBack()
                 } label: {
                     Image(systemName: "chevron.left")
@@ -367,9 +392,9 @@ struct MusicSwipeView: View {
     }
 
     /// The one-time gesture guide shows once the deck has actually settled on a
-    /// card — after the Home→Swipe morph (`chromeRevealed`) and only when there's
-    /// something to swipe. Gating on `chromeRevealed` keeps it from flashing over
-    /// the hero mid-morph.
+    /// card — after the Home→Swipe entry crossfade (`chromeRevealed`) and only
+    /// when there's something to swipe. Gating on `chromeRevealed` keeps it from
+    /// flashing in mid-transition.
     private var shouldShowSwipeGuide: Bool {
         chromeRevealed && swipeGuidePending
     }
@@ -441,9 +466,9 @@ struct MusicSwipeView: View {
                     onShowArtist: { artistSheetSong = current },
                     onShowAlbum: { albumSheetSong = current },
                     onScrubbingChanged: { isScrubbing = $0 },
-                    heroNamespace: heroNamespace,
                     chromeRevealed: chromeRevealed,
-                    skipReceding: skipFadesOut
+                    tileReceding: skipFadesOut || sessionEnding,
+                    tileApproaching: !deckArrived
                 )
                 // Double-tap skip: fade the acted-on card out in place. The
                 // card itself never moves (see `skipFadesOut`); the artwork
@@ -962,9 +987,9 @@ private struct CurrentCardView: View {
     let onShowArtist: () -> Void
     let onShowAlbum: () -> Void
     let onScrubbingChanged: (Bool) -> Void
-    let heroNamespace: Namespace.ID?
     let chromeRevealed: Bool
-    let skipReceding: Bool
+    let tileReceding: Bool
+    let tileApproaching: Bool
 
     var body: some View {
         let service = MusicLibraryService.shared
@@ -987,9 +1012,9 @@ private struct CurrentCardView: View {
             onShowArtist: onShowArtist,
             onShowAlbum: onShowAlbum,
             onScrubbingChanged: onScrubbingChanged,
-            heroNamespace: heroNamespace,
             chromeRevealed: chromeRevealed,
-            skipReceding: skipReceding
+            tileReceding: tileReceding,
+            tileApproaching: tileApproaching
         )
     }
 }

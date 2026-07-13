@@ -36,6 +36,14 @@ struct SongCardView: View {
     /// final center position immediately while the cover is still morphing
     /// — making the button look unanchored from the cover during entry.
     var chromeRevealed: Bool = true
+    /// True while a double-tap skip is fading this card out. Drives the
+    /// artwork-tile recede: the cover — the one element with a visible
+    /// boundary (rounded corners + shadow) — shrinks in place while the text
+    /// and controls only fade, holding their standing positions. Whole-card
+    /// geometry moves read as element drift on this full-screen layout, so
+    /// the recede is scoped to the tile (see `MusicSwipeView.skipFadesOut`).
+    /// Only wired on the front card; inert under Reduce Motion.
+    var skipReceding: Bool = false
 
     @State private var scrubOverride: TimeInterval?
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
@@ -105,6 +113,13 @@ struct SongCardView: View {
                         // centres on the cover and the box can't be stretched by a
                         // child.
                         .frame(width: artworkSize, height: artworkSize)
+                        // Skip recede: the cover (plus its riding disc/progress
+                        // chrome) shrinks about its own centre while the card
+                        // fades — the tile's visible boundary is what makes
+                        // this read as "set aside" rather than element drift.
+                        // A rendering transform only, so the disc's centred
+                        // position is never re-resolved (the old drift bug).
+                        .scaleEffect(skipReceding && !reduceMotion ? 0.88 : 1.0)
 
                         timeLabels(width: artworkSize)
                             .opacity(progressOpacity)

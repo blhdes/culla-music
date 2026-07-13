@@ -57,13 +57,15 @@ struct MusicSwipeView: View {
     // Drag state
     @State private var cardOffset: CGSize = .zero
     /// Drives the double-tap skip: while true, the current card fades out in
-    /// place. Deliberately opacity-only — the card view is a *full-screen*
-    /// layout whose background matches what's behind it, so any scale/offset
-    /// reads as the artwork and text drifting off their standing positions,
-    /// not as a card moving (the "element shift" bug). Drag swipes never touch
-    /// this; they keep the velocity-continuing `flyOff`. Reset non-animated in
-    /// the same commit that advances the deck, so the incoming card mounts at
-    /// full strength.
+    /// place and its artwork tile recedes (SongCardView scales just the cover
+    /// about its own centre). The card layout itself never moves — it's a
+    /// *full-screen* view whose background matches what's behind it, so any
+    /// whole-card scale/offset reads as the artwork and text drifting off
+    /// their standing positions, not as a card moving (the "element shift"
+    /// bug). Only the tile has a visible boundary, so only the tile moves.
+    /// Drag swipes never touch this; they keep the velocity-continuing
+    /// `flyOff`. Reset non-animated in the same commit that advances the
+    /// deck, so the incoming card mounts at full strength.
     @State private var skipFadesOut = false
     @State private var highlightedID: UUID?
     @State private var playlistFrames: [UUID: CGRect] = [:]
@@ -440,10 +442,12 @@ struct MusicSwipeView: View {
                     onShowAlbum: { albumSheetSong = current },
                     onScrubbingChanged: { isScrubbing = $0 },
                     heroNamespace: heroNamespace,
-                    chromeRevealed: chromeRevealed
+                    chromeRevealed: chromeRevealed,
+                    skipReceding: skipFadesOut
                 )
-                // Double-tap skip: fade the acted-on card out in place.
-                // Opacity-only on purpose — see `skipFadesOut`.
+                // Double-tap skip: fade the acted-on card out in place. The
+                // card itself never moves (see `skipFadesOut`); the artwork
+                // tile alone recedes, inside SongCardView.
                 .opacity(skipFadesOut ? 0 : 1)
                 .id(current.id.rawValue)
                 .transition(.asymmetric(
@@ -621,10 +625,11 @@ struct MusicSwipeView: View {
 
     /// Double-tap skip. Unlike `flyOff` — whose easeOut continues a drag's
     /// existing velocity — a skip starts from rest and is the deck's quietest
-    /// action ("not now"), so the card simply fades out in place and the next
-    /// one fades in at its standing position. No scale, no offset: the card
-    /// view is full-screen with an invisible boundary, so geometry moves read
-    /// as elements drifting, not a card leaving (see `skipFadesOut`).
+    /// action ("not now"): the card fades out in place while its artwork tile
+    /// recedes, and the next card fades in at its standing position. The
+    /// recede is scoped to the tile because the card view is full-screen with
+    /// an invisible boundary — whole-card geometry moves read as elements
+    /// drifting, not a card leaving (see `skipFadesOut`).
     private func skipWithFade() {
         // Freeze the outgoing accent for the toast — same reason as `flyOff`.
         pendingToastAccent = effectiveAccent.primary
@@ -959,6 +964,7 @@ private struct CurrentCardView: View {
     let onScrubbingChanged: (Bool) -> Void
     let heroNamespace: Namespace.ID?
     let chromeRevealed: Bool
+    let skipReceding: Bool
 
     var body: some View {
         let service = MusicLibraryService.shared
@@ -982,7 +988,8 @@ private struct CurrentCardView: View {
             onShowAlbum: onShowAlbum,
             onScrubbingChanged: onScrubbingChanged,
             heroNamespace: heroNamespace,
-            chromeRevealed: chromeRevealed
+            chromeRevealed: chromeRevealed,
+            skipReceding: skipReceding
         )
     }
 }

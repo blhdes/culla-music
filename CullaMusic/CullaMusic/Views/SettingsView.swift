@@ -20,6 +20,7 @@ struct SettingsView: View {
 
     @State private var showLovedPicker = false
     @State private var showColorPicker = false
+    @State private var showInsights = false
 
     private var pickablePlaylists: [Playlist] {
         allPlaylists.filter { $0.isEditable && $0.appleMusicPlaylistID != nil }
@@ -65,6 +66,7 @@ struct SettingsView: View {
                 GlassStack(spacing: 22) {
                     lookCard
                     playbackCard
+                    insightsRow
                     personalCard
                     copyrightFooter
                 }
@@ -95,6 +97,14 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showColorPicker) {
                 AccentPalettePickerSheet(selectedRaw: $accentPaletteRaw)
+            }
+            // Full screen rather than a sheet — Insights reads as a focused
+            // moment, mirroring the photo app. The cover is its own
+            // presentation host, so it needs the theme pin too (same reason
+            // as the Settings sheet itself, see `resolvedColorScheme`).
+            .fullScreenCover(isPresented: $showInsights) {
+                InsightsView()
+                    .sheetColorScheme(resolvedColorScheme)
             }
         }
         .sheetColorScheme(resolvedColorScheme)
@@ -138,6 +148,40 @@ struct SettingsView: View {
                 .font(.system(.body, design: .rounded))
                 .padding(.vertical, 4)
         }
+    }
+
+    /// A standalone glass row rather than a titled card — Insights is a door
+    /// to another screen, not a setting, so it skips the section header and
+    /// keeps the same surface treatment as the cards around it.
+    private var insightsRow: some View {
+        Button {
+            showInsights = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(appAccent)
+                Text("Insights")
+                    .font(.system(.body, design: .rounded).weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("Your sorting journey")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .glassSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous), interactive: true)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Deep-links to the system's per-app language page (Settings → CullaMusic),

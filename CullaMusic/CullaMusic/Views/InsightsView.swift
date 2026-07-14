@@ -18,6 +18,8 @@ struct InsightsView: View {
     @State private var model = InsightsModel()
     /// Seed for the artist hub opened from a Top Artists row.
     @State private var artistSheetSong: Song?
+    /// Whether "Where they went" shows every playlist or just the top 5.
+    @State private var showAllPlaylists = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
 
@@ -175,8 +177,10 @@ struct InsightsView: View {
     }
 
     private func playlistBreakdown(_ slices: [PlaylistSlice]) -> some View {
-        let top = Array(slices.prefix(5))
-        let maxCount = top.first?.count ?? 1
+        let top = showAllPlaylists ? slices : Array(slices.prefix(5))
+        // Always the biggest slice overall — bar lengths keep their meaning
+        // whether the card is collapsed or expanded.
+        let maxCount = slices.first?.count ?? 1
         let remaining = slices.count - top.count
 
         return GlassPanel(icon: "square.stack.3d.up.fill", title: "Where they went") {
@@ -184,11 +188,26 @@ struct InsightsView: View {
                 ForEach(Array(top.enumerated()), id: \.element.id) { rank, slice in
                     playlistBar(slice, maxCount: maxCount, rank: rank)
                 }
-                if remaining > 0 {
-                    Text("+ \(remaining) more")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(.tertiary)
+                if slices.count > 5 {
+                    Button {
+                        withAnimation(.snappy) { showAllPlaylists.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if showAllPlaylists {
+                                Text("Show less")
+                            } else {
+                                Text("+ \(remaining) more")
+                            }
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .rotationEffect(.degrees(showAllPlaylists ? 180 : 0))
+                        }
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

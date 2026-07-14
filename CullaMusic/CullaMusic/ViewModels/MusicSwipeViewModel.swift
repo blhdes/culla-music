@@ -163,6 +163,15 @@ final class MusicSwipeViewModel {
         undoCoordinator.clear()
         service.resetLibraryCursor()
 
+        // Anchored sessions know their first card up front — start its accent
+        // extraction now, in parallel with the playlist sync, so the bounded
+        // wait below (usually) finds it already cached and costs nothing.
+        if dynamicAccentEnabled, let anchor = anchorSongs.first {
+            Task { @MainActor in
+                _ = await AccentExtractor.shared.accent(for: anchor)
+            }
+        }
+
         // Sync is one round-trip and needed for sidebar + chips; keep it
         // blocking. The membership index is the slow step — defer it where we
         // can so the first card paints sooner.
@@ -237,8 +246,25 @@ final class MusicSwipeViewModel {
             print("loadInitial failed: \(error)")
         }
 
+        // Hold the reveal briefly for the first card's cover tint, so the
+        // chips' first paint is already the artwork color instead of opening
+        // on the app palette and blooming mid-crossfade (the "default color
+        // at entry" flash). Bounded: a slow network forfeits the head start
+        // rather than stalling entry — the in-flight extraction then lands
+        // through the swipe view's async refresh, as before.
+        if dynamicAccentEnabled, let first = currentSong {
+            await AccentExtractor.shared.warmAccent(for: first, timeout: .milliseconds(500))
+        }
+
         isLoading = false
         if currentSong == nil { isEmpty = true }
+    }
+
+    /// Mirrors the `useDynamicAccent` @AppStorage default (on). A bare
+    /// `bool(forKey:)` would read the never-touched key as *off* and skip the
+    /// accent warm-up for everyone who left the setting alone.
+    private var dynamicAccentEnabled: Bool {
+        UserDefaults.standard.object(forKey: "useDynamicAccent") as? Bool ?? true
     }
 
     func reload() async {

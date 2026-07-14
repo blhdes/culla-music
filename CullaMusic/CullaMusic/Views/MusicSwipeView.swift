@@ -430,6 +430,7 @@ struct MusicSwipeView: View {
         ZStack {
             // Next card (behind, no interaction)
             if let next = viewModel.nextSong {
+                let nextAccent = cardAccent(for: next)
                 SongCardView(
                     song: next,
                     offset: .zero,
@@ -442,6 +443,9 @@ struct MusicSwipeView: View {
                     onTogglePlay: {},
                     onSeek: { _ in }
                 )
+                .environment(\.appAccent, nextAccent.primary)
+                .environment(\.appAccentSecondary, nextAccent.secondary)
+                .environment(\.appAccentNeutral, nextAccent.neutralTint)
                 .id(next.id.rawValue)
                 .allowsHitTesting(false)
             }
@@ -450,6 +454,7 @@ struct MusicSwipeView: View {
             Color(.systemBackground).ignoresSafeArea()
 
             if let current = viewModel.currentSong {
+                let currentAccent = cardAccent(for: current)
                 // The front card lives in its own leaf view so the player's
                 // high-frequency `playbackPosition` reads (which tick every
                 // 0.1–0.2s while a preview plays) stay scoped to the card. Read
@@ -470,6 +475,9 @@ struct MusicSwipeView: View {
                     tileReceding: skipFadesOut || sessionEnding,
                     tileApproaching: !deckArrived
                 )
+                .environment(\.appAccent, currentAccent.primary)
+                .environment(\.appAccentSecondary, currentAccent.secondary)
+                .environment(\.appAccentNeutral, currentAccent.neutralTint)
                 // Double-tap skip: fade the acted-on card out in place. The
                 // card itself never moves (see `skipFadesOut`); the artwork
                 // tile alone recedes, inside SongCardView.
@@ -786,6 +794,27 @@ struct MusicSwipeView: View {
                     return provisional
                 }
             }
+        }
+        return .flat(paletteAccent)
+    }
+
+    /// The tint a *card* wears — always derived from that card's own song,
+    /// never from the screen-global accent. The global accent tracks the
+    /// current song and blooms in a beat after a card transition, which is
+    /// right for the persistent chrome (sidebar, undo, toast) but wrong for
+    /// the cards themselves: the next card peeking out during a drag wore the
+    /// *outgoing* song's tint on its membership chips, then visibly recolored
+    /// after the commit — always one step behind. Cache first (the nextSong
+    /// `.task` pre-warms it), then MusicKit's instant artwork color, then the
+    /// palette. Injected per-card in `cardStack`, overriding the global value
+    /// for that subtree only.
+    private func cardAccent(for song: Song) -> ArtworkAccent {
+        guard useDynamicAccent else { return .flat(paletteAccent) }
+        if let cached = AccentExtractor.shared.cachedAccent(for: song) {
+            return cached
+        }
+        if let provisional = AccentExtractor.shared.provisionalAccent(for: song) {
+            return provisional
         }
         return .flat(paletteAccent)
     }

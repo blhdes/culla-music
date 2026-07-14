@@ -68,6 +68,36 @@ final class AccentExtractor {
         cache[song.id.rawValue]
     }
 
+    /// Waits for the song's accent extraction, but never longer than `timeout`.
+    /// Used at session entry: holding the deck's reveal on this gives the first
+    /// card's tint a head start, so the chips open on the real cover color
+    /// instead of blooming from the app palette a beat after first paint. On
+    /// timeout the extraction keeps running (it lives in `inFlight`, not here)
+    /// and the swipe view's async refresh blooms it in as before — a slow
+    /// network forfeits the head start rather than stalling entry.
+    ///
+    /// A plain `await accent(for:)` raced inside a task group can't do this:
+    /// the group would still block on the un-cancellable extraction child at
+    /// scope exit. Instead the extraction runs unstructured and we watch for
+    /// its completion in short slices up to the deadline.
+    func warmAccent(for song: Song, timeout: Duration) async {
+        let id = song.id.rawValue
+        if cache[id] != nil { return }
+        Task { @MainActor in
+            _ = await self.accent(for: song)
+        }
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            // Sleep first: the kicked task registers itself in `inFlight`
+            // synchronously as soon as this suspension lets it run.
+            try? await Task.sleep(for: .milliseconds(50))
+            if cache[id] != nil { return }
+            // Done without a result (no artwork / extraction failed) — the
+            // cache will never fill, so waiting out the deadline is pointless.
+            if inFlight[id] == nil { return }
+        }
+    }
+
     /// An *instant*, cover-derived accent from MusicKit's artwork metadata
     /// (`Artwork.backgroundColor`) — no network, no pixel sampling. Lets a cold
     /// card open on a tint pulled from its own cover instead of the app palette

@@ -49,6 +49,9 @@ struct HomeArtCarouselView: View {
     var onCenteredSongOnExit: ((String?) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Same key the swipe screen reads — gates the accent pre-warm below so
+    /// browsing covers doesn't fetch artwork tints nobody will see.
+    @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
     private let service = MusicLibraryService.shared
 
     @State private var feed: CarouselSongFeed?
@@ -186,6 +189,19 @@ struct HomeArtCarouselView: View {
             // Span is library-wide (independent of mode), so load it once.
             if dateSpan == nil {
                 dateSpan = await service.libraryAddedDateSpan()
+            }
+        }
+        .task(id: scrollPositionID) {
+            // Pre-warm artwork accents for what the user is looking at: the
+            // centred cover plus the few after it become the session's opening
+            // anchors on Start, so warming here lets the swipe deck's first
+            // cards paint their final tint on frame one instead of opening on
+            // a provisional color and visibly refining a beat later. Repeat
+            // visits are free — the extractor caches and coalesces in-flight.
+            guard useDynamicAccent, let feed, !feed.songs.isEmpty else { return }
+            let start = feed.songs.firstIndex { $0.id.rawValue == scrollPositionID } ?? 0
+            for song in feed.songs.dropFirst(start).prefix(4) {
+                _ = await AccentExtractor.shared.accent(for: song)
             }
         }
         .sheet(isPresented: $showDatePicker) {

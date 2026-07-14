@@ -44,6 +44,13 @@ struct PlaylistMembershipChips: View {
                 }
             }
             .padding(.top, 2)
+            // A cold card opens on the provisional (artwork-metadata) tint and
+            // the real extraction can land while the chips are already on
+            // screen — e.g. on the behind card mid-drag, where the change
+            // arrives via a plain re-render with no animated transaction and
+            // would snap. Scoped here (not on the card) so only the tint
+            // refine blooms; a freshly mounted card still paints instantly.
+            .animation(.easeInOut(duration: 0.45), value: chipTint)
         }
     }
 

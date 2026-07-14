@@ -915,6 +915,14 @@ final class MusicSwipeViewModel {
         try? modelContext.save()
     }
 
+    /// First few songs of the un-dealt queue (beyond `nextSong`). The swipe
+    /// view warms their artwork accents ahead of arrival so a fast swipe run
+    /// doesn't outrun the extractor — a cold card opens on the provisional
+    /// tint and visibly refines a beat later.
+    func upcomingSongs(_ count: Int) -> [Song] {
+        Array(songQueue.prefix(count))
+    }
+
     private func populateQueue(with songs: [Song]) {
         var queue = songs
         if currentSong == nil, !queue.isEmpty {

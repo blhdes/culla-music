@@ -265,12 +265,18 @@ struct MusicSwipeView: View {
             dateSpan = await viewModel.dateJumpSpan()
         }
         .task(id: viewModel.nextSong?.id.rawValue) {
-            // Warm the accent cache for the upcoming card so its color
-            // transition is instant when it slides in. Result is discarded —
-            // we just want the cache populated before refreshDynamicAccent
-            // asks for it.
+            // Warm the accent cache ahead of arrival so color transitions are
+            // instant when cards slide in. The on-deck card first — it's the
+            // one revealed mid-drag — then a few deeper, so a fast swipe run
+            // doesn't outrun the extractor and open a card on a provisional
+            // tint that refines mid-display. Results are discarded; we just
+            // want the cache populated before `cardAccent` reads it. A card
+            // advance re-fires this task, and already-warm songs are free.
             guard useDynamicAccent, let next = viewModel.nextSong else { return }
             _ = await AccentExtractor.shared.accent(for: next)
+            for song in viewModel.upcomingSongs(3) {
+                _ = await AccentExtractor.shared.accent(for: song)
+            }
         }
         .onChange(of: useDynamicAccent) { _, enabled in
             if !enabled {

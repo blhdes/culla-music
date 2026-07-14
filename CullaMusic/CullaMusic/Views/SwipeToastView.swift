@@ -122,7 +122,13 @@ struct SwipeToastView: View {
         .padding(.leading, 14)
         .padding(.trailing, 5)
         .padding(.vertical, 5)
+        // Cap long titles at 280pt, but let short toasts hug their text. A
+        // bare `maxWidth` frame *expands* to fill the proposal (that's why
+        // every toast used to render 280 wide); `fixedSize` makes the frame
+        // size to the text's ideal width instead, with 280 still the ceiling
+        // so lineLimit(1) truncation kicks in for long messages.
         .frame(maxWidth: 280)
+        .fixedSize(horizontal: true, vertical: false)
         .glassSurface(in: Capsule())
         // Hairline edge so the pill reads against bright artwork — the flat
         // glass alone melted into light covers.

@@ -30,8 +30,9 @@ final class HomeViewModel {
     /// UserDefaults keys for the day-scoped count caches. Named once so a read
     /// site and its matching write site can't drift apart on a typo — a
     /// mismatch would silently disable the cache and re-walk the whole library
-    /// on every launch.
-    private enum CacheKey {
+    /// on every launch. Internal (not private) because Insights reads the
+    /// cached library count too, for its coverage bar.
+    enum CacheKey {
         static let libraryDate = "music.libraryCountDate"
         static let libraryFingerprint = "music.libraryCountFingerprint"
         static let libraryValue = "music.libraryCountCached"

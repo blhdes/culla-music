@@ -13,10 +13,24 @@ struct InsightsView: View {
     @Query(sort: \Playlist.displayOrder) private var playlists: [Playlist]
 
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
+    @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
 
     @State private var model = InsightsModel()
+    /// Seed for the artist hub opened from a Top Artists row.
+    @State private var artistSheetSong: Song?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appAccent) private var appAccent
+
+    // Same presentation-host pinning as SettingsView.resolvedColorScheme —
+    // the artist sheet opens from inside this full-screen cover, so it needs
+    // its own pin to follow a theme override.
+    private var resolvedColorScheme: ColorScheme? {
+        switch colorSchemeRaw {
+        case "light": .light
+        case "dark":  .dark
+        default:      nil
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,10 +53,14 @@ struct InsightsView: View {
             }
             .task {
                 model.calculateStreaks(from: sortedSongs.map(\.sortedAt))
-                await model.loadTopArtists(recentFirstSongIDs: recentFirstSortedIDs)
+                await model.loadTasteProfile(recentFirstSongIDs: recentFirstSortedIDs)
             }
             .onChange(of: sortedSongs.count) {
                 model.calculateStreaks(from: sortedSongs.map(\.sortedAt))
+            }
+            .sheet(item: $artistSheetSong) { song in
+                ArtistDetailSheet(song: song)
+                    .sheetColorScheme(resolvedColorScheme)
             }
         }
     }
@@ -63,7 +81,12 @@ struct InsightsView: View {
     // MARK: - Content
 
     private var statsContent: some View {
-        ScrollView {
+        // One evaluation per body pass — both are O(history) walks that fault
+        // SwiftData relationships, and each value feeds a gate *and* a card.
+        let slices = playlistSlices
+        let loved = lovedCount
+
+        return ScrollView {
             GlassStack(spacing: 22) {
                 // Hero — the count ticks via numericText when it changes.
                 VStack(spacing: 4) {
@@ -75,6 +98,10 @@ struct InsightsView: View {
                     Text("songs sorted")
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(.secondary)
+                    if let coverage = libraryCoverage {
+                        coverageBar(coverage)
+                            .padding(.top, 12)
+                    }
                 }
                 .padding(.top, 16)
 
@@ -83,18 +110,32 @@ struct InsightsView: View {
                     streakBadge(icon: "trophy.fill", value: model.longestStreak, label: "Best")
                 }
 
-                if !playlistSlices.isEmpty {
-                    playlistBreakdown
+                if !slices.isEmpty {
+                    playlistBreakdown(slices)
                 }
 
                 activityChart
 
                 topArtistsCard
 
-                detailsCard
+                // Taste and Eras share the artists' resolve — bones while it
+                // runs, so finishing doesn't shove the cards below around.
+                if model.isResolvingArtists {
+                    skeletonPanel(icon: "guitars.fill", title: "Taste")
+                    skeletonPanel(icon: "hourglass", title: "Eras")
+                } else {
+                    if !model.genres.isEmpty {
+                        tasteCard
+                    }
+                    if !model.decades.isEmpty {
+                        eraCard
+                    }
+                }
 
-                if lovedCount > 0 {
-                    lovedHighlight
+                detailsCard(lovedCount: loved)
+
+                if loved > 0 {
+                    lovedHighlight(count: loved)
                 }
             }
             .padding(.horizontal, 18)
@@ -133,8 +174,7 @@ struct InsightsView: View {
             }
     }
 
-    private var playlistBreakdown: some View {
-        let slices = playlistSlices
+    private func playlistBreakdown(_ slices: [PlaylistSlice]) -> some View {
         let top = Array(slices.prefix(5))
         let maxCount = top.first?.count ?? 1
         let remaining = slices.count - top.count
@@ -155,13 +195,8 @@ struct InsightsView: View {
     }
 
     private func playlistBar(_ slice: PlaylistSlice, maxCount: Int, rank: Int) -> some View {
-        // Bars fade with rank — the top playlist reads strongest. Length
-        // already encodes the count; the fade is just depth, not data.
-        let barOpacity = max(0.9 - Double(rank) * 0.15, 0.3)
-        let fraction = maxCount > 0 ? CGFloat(slice.count) / CGFloat(maxCount) : 0
-
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        statBar(
+            label: HStack(spacing: 6) {
                 if slice.isLoved {
                     Image(systemName: "heart.fill")
                         .font(.caption2.weight(.semibold))
@@ -170,8 +205,29 @@ struct InsightsView: View {
                 Text(slice.name)
                     .font(.system(.footnote, design: .rounded).weight(.medium))
                     .lineLimit(1)
+            },
+            value: "\(slice.count)",
+            fraction: maxCount > 0 ? CGFloat(slice.count) / CGFloat(maxCount) : 0,
+            rank: rank
+        )
+    }
+
+    /// Shared bar row for the breakdown cards (playlists, genres): label +
+    /// trailing value over a capsule bar. Length encodes `fraction`; bars fade
+    /// with `rank` — the top row reads strongest, depth rather than data.
+    private func statBar(
+        label: some View,
+        value: String,
+        fraction: CGFloat,
+        rank: Int
+    ) -> some View {
+        let barOpacity = max(0.9 - Double(rank) * 0.15, 0.3)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                label
                 Spacer(minLength: 8)
-                Text("\(slice.count)")
+                Text(value)
                     .font(.system(.footnote, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -229,8 +285,11 @@ struct InsightsView: View {
     }
 
     private var activityChart: some View {
-        GlassPanel(icon: "chart.xyaxis.line", title: "Last 7 days") {
-            Chart(chartData) { point in
+        // One evaluation — the marks and the y-domain share the same grouping.
+        let data = chartData
+
+        return GlassPanel(icon: "chart.xyaxis.line", title: "Last 7 days") {
+            Chart(data) { point in
                 LineMark(
                     x: .value("Day", point.date, unit: .day),
                     y: .value("Count", point.count)
@@ -267,7 +326,7 @@ struct InsightsView: View {
                     AxisValueLabel()
                 }
             }
-            .chartYScale(domain: 0...max(chartData.map(\.count).max() ?? 1, 1))
+            .chartYScale(domain: 0...max(data.map(\.count).max() ?? 1, 1))
             .chartLegend(position: .bottom, alignment: .center, spacing: 12)
             .frame(height: 180)
         }
@@ -281,38 +340,59 @@ struct InsightsView: View {
         // nothing at all if the resolve came back empty/failed — a stats
         // screen shouldn't surface a lookup error.
         if model.isResolvingArtists {
-            GlassPanel(icon: "music.mic", title: "Top artists") {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach([150, 120, 170] as [CGFloat], id: \.self) { width in
-                        SkeletonShape(shape: Capsule())
-                            .frame(width: width, height: 12)
-                    }
-                }
-                .padding(.vertical, 2)
-            }
+            skeletonPanel(icon: "music.mic", title: "Top artists")
         } else if !model.topArtists.isEmpty {
             GlassPanel(icon: "music.mic", title: "Top artists") {
                 VStack(spacing: 0) {
                     ForEach(Array(model.topArtists.enumerated()), id: \.element.id) { rank, artist in
-                        HStack(spacing: 12) {
-                            Text("\(rank + 1)")
-                                .font(.system(.footnote, design: .rounded).weight(.bold))
-                                .foregroundStyle(rank == 0 ? appAccent : .secondary)
-                                .frame(width: 18)
-                            Text(artist.name)
-                                .font(.system(.body, design: .rounded))
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            artistAvatar(artist)
-                            Text("\(artist.count)")
-                                .font(.system(.body, design: .rounded).weight(.medium))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                        // Every stat is a door: a row with a seed song opens
+                        // the same artist hub the swipe card's info button
+                        // does. Rows without one (no library resolve) stay
+                        // plain — no chevron, nothing to open.
+                        Button {
+                            artistSheetSong = artist.seedSong
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text("\(rank + 1)")
+                                    .font(.system(.footnote, design: .rounded).weight(.bold))
+                                    .foregroundStyle(rank == 0 ? appAccent : .secondary)
+                                    .frame(width: 18)
+                                Text(artist.name)
+                                    .font(.system(.body, design: .rounded))
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                artistAvatar(artist)
+                                Text("\(artist.count)")
+                                    .font(.system(.body, design: .rounded).weight(.medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                                if artist.seedSong != nil {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 6)
+                        .buttonStyle(.plain)
+                        .disabled(artist.seedSong == nil)
                     }
                 }
             }
+        }
+    }
+
+    /// Loading bones for the cards fed by the async taste resolve.
+    private func skeletonPanel(icon: String, title: LocalizedStringKey) -> some View {
+        GlassPanel(icon: icon, title: title) {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach([150, 120, 170] as [CGFloat], id: \.self) { width in
+                    SkeletonShape(shape: Capsule())
+                        .frame(width: width, height: 12)
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 
@@ -336,12 +416,94 @@ struct InsightsView: View {
         .frame(width: 28, height: 28)
     }
 
+    // MARK: - Recent taste
+
+    /// Genre mix of the whole sorted history, in the same bar language as the
+    /// playlist breakdown. The trailing number is the share of sorts carrying
+    /// that genre — shares overlap by design (a song can be tagged with
+    /// several genres), so they're per-row facts, not slices of 100%.
+    private var tasteCard: some View {
+        let maxCount = model.genres.first?.count ?? 1
+
+        return GlassPanel(icon: "guitars.fill", title: "Taste") {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(model.genres.enumerated()), id: \.element.id) { rank, genre in
+                    statBar(
+                        label: Text(genre.name)
+                            .font(.system(.footnote, design: .rounded).weight(.medium))
+                            .lineLimit(1),
+                        value: genreShareText(genre),
+                        fraction: maxCount > 0 ? CGFloat(genre.count) / CGFloat(maxCount) : 0,
+                        rank: rank
+                    )
+                }
+                if model.musicSeconds > 0 {
+                    Text("≈ \(formattedMusicTime) of music sorted")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    private func genreShareText(_ genre: InsightsModel.GenreShare) -> String {
+        let share = Double(genre.count) / Double(max(model.resolvedEventCount, 1))
+        return share.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    private var formattedMusicTime: String {
+        Duration.seconds(model.musicSeconds).formatted(
+            .units(allowed: [.hours, .minutes], width: .abbreviated, maximumUnitCount: 2)
+        )
+    }
+
+    // MARK: - Eras
+
+    /// Release-decade histogram of the sorted history — "when is your music
+    /// from", the era companion to the genre mix. The model zero-fills the
+    /// decades in between, so gaps show as gaps.
+    private var eraCard: some View {
+        let bins = model.decades
+        // Short "'90s" tags collide when the sample spans a century (1920 and
+        // 2020 are both "'20s"), and a duplicated category in the pinned
+        // domain corrupts the chart — fall back to full "1920s" labels then.
+        let short = bins.map { String(format: "'%02ds", $0.decade % 100) }
+        let labels = Set(short).count == short.count
+            ? short
+            : bins.map { "\($0.decade)s" }
+
+        return GlassPanel(icon: "hourglass", title: "Eras") {
+            Chart {
+                ForEach(bins.indices, id: \.self) { index in
+                    BarMark(
+                        x: .value("Decade", labels[index]),
+                        y: .value("Sorts", bins[index].count)
+                    )
+                    .foregroundStyle(appAccent.opacity(0.85))
+                    .cornerRadius(3)
+                }
+            }
+            // String categories sort alphabetically by default, which would
+            // put '00s before '90s — pin the axis to the model's time order.
+            .chartXScale(domain: labels)
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                    AxisValueLabel()
+                }
+            }
+            .frame(height: 140)
+        }
+    }
+
     // MARK: - Details
 
-    private var detailsCard: some View {
+    private func detailsCard(lovedCount: Int) -> some View {
         GlassPanel(icon: "list.bullet.rectangle.fill", title: "Details") {
             VStack(spacing: 0) {
                 detailRow("Dismissed", value: "\(dismissedSongs.count)")
+                detailRow("Keep rate", value: keepRateText)
                 detailRow("Loved", value: "\(lovedCount)")
                 detailRow("Playlists", value: "\(playlists.count)")
                 detailRow("Busiest day", value: busiestDayText)
@@ -365,11 +527,11 @@ struct InsightsView: View {
 
     // MARK: - Loved highlight
 
-    private var lovedHighlight: some View {
+    private func lovedHighlight(count: Int) -> some View {
         GlassPanel(icon: "heart.fill", title: "Loved") {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(lovedCount)")
+                    Text("\(count)")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
@@ -385,9 +547,61 @@ struct InsightsView: View {
         }
     }
 
+    // MARK: - Library coverage
+
+    /// Fraction of the library that's been through the deck. The "songs
+    /// remaining" half comes from Home's day-scoped cached library walk
+    /// (`HomeViewModel.CacheKey`) — Insights never walks the library itself,
+    /// so this is nil (bar hidden) until Home has cached a count once. The
+    /// cache can be up to a day stale, which is fine for a progress bar; and
+    /// because the total is handled + remaining, the fraction stays below 1
+    /// even when handled rows reference songs that have since left the library.
+    private var libraryCoverage: Double? {
+        guard UserDefaults.standard.object(forKey: HomeViewModel.CacheKey.libraryValue) != nil else {
+            return nil
+        }
+        let remaining = UserDefaults.standard.integer(forKey: HomeViewModel.CacheKey.libraryValue)
+
+        // Distinct songs, not sort events — a song sorted into two playlists
+        // was still only one library decision.
+        var handledIDs = Set(sortedSongs.map(\.songID))
+        handledIDs.formUnion(dismissedSongs.map(\.songID))
+
+        let total = handledIDs.count + remaining
+        guard total > 0 else { return nil }
+        return Double(handledIDs.count) / Double(total)
+    }
+
+    /// Slim centered gauge under the hero count — the "how far through the
+    /// library" story. Fixed width so it reads as a gauge, not a divider.
+    private func coverageBar(_ fraction: Double) -> some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(appAccent.opacity(0.85))
+                    .frame(width: max(180 * fraction, 6))
+            }
+            .frame(width: 180, height: 6)
+            Text("≈ \(fraction.formatted(.percent.precision(.fractionLength(0)))) of your library handled")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - Computed stats
 
-    /// Sorted-song IDs newest-first, feeding the top-artist resolve.
+    /// Kept vs. every decision made. Counts rows (not distinct songs) so it
+    /// matches the hero and Dismissed numbers it sits between.
+    private var keepRateText: String {
+        let decisions = sortedSongs.count + dismissedSongs.count
+        guard decisions > 0 else { return "—" }
+        let rate = Double(sortedSongs.count) / Double(decisions)
+        return rate.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    /// Sorted-song IDs newest-first, feeding the taste-profile resolve.
     private var recentFirstSortedIDs: [String] {
         sortedSongs
             .sorted { $0.sortedAt > $1.sortedAt }

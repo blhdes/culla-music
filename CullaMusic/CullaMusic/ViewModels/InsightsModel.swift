@@ -1,10 +1,11 @@
 import Foundation
 import MusicKit
 
-/// Backs the Insights screen. Everything on that screen except Top Artists is
-/// computed straight from the local SwiftData rows the view already holds via
-/// `@Query`; this model owns the two pieces that aren't a simple count:
-/// streak math and the async top-artist resolve.
+/// Backs the Insights screen. The simple counts are computed straight from
+/// the local SwiftData rows the view already holds via `@Query`; this model
+/// owns the two pieces that aren't: streak math and the async taste resolve
+/// (top artists, genre mix, era histogram, total music time), all fed by one
+/// library walk over the most recent sorts.
 @Observable
 @MainActor
 final class InsightsModel {
@@ -12,24 +13,49 @@ final class InsightsModel {
     struct ArtistCount: Identifiable {
         let name: String
         let count: Int
-        /// The artist-page portrait, filled by `loadTopArtists` when the name
+        /// Any resolved song by this artist — the tap-through seed for
+        /// `ArtistDetailSheet`, which resolves the artist page itself.
+        var seedSong: Song?
+        /// The artist-page portrait, filled by `loadTasteProfile` when the name
         /// resolves to a catalog artist; nil → the view shows an initial circle.
         var artwork: Artwork?
         var id: String { name }
     }
 
+    struct GenreShare: Identifiable {
+        let name: String
+        let count: Int
+        var id: String { name }
+    }
+
+    struct DecadeCount: Identifiable {
+        /// Decade start year — 1990 stands for the '90s.
+        let decade: Int
+        let count: Int
+        var id: Int { decade }
+    }
+
     private(set) var currentStreak = 0
     private(set) var longestStreak = 0
 
-    /// The user's most-sorted artists, filled in by `loadTopArtists`.
+    /// The user's most-sorted artists, filled in by `loadTasteProfile`.
     private(set) var topArtists: [ArtistCount] = []
+    /// Top genres across all sorts, most common first. Apple tags every song
+    /// with the umbrella genre "Music", which is filtered out.
+    private(set) var genres: [GenreShare] = []
+    /// Sorts per release decade, oldest decade first and zero-filled in
+    /// between, so the era chart shows gaps as gaps.
+    private(set) var decades: [DecadeCount] = []
+    /// Total playing time of the distinct sorted songs.
+    private(set) var musicSeconds: TimeInterval = 0
+    /// How many sort events actually resolved — the denominator for genre
+    /// shares (a share is "x% of your sorts carried this genre").
+    private(set) var resolvedEventCount = 0
     /// True while the library resolve that powers Top Artists is in flight —
-    /// the card shows skeleton bones meanwhile.
+    /// the card shows skeleton bones meanwhile. Finished-but-empty needs no
+    /// flag of its own: the view hides the card when this is false and
+    /// `topArtists` stayed empty.
     private(set) var isResolvingArtists = false
-    /// Set once the resolve has finished (success or failure), so the view can
-    /// tell "still loading, show bones" apart from "done and empty, hide the
-    /// card" — without this the card would vanish and reappear on load.
-    private(set) var artistResolveFinished = false
 
     private let service = MusicLibraryService.shared
 
@@ -85,53 +111,82 @@ final class InsightsModel {
         currentStreak = streak
     }
 
-    // MARK: - Top artists
+    // MARK: - Taste profile
 
-    /// Cap on how many sorted songs feed the artist ranking. Matches History's
-    /// resolve cap: recent activity is what the ranking should reflect, and it
-    /// keeps the library walk bounded on long histories.
-    private let artistSampleLimit = 200
+    /// Resolves every sorted song from the library and derives the whole
+    /// taste profile from that one batch: artist ranking, genre mix,
+    /// release-decade histogram, and total music time. Uncapped by design —
+    /// the resolve is one library walk whose cost is bounded by library size,
+    /// not by how many IDs it looks for. Sorted songs are library songs by
+    /// definition (sorting added them to a playlist), so the library resolver
+    /// is the right path — no catalog split needed. Failure just leaves
+    /// everything empty; the cards hide themselves rather than surfacing a
+    /// lookup error on a stats screen.
+    func loadTasteProfile(recentFirstSongIDs: [String]) async {
+        guard !recentFirstSongIDs.isEmpty else { return }
 
-    /// Resolves the most recent sorted songs from the library and ranks their
-    /// artists. Sorted songs are library songs by definition (sorting added
-    /// them to a playlist), so the library resolver is the right path — no
-    /// catalog split needed. Failure just leaves `topArtists` empty; the card
-    /// hides itself rather than surfacing an error on a stats screen.
-    func loadTopArtists(recentFirstSongIDs: [String]) async {
-        guard !recentFirstSongIDs.isEmpty else {
-            artistResolveFinished = true
-            return
-        }
-
-        // De-dupe while keeping recency order, then cap. A song sorted twice
-        // (e.g. into two playlists) still counts its artist twice below — the
-        // ranking measures sorting activity, not distinct tracks.
+        // De-dupe for the resolve. A song sorted twice (e.g. into two
+        // playlists) still counts its artist twice below — the ranking
+        // measures sorting activity, not distinct tracks.
         var seen = Set<String>()
-        let uniqueIDs = recentFirstSongIDs
-            .filter { seen.insert($0).inserted }
-            .prefix(artistSampleLimit)
+        let uniqueIDs = recentFirstSongIDs.filter { seen.insert($0).inserted }
 
         isResolvingArtists = true
-        defer {
-            isResolvingArtists = false
-            artistResolveFinished = true
-        }
+        defer { isResolvingArtists = false }
 
         do {
-            let songs = try await service.resolveSongs(ids: Array(uniqueIDs))
+            let songs = try await service.resolveSongs(ids: uniqueIDs)
+            // The cover may have been dismissed mid-walk — the model dies with
+            // the view, so bail before counting and the portrait lookups.
+            if Task.isCancelled { return }
             let byID = Dictionary(
                 songs.map { ($0.id.rawValue, $0) },
                 uniquingKeysWith: { first, _ in first }
             )
-            // Count per artist across the full (pre-dedupe) activity list so
-            // repeat sorts weigh in, skipping songs that no longer resolve.
-            var counts: [String: Int] = [:]
-            for id in recentFirstSongIDs.prefix(artistSampleLimit) {
+            // One pass over the full (pre-dedupe) activity list: artists,
+            // genres and decades all count per sort event so repeat sorts
+            // weigh in, skipping songs that no longer resolve.
+            let calendar = Calendar.current
+            var artistCounts: [String: Int] = [:]
+            var genreCounts: [String: Int] = [:]
+            var decadeCounts: [Int: Int] = [:]
+            var events = 0
+            for id in recentFirstSongIDs {
                 guard let song = byID[id] else { continue }
-                counts[song.artistName, default: 0] += 1
+                events += 1
+                artistCounts[song.artistName, default: 0] += 1
+                for genre in song.genreNames where !Self.isUmbrellaGenre(genre) {
+                    genreCounts[genre, default: 0] += 1
+                }
+                if let released = song.releaseDate {
+                    let year = calendar.component(.year, from: released)
+                    decadeCounts[(year / 10) * 10, default: 0] += 1
+                }
             }
+
+            resolvedEventCount = events
+            genres = Array(
+                genreCounts
+                    .map { GenreShare(name: $0.key, count: $0.value) }
+                    .sorted { lhs, rhs in
+                        if lhs.count != rhs.count { return lhs.count > rhs.count }
+                        return lhs.name < rhs.name   // stable tie-break
+                    }
+                    .prefix(4)
+            )
+            if let oldest = decadeCounts.keys.min(), let newest = decadeCounts.keys.max() {
+                decades = stride(from: oldest, through: newest, by: 10).map {
+                    DecadeCount(decade: $0, count: decadeCounts[$0] ?? 0)
+                }
+            } else {
+                decades = []
+            }
+            // Distinct songs only — `songs` is already de-duped, and "how much
+            // music passed through" shouldn't double-count a re-sorted track.
+            musicSeconds = songs.compactMap(\.duration).reduce(0, +)
+
             var ranked = Array(
-                counts
+                artistCounts
                     .map { ArtistCount(name: $0.key, count: $0.value) }
                     .sorted { lhs, rhs in
                         if lhs.count != rhs.count { return lhs.count > rhs.count }
@@ -139,20 +194,44 @@ final class InsightsModel {
                     }
                     .prefix(3)
             )
+            for index in ranked.indices {
+                ranked[index].seedSong = songs.first(where: { $0.artistName == ranked[index].name })
+            }
+            // Publish rows (and drop the bones) as soon as counting is done —
+            // the portrait lookups below are slow network calls, and the rows
+            // are already useful with their initial-letter circles.
+            topArtists = ranked
+            isResolvingArtists = false
+
             // Attach portraits via the same resolver the Artist hub uses
             // (exact-name catalog match, "Various Artists" guarded), so the
             // face here always matches the artist page a lookup would open.
-            // The resolver wants a Song, so any resolved song by the artist
-            // seeds it; a miss just leaves the initial-letter fallback.
+            // Each write lands in the visible rows, so avatars fill in live.
             for index in ranked.indices {
-                let name = ranked[index].name
-                guard let seed = songs.first(where: { $0.artistName == name }) else { continue }
-                ranked[index].artwork = (try? await service.resolveArtist(for: seed))?.artwork
+                if Task.isCancelled { return }
+                guard let seed = ranked[index].seedSong else { continue }
+                do {
+                    topArtists[index].artwork = try await service.resolveArtist(for: seed)?.artwork
+                } catch {
+                    // "No catalog page" is the nil return above — a throw is a
+                    // real lookup failure, and the initial-letter fallback
+                    // shouldn't hide it from the log.
+                    print("InsightsModel portrait resolve failed for \(ranked[index].name): \(error)")
+                }
             }
-            topArtists = ranked
         } catch {
-            print("InsightsModel.loadTopArtists failed: \(error)")
+            print("InsightsModel.loadTasteProfile failed: \(error)")
             topArtists = []
+            genres = []
+            decades = []
+            musicSeconds = 0
+            resolvedEventCount = 0
         }
+    }
+
+    /// Apple tags every catalog song with the generic "Music" genre — it says
+    /// nothing about taste, so the genre mix skips it.
+    private static func isUmbrellaGenre(_ name: String) -> Bool {
+        name.caseInsensitiveCompare("Music") == .orderedSame
     }
 }

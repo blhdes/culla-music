@@ -131,6 +131,14 @@ final class MusicLibraryService {
     /// `clipPlayer.volume`.
     private var clipVolumeRampTask: Task<Void, Never>?
 
+    /// Bumped on every `playPreview`/`stopPreview` call. `ApplicationMusicPlayer.play()`
+    /// can take a while to resolve (cold-start latency); an in-flight play task
+    /// checks its captured generation against the current one before committing
+    /// `isPlayingPreview`/`nowPlayingSongID`, so a stop that lands first (e.g. the
+    /// user backing out of a swipe session before autoplay's first `play()` even
+    /// returns) isn't silently ignored by a later, now-stale success.
+    private var playGeneration: Int = 0
+
     private init() {}
 
     // MARK: - Authorization
@@ -1180,21 +1188,25 @@ final class MusicLibraryService {
     // MARK: - Playback
 
     func playPreview(for song: Song) {
+        playGeneration += 1
+        let generation = playGeneration
         let useHotPreview = UserDefaults.standard.bool(forKey: "useHotPreview")
         if useHotPreview {
             Task { @MainActor in
-                await playWithHotClipIfPossible(song)
+                await playWithHotClipIfPossible(song, generation: generation)
             }
             return
         }
-        playFullSong(song)
+        playFullSong(song, generation: generation)
     }
 
-    private func playWithHotClipIfPossible(_ song: Song) async {
+    private func playWithHotClipIfPossible(_ song: Song, generation: Int) async {
         if let url = await resolveHotClipURL(for: song) {
-            await playHotClip(url: url, songID: song.id.rawValue)
+            guard generation == playGeneration else { return }
+            await playHotClip(url: url, songID: song.id.rawValue, generation: generation)
         } else {
-            playFullSong(song)
+            guard generation == playGeneration else { return }
+            playFullSong(song, generation: generation)
         }
     }
 
@@ -1255,6 +1267,12 @@ final class MusicLibraryService {
         // A *paused* preview still has a song + clip loaded (isPlayingPreview is
         // false but nowPlayingSongID is set), so swiping away must still tear it
         // down — hence the second clause.
+        // Invalidate any in-flight play() first, unconditionally — autoplay may
+        // still be cold-starting (isPlayingPreview/nowPlayingSongID not written
+        // yet), and without this the guard below would no-op while that call
+        // later lands and starts audio on whatever screen is showing next.
+        playGeneration += 1
+
         guard isPlayingPreview || nowPlayingSongID != nil else { return }
         clipVolumeRampTask?.cancel()
         clipVolumeRampTask = nil
@@ -1304,14 +1322,21 @@ final class MusicLibraryService {
             clipPlayer.play()
             rampClipVolume(to: 1, duration: 0.22)
         } else {
+            let generation = playGeneration
             Task { @MainActor in
                 do {
                     try await player.play()
+                    guard generation == playGeneration else {
+                        player.pause()
+                        return
+                    }
                     isPlayingPreview = true
                     startFullSongPositionTimer()
                 } catch {
                     print("[playback] resume failed: \(error)")
-                    isPlayingPreview = false
+                    if generation == playGeneration {
+                        isPlayingPreview = false
+                    }
                 }
             }
         }
@@ -1355,13 +1380,21 @@ final class MusicLibraryService {
         playbackPosition = target
     }
 
-    private func playFullSong(_ song: Song) {
+    private func playFullSong(_ song: Song, generation: Int) {
         stopClipPlayer()
         stopPositionObservers()
         Task { @MainActor in
             do {
                 player.queue = ApplicationMusicPlayer.Queue(for: [song])
                 try await player.play()
+                guard generation == playGeneration else {
+                    // Superseded by a newer play or a stop before this landed —
+                    // e.g. the user backed out of the swipe session while
+                    // MusicKit was still cold-starting. Silence it rather than
+                    // let it surface on a screen with no transport to stop it.
+                    player.pause()
+                    return
+                }
                 isPlayingPreview = true
                 nowPlayingSongID = song.id.rawValue
                 playbackPosition = 0
@@ -1369,13 +1402,15 @@ final class MusicLibraryService {
                 startFullSongPositionTimer()
             } catch {
                 print("Playback failed: \(error)")
-                isPlayingPreview = false
-                nowPlayingSongID = nil
+                if generation == playGeneration {
+                    isPlayingPreview = false
+                    nowPlayingSongID = nil
+                }
             }
         }
     }
 
-    private func playHotClip(url: URL, songID: String) async {
+    private func playHotClip(url: URL, songID: String, generation: Int) async {
         player.pause()
         stopClipPlayer()
         stopPositionObservers()
@@ -1392,6 +1427,7 @@ final class MusicLibraryService {
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
         await applyFadeEnvelope(to: item, asset: asset)
+        guard generation == playGeneration else { return }
         clipPlayer.replaceCurrentItem(with: item)
 
         // The 30s preview is a finite clip — when it reaches the end, treat it

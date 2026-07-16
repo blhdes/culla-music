@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import MusicKit
+import UIKit
 
 /// A reverse-chronological timeline of past movements — songs sorted into a
 /// playlist (or loved) and songs dismissed. Swipe a row to undo: a sort is
@@ -119,9 +120,10 @@ struct HistorySheet: View {
     /// falls back to the honest undo so the action is never a dead button.
     @ViewBuilder
     private func rowAction(for entry: HistoryStore.Entry, store: HistoryStore) -> some View {
-        if entry.isStale {
-            // Phantom log entry — the song already left the playlist (removed in
-            // Music). Nothing to undo or open; the row stays purely as a record.
+        if entry.isStale || (entry.song == nil && !store.isResolving) {
+            // Tombstone — the song left its playlist or the library entirely
+            // (removed in Music). Nothing to undo or open; the row stays
+            // purely as a record of the movement.
             EmptyView()
         } else if case .sorted(_, _, let createdByApp) = entry.movement, !createdByApp {
             // Culla can't remove from the user's own playlists — so instead of a
@@ -235,12 +237,15 @@ private struct HistoryRow: View {
                     SkeletonShape(shape: Capsule()).frame(width: 150, height: 11)
                     SkeletonShape(shape: Capsule()).frame(width: 92, height: 9)
                 } else {
-                    Text(entry.song?.title ?? String(localized: "Track unavailable"))
+                    // Tombstones fall back to the identity saved at movement
+                    // time; the localized strings only surface for rows from
+                    // before snapshots existed.
+                    Text(entry.song?.title ?? entry.snapshotTitle ?? String(localized: "Track unavailable"))
                         .font(.system(.subheadline, design: .rounded).weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Text(entry.song?.artistName ?? String(localized: "No longer in your library"))
+                    Text(entry.song?.artistName ?? entry.snapshotArtist ?? String(localized: "No longer in your library"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -259,9 +264,9 @@ private struct HistoryRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        // Phantom log entry — the song left the playlist (removed in Music), so
-        // the row recedes but stays as a record of what once happened.
-        .opacity(entry.isStale ? 0.5 : 1)
+        // Tombstone — the song left its playlist or the library (removed in
+        // Music), so the row recedes but stays as a record of what happened.
+        .opacity(entry.isStale || isTombstone ? 0.5 : 1)
     }
 
     @ViewBuilder
@@ -280,6 +285,15 @@ private struct HistoryRow: View {
                     )
                 if let artwork = entry.song?.artwork {
                     ArtworkImage(artwork, width: 52, height: 52)
+                } else if let data = entry.snapshotArtworkData,
+                          let cover = UIImage(data: data) {
+                    // The saved cover, drained of color on purpose — together
+                    // with the dimmed row it reads as "was here, gone now".
+                    Image(uiImage: cover)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .saturation(0)
                 }
             }
             .frame(width: 52, height: 52)
@@ -319,8 +333,16 @@ private struct HistoryRow: View {
 
     // While the library walk is in flight a nil song means "still resolving" →
     // show skeleton bones. Once it's done, a nil song means the track was
-    // removed from the library, so the row falls back to "Track unavailable".
+    // removed from the library — see `isTombstone`.
     private var isPlaceholder: Bool {
         entry.song == nil && isResolving
+    }
+
+    // The resolve finished and the song is gone: the row becomes a greyed
+    // tombstone — saved identity, desaturated cover, swipe actions blocked
+    // (see HistorySheet.rowAction). Covers rows the reconcilers haven't
+    // voided yet too, so a just-deleted song can't offer a dead Undo.
+    private var isTombstone: Bool {
+        entry.song == nil && !isResolving
     }
 }

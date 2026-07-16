@@ -401,6 +401,10 @@ final class MusicSwipeViewModel {
         if let existing = dismissedStore.record(for: songID) {
             let originalDismissedAt = existing.dismissedAt
             existing.dismissedAt = .now
+            // A re-dismiss is live evidence the song exists — clear any stale
+            // void and (re)capture the identity snapshot older rows lack.
+            existing.voidedAt = nil
+            MovementSnapshotter.capture(from: song, into: existing, context: modelContext)
             try? modelContext.save()
             undoCoordinator.record(.redismissed(
                 song: song,
@@ -417,6 +421,7 @@ final class MusicSwipeViewModel {
 
         let record = DismissedSong(songID: songID)
         modelContext.insert(record)
+        MovementSnapshotter.capture(from: song, into: record, context: modelContext)
         try? modelContext.save()
         undoCoordinator.record(.dismissed(song: song, record: record))
         sessionExclusionSet.insert(songID)
@@ -464,6 +469,7 @@ final class MusicSwipeViewModel {
 
             let sortedRecord = SortedSong(songID: song.id.rawValue, playlist: playlist)
             modelContext.insert(sortedRecord)
+            MovementSnapshotter.capture(from: song, into: sortedRecord, context: modelContext)
             try? modelContext.save()
             undoCoordinator.record(.sortedFromDismissed(
                 song: song,
@@ -497,6 +503,7 @@ final class MusicSwipeViewModel {
 
         let record = SortedSong(songID: song.id.rawValue, playlist: playlist)
         modelContext.insert(record)
+        MovementSnapshotter.capture(from: song, into: record, context: modelContext)
         try? modelContext.save()
         if let originalDismissedAt {
             undoCoordinator.record(.sortedFromDismissed(
@@ -624,6 +631,7 @@ final class MusicSwipeViewModel {
 
             let record = SortedSong(songID: songID, playlist: playlist)
             modelContext.insert(record)
+            MovementSnapshotter.capture(from: song, into: record, context: modelContext)
             try? modelContext.save()
             let recordID = record.id
             if let originalDismissedAt {
@@ -708,6 +716,7 @@ final class MusicSwipeViewModel {
             let restored = DismissedSong(songID: songID)
             restored.dismissedAt = restoreDismissedAt
             modelContext.insert(restored)
+            MovementSnapshotter.capture(from: song, into: restored, context: modelContext)
             dismissedStore.set(songID: songID, date: restoreDismissedAt)
             classifyDismissedTrack(recordID: restored.id, song: song)
         }
@@ -762,6 +771,7 @@ final class MusicSwipeViewModel {
             let restored = DismissedSong(songID: song.id.rawValue)
             restored.dismissedAt = originalDismissedAt
             modelContext.insert(restored)
+            MovementSnapshotter.capture(from: song, into: restored, context: modelContext)
             try? modelContext.save()
             classifyDismissedTrack(recordID: restored.id, song: song)
             // No-op for the dismissed-review path (never excluded there); clears
@@ -788,6 +798,7 @@ final class MusicSwipeViewModel {
             let restored = DismissedSong(songID: song.id.rawValue)
             restored.dismissedAt = originalDismissedAt
             modelContext.insert(restored)
+            MovementSnapshotter.capture(from: song, into: restored, context: modelContext)
             try? modelContext.save()
             classifyDismissedTrack(recordID: restored.id, song: song)
             sessionExclusionSet.remove(song.id.rawValue)
@@ -875,7 +886,12 @@ final class MusicSwipeViewModel {
         let sortDescriptor = ascending
             ? SortDescriptor<DismissedSong>(\.dismissedAt, order: .forward)
             : SortDescriptor<DismissedSong>(\.dismissedAt, order: .reverse)
-        let descriptor = FetchDescriptor<DismissedSong>(sortBy: [sortDescriptor])
+        // Active rows only — voided rows (song deleted from the library) are
+        // History tombstones, not deck content.
+        let descriptor = FetchDescriptor<DismissedSong>(
+            predicate: DismissedSong.activePredicate,
+            sortBy: [sortDescriptor]
+        )
         let dismissed = (try? modelContext.fetch(descriptor)) ?? []
 
         guard !dismissed.isEmpty || !lead.isEmpty else {
@@ -889,25 +905,24 @@ final class MusicSwipeViewModel {
         let resolved = remainingIDs.isEmpty
             ? []
             : try await service.resolveSongs(orderedIDs: remainingIDs, catalogIDs: catalogIDs)
-        pruneOrphanedDismissals(rows: remaining, resolved: resolved)
+        voidOrphanedDismissals(rows: remaining, resolved: resolved)
         populateQueue(with: lead + resolved)
     }
 
-    /// Deletes dismissed rows that resolved to nothing — stale records left
+    /// Voids dismissed rows that resolved to nothing — stale records left
     /// behind when a previously-dismissed song is later removed from the
     /// library. `resolveSongs` pages the entire library when it can't find an
     /// ID, so a library row that didn't resolve is authoritatively gone (the
-    /// shared reconciler skips catalog rows). Also drops the pruned IDs from
-    /// `dismissedStore` so the in-memory dates map stays in lockstep.
-    private func pruneOrphanedDismissals(rows: [DismissedSong], resolved: [Song]) {
-        let pruned = DismissedSongReconciler.pruneOrphans(
+    /// shared reconciler skips catalog rows). Voided rows stay in History as
+    /// greyed tombstones; counts and this deck skip them via
+    /// `DismissedSong.activePredicate`. `dismissedStore` keeps their dates —
+    /// a voided row is still "dismissed at X", just not surfaceable.
+    private func voidOrphanedDismissals(rows: [DismissedSong], resolved: [Song]) {
+        DismissedSongReconciler.reconcile(
             rows: rows,
             resolvedIDs: Set(resolved.map { $0.id.rawValue }),
             in: modelContext
         )
-        for songID in pruned {
-            dismissedStore.remove(songID: songID)
-        }
     }
 
     /// First few songs of the un-dealt queue (beyond `nextSong`). The swipe

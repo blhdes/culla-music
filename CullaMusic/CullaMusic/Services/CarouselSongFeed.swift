@@ -210,7 +210,10 @@ final class CarouselSongFeed {
 
     private func loadAllDismissed() async {
         let ascending = sortOrder.ascending
+        // Active rows only — voided rows (song deleted from the library) are
+        // History tombstones, not browsable covers.
         let descriptor = FetchDescriptor<DismissedSong>(
+            predicate: DismissedSong.activePredicate,
             sortBy: [SortDescriptor(\.dismissedAt, order: ascending ? .forward : .reverse)]
         )
         guard
@@ -226,10 +229,10 @@ final class CarouselSongFeed {
             songs = try await service.resolveSongs(orderedIDs: ids, catalogIDs: catalogIDs)
             // `resolveSongs` pages the whole library for the non-catalog IDs,
             // so a library row it didn't return is authoritatively gone —
-            // same prune the swipe deck runs, kept here so browsing dismissed
-            // covers also heals stale rows. Inside the do-block on purpose: a
-            // FAILED resolve proves nothing and must never prune.
-            DismissedSongReconciler.pruneOrphans(
+            // same voiding the swipe deck runs, kept here so browsing
+            // dismissed covers also heals stale rows. Inside the do-block on
+            // purpose: a FAILED resolve proves nothing and must never void.
+            DismissedSongReconciler.reconcile(
                 rows: rows,
                 resolvedIDs: Set(songs.map { $0.id.rawValue }),
                 in: modelContext

@@ -39,10 +39,10 @@ struct HomeHeroArtStack: View {
     /// loaded). Used by HomeView to open the full carousel exploration screen.
     var onHeroTap: (() -> Void)? = nil
     /// Fires when the dismissed-deck load proves some `DismissedSong` rows are
-    /// orphaned (their song was deleted from the library) and prunes them.
+    /// orphaned (their song was deleted from the library) and voids them.
     /// HomeView uses it to recompute the mode-tile counts, so the Dismissed
-    /// badge drops to the real number instead of counting phantom rows.
-    var onDismissedOrphansPruned: (() -> Void)? = nil
+    /// badge drops to the real number instead of counting tombstone rows.
+    var onDismissedOrphansVoided: (() -> Void)? = nil
     /// Apple Music song-id of the last cover the user centred inside the
     /// carousel exploration screen. When set, the scrub deck prepends that
     /// song's artwork at position 0 so the hero reflects "where you left
@@ -770,14 +770,15 @@ struct HomeHeroArtStack: View {
     /// The per-ID filter doubles as orphan detection: an exact-ID library
     /// request only ever returns the match or nothing, so a request that
     /// SUCCEEDS empty proves the song was deleted from the library. Those rows
-    /// are pruned (via the shared reconciler, which spares catalog rows) and
+    /// are voided (via the shared reconciler, which spares catalog rows) and
     /// the window re-fetched — otherwise a deleted song holds a deck slot as
     /// a blank forever while Home's Dismissed count keeps counting it.
     private func fetchRecentlyDismissedArtworks(limit: Int) async -> [Artwork] {
-        // Each pass either returns, or prunes ≥1 orphan row and re-fetches the
-        // now-smaller window — so the loop always terminates.
+        // Each pass either returns, or voids ≥1 orphan row and re-fetches the
+        // now-smaller active window — so the loop always terminates.
         while !Task.isCancelled {
             var descriptor = FetchDescriptor<DismissedSong>(
+                predicate: DismissedSong.activePredicate,
                 sortBy: [SortDescriptor(
                     \.dismissedAt,
                     order: sortOrder.ascending ? .forward : .reverse
@@ -842,7 +843,7 @@ struct HomeHeroArtStack: View {
             // (the cold-open trap SortedSongReconciler refuses to reconcile
             // against). One limit-1 probe settles it: a readable library
             // returns something, so the misses really are deletions. If even
-            // the probe comes back empty, skip pruning — a later pass
+            // the probe comes back empty, skip voiding — a later pass
             // self-heals once the library is actually there.
             let hasOrphanCandidates = decisiveRows.contains {
                 !$0.isCatalogTrack && !inLibraryIDs.contains($0.songID)
@@ -854,16 +855,16 @@ struct HomeHeroArtStack: View {
                 guard let probeItems, !probeItems.isEmpty else { return artworks }
             }
 
-            let pruned = DismissedSongReconciler.pruneOrphans(
+            let voided = DismissedSongReconciler.reconcile(
                 rows: decisiveRows,
                 resolvedIDs: inLibraryIDs,
                 in: modelContext
             )
-            guard !pruned.isEmpty else { return artworks }
+            guard !voided.isEmpty else { return artworks }
 
-            onDismissedOrphansPruned?()
-            // The window shrank — go around to refill it from the rows that
-            // were previously beyond the fetchLimit.
+            onDismissedOrphansVoided?()
+            // The active window shrank — go around to refill it from the rows
+            // that were previously beyond the fetchLimit.
         }
         return []
     }

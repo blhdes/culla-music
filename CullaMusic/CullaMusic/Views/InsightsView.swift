@@ -532,7 +532,11 @@ struct InsightsView: View {
     private func detailsCard(lovedCount: Int) -> some View {
         GlassPanel(icon: "list.bullet.rectangle.fill", title: "Details") {
             VStack(spacing: 0) {
-                detailRow("Dismissed", value: "\(dismissedSongs.count)")
+                // Active rows only, matching Home's badge — voided rows (song
+                // deleted from the library) are History tombstones. The other
+                // stats keep ALL rows on purpose: they count decisions made,
+                // and a decision doesn't un-happen when its song is deleted.
+                detailRow("Dismissed", value: "\(dismissedSongs.count { $0.voidedAt == nil })")
                 detailRow("Keep rate", value: keepRateText)
                 detailRow("Loved", value: "\(lovedCount)")
                 detailRow("Playlists", value: "\(playlists.count)")

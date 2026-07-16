@@ -33,12 +33,24 @@ final class HistoryStore {
         let date: Date
         let movement: Movement
         let isCatalogTrack: Bool
+        /// Saved display identity captured at movement time (see
+        /// `MovementSnapshotting`). When the song no longer resolves, these
+        /// keep the row readable as a greyed tombstone instead of collapsing
+        /// to "Track unavailable". Nil on rows from before snapshots existed.
+        let snapshotTitle: String?
+        let snapshotArtist: String?
+        /// Saved cover bytes. Filled lazily AFTER the resolve pass, and only
+        /// for entries whose song is gone — copying blobs up front would drag
+        /// every row's external-storage data into memory for covers that
+        /// `ArtworkImage` already renders live.
+        var snapshotArtworkData: Data? = nil
         var song: Song?         // filled in lazily by `resolveSongs`
-        /// Set by `reconcileSortedMemberships` when a sort's song is no longer
-        /// in its playlist — i.e. the user removed it directly in the Music app,
-        /// so Culla's saved record and reality have drifted. The row stays as a
-        /// dimmed, action-less phantom (a log of what happened) rather than
-        /// vanishing. Recomputed every open, so re-adding the song un-greys it.
+        /// Set when the saved record and reality have drifted: a sort whose
+        /// song left its playlist (`reconcileSortedMemberships`) or a
+        /// dismissal whose song left the library (`reconcileDismissedRows`).
+        /// The row stays as a dimmed, action-less phantom (a log of what
+        /// happened) rather than vanishing. Recomputed every open, so
+        /// re-adding the song un-greys it.
         var isStale = false
     }
 
@@ -65,6 +77,12 @@ final class HistoryStore {
     private let modelContext: ModelContext
     private let service = MusicLibraryService.shared
 
+    /// Live rows the entries were built from, kept for the post-resolve
+    /// passes (dismissed reconcile + snapshot backfill). Refreshed on every
+    /// `load`; undo still refetches its row by id, so holding these is safe.
+    private var sortedRowsByID: [UUID: SortedSong] = [:]
+    private var dismissedRowsByID: [UUID: DismissedSong] = [:]
+
     private var lovedPlaylistID: String {
         UserDefaults.standard.string(forKey: LovedPlaylistResolver.defaultsKey) ?? ""
     }
@@ -75,15 +93,14 @@ final class HistoryStore {
 
     var isEmpty: Bool { visibleEntries.isEmpty }
 
-    /// Entries worth rendering. Drops "dead phantom" rows — a sort that's both
-    /// voided (greyed; its song left the playlist) AND unresolvable (the song
-    /// is gone from the library): no track identity, no swipe action, nothing
-    /// the user can act on. Resolved-but-voided rows stay (a readable log), and
-    /// unresolved-but-active rows stay (still undoable for cleanup); only the
-    /// useless intersection is hidden. Safe during load — `isStale` is set only
-    /// after the resolve, so this never hides a row that's merely still loading.
+    /// Entries worth rendering. Drops only truly "dead phantom" rows — voided
+    /// (greyed), unresolvable (song gone from the library), AND without a
+    /// saved snapshot: no track identity at all, nothing to read or act on.
+    /// Rows with a snapshot stay as tombstones (the saved title/artist/cover
+    /// keeps them a readable record); resolved-but-voided rows stay too.
+    /// Only pre-snapshot rows whose song is gone can still hit this filter.
     private var visibleEntries: [Entry] {
-        entries.filter { !($0.isStale && $0.song == nil) }
+        entries.filter { !($0.isStale && $0.song == nil && $0.snapshotTitle == nil) }
     }
 
     /// Entries grouped into day sections, newest day first. Recomputed when
@@ -107,6 +124,10 @@ final class HistoryStore {
         isLoading = true
         let sortedRows = (try? modelContext.fetch(FetchDescriptor<SortedSong>())) ?? []
         let dismissedRows = (try? modelContext.fetch(FetchDescriptor<DismissedSong>())) ?? []
+        // Kept for the post-resolve passes (dismissed reconcile + snapshot
+        // backfill), which need the live rows the entries were built from.
+        sortedRowsByID = Dictionary(uniqueKeysWithValues: sortedRows.map { ($0.id, $0) })
+        dismissedRowsByID = Dictionary(uniqueKeysWithValues: dismissedRows.map { ($0.id, $0) })
 
         let lovedID = lovedPlaylistID
         var built: [Entry] = []
@@ -127,6 +148,8 @@ final class HistoryStore {
                     createdByApp: playlist.createdByApp
                 ),
                 isCatalogTrack: false,
+                snapshotTitle: row.snapshotTitle,
+                snapshotArtist: row.snapshotArtist,
                 song: nil
             ))
         }
@@ -137,7 +160,12 @@ final class HistoryStore {
                 date: row.dismissedAt,
                 movement: .dismissed,
                 isCatalogTrack: row.isCatalogTrack,
-                song: nil
+                snapshotTitle: row.snapshotTitle,
+                snapshotArtist: row.snapshotArtist,
+                song: nil,
+                // Already-voided rows grey out immediately — no need to wait
+                // for the resolve to prove again what a past pass recorded.
+                isStale: row.voidedAt != nil
             ))
         }
 
@@ -146,8 +174,79 @@ final class HistoryStore {
         entries = built
         isLoading = false
 
-        await resolveSongs()
+        let resolvedIDs = await resolveSongs()
         await reconcileSortedMemberships()
+        if let resolvedIDs {
+            reconcileDismissedRows(resolvedIDs: resolvedIDs)
+        }
+        backfillSnapshots()
+    }
+
+    /// Mirrors `reconcileSortedMemberships` for dismissals: the resolve pass
+    /// paged the library for every entry's ID, so a dismissed row whose song
+    /// didn't come back was deleted from the library. The shared reconciler
+    /// voids it (and un-voids any whose song returned); the entry greys to a
+    /// tombstone in place. Evidence-scoped: only rows whose IDs the resolve
+    /// actually checked are passed, and an all-empty resolve is refused — on
+    /// a cold open the library can read back empty before syncing, and
+    /// voiding everything against that would grey out real records.
+    private func reconcileDismissedRows(resolvedIDs: Set<String>) {
+        guard !resolvedIDs.isEmpty else { return }
+        let checkedIDs = Set(entries.map(\.songID))
+        let checkedRows = dismissedRowsByID.values.filter { checkedIDs.contains($0.songID) }
+        guard !checkedRows.isEmpty else { return }
+        DismissedSongReconciler.reconcile(
+            rows: Array(checkedRows),
+            resolvedIDs: resolvedIDs,
+            in: modelContext
+        )
+        entries = entries.map { entry in
+            guard case .dismissed = entry.movement,
+                  let row = dismissedRowsByID[entry.id] else { return entry }
+            var copy = entry
+            copy.isStale = row.voidedAt != nil
+            return copy
+        }
+    }
+
+    /// Two jobs after the resolve settles:
+    /// - Rows that predate snapshots get one captured now from their live
+    ///   `Song` (with a per-open cap on artwork downloads), so the identity is
+    ///   saved BEFORE the song can ever disappear.
+    /// - Entries whose song is gone pull their saved cover bytes in, so the
+    ///   tombstone rows render with the remembered artwork.
+    private func backfillSnapshots() {
+        var artworkBudget = 50
+        var wroteIdentity = false
+        entries = entries.map { entry in
+            var copy = entry
+            let row: (any MovementSnapshotting & PersistentModel)? = switch entry.movement {
+            case .sorted:    sortedRowsByID[entry.id]
+            case .dismissed: dismissedRowsByID[entry.id]
+            }
+            guard let row else { return copy }
+
+            if let song = entry.song {
+                let needsIdentity = row.snapshotTitle == nil || row.snapshotArtist == nil
+                let wantsArtwork = row.snapshotArtworkData == nil && artworkBudget > 0
+                if needsIdentity || wantsArtwork {
+                    if wantsArtwork { artworkBudget -= 1 }
+                    MovementSnapshotter.capture(
+                        from: song,
+                        into: row,
+                        context: modelContext,
+                        fetchArtwork: wantsArtwork
+                    )
+                    wroteIdentity = wroteIdentity || needsIdentity
+                }
+            } else {
+                copy.snapshotArtworkData = row.snapshotArtworkData
+            }
+            return copy
+        }
+        if wroteIdentity {
+            try? modelContext.save()
+        }
     }
 
     /// Greys out sort entries whose song is no longer in the playlist — the
@@ -188,9 +287,14 @@ final class HistoryStore {
     /// catalog-only tracks come from `DismissedSong.isCatalogTrack`, everything
     /// else from the library (a sorted song is in the library by definition —
     /// adding it to a playlist added it). Unresolved IDs (song later removed
-    /// from the library) simply keep a nil `song` and render as "unavailable".
-    private func resolveSongs() async {
-        guard !entries.isEmpty else { return }
+    /// from the library) simply keep a nil `song` and render as tombstones.
+    ///
+    /// Returns the set of song IDs that resolved, or nil when the resolve
+    /// failed outright — the caller uses it as reconcile evidence, and a
+    /// failed walk must never masquerade as "nothing resolved".
+    @discardableResult
+    private func resolveSongs() async -> Set<String>? {
+        guard !entries.isEmpty else { return nil }
         isResolving = true
         defer { isResolving = false }
 
@@ -223,18 +327,19 @@ final class HistoryStore {
                     copy.song = byID[entry.songID]
                     return copy
                 }
-                return
+                return Set(byID.keys)
             } catch {
                 // First failure: let the library settle, then retry once.
-                // Second: give up — rows fall back to "Track unavailable."
+                // Second: give up — rows fall back to their tombstone state.
                 guard attempt == 0 else {
                     print("HistoryStore.resolveSongs failed: \(error)")
-                    return
+                    return nil
                 }
                 try? await Task.sleep(for: .milliseconds(600))
-                if Task.isCancelled { return }
+                if Task.isCancelled { return nil }
             }
         }
+        return nil
     }
 
     // MARK: - Undo

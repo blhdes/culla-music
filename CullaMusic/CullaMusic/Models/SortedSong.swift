@@ -16,6 +16,14 @@ final class SortedSong {
     /// is a safe lightweight SwiftData migration.
     var voidedAt: Date?
 
+    /// Saved display identity from the moment of sorting — see
+    /// `MovementSnapshotting`. Lets History keep showing the track (greyed)
+    /// after the song leaves the library. Optional: rows from before this
+    /// feature have none and fall back to "Track unavailable".
+    var snapshotTitle: String?
+    var snapshotArtist: String?
+    @Attribute(.externalStorage) var snapshotArtworkData: Data?
+
     init(songID: String, playlist: Playlist) {
         self.id = UUID()
         self.songID = songID
@@ -23,6 +31,8 @@ final class SortedSong {
         self.playlist = playlist
     }
 }
+
+extension SortedSong: MovementSnapshotting {}
 
 /// Single source of truth for keeping `SortedSong.voidedAt` in step with what's
 /// actually in each playlist. Both the swipe deck (at session start) and the

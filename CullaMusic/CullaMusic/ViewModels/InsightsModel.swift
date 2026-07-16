@@ -19,6 +19,11 @@ final class InsightsModel {
         /// The artist-page portrait, filled by `loadTasteProfile` when the name
         /// resolves to a catalog artist; nil → the view shows an initial circle.
         var artwork: Artwork?
+        /// True once the portrait lookup has finished, found or not. Until
+        /// then `artwork == nil` means "still looking" and the view shimmers
+        /// a bone; after, it means "no portrait exists" and the view settles
+        /// on the initial-letter circle.
+        var portraitResolved = false
         var id: String { name }
     }
 
@@ -209,7 +214,12 @@ final class InsightsModel {
             // Each write lands in the visible rows, so avatars fill in live.
             for index in ranked.indices {
                 if Task.isCancelled { return }
-                guard let seed = ranked[index].seedSong else { continue }
+                guard let seed = ranked[index].seedSong else {
+                    // No seed song → no lookup to run; settle the row now so
+                    // its bone doesn't shimmer forever.
+                    topArtists[index].portraitResolved = true
+                    continue
+                }
                 do {
                     topArtists[index].artwork = try await service.resolveArtist(for: seed)?.artwork
                 } catch {
@@ -218,6 +228,7 @@ final class InsightsModel {
                     // shouldn't hide it from the log.
                     print("InsightsModel portrait resolve failed for \(ranked[index].name): \(error)")
                 }
+                topArtists[index].portraitResolved = true
             }
         } catch {
             print("InsightsModel.loadTasteProfile failed: \(error)")

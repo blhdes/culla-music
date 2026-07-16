@@ -415,24 +415,35 @@ struct InsightsView: View {
         }
     }
 
-    /// Round artist-page portrait sitting just before the count. The initial
-    /// circle is layered *behind* `ArtworkImage` rather than swapped with it
-    /// (`ArtworkImage` is transparent while it loads — see the same pattern in
-    /// ManagePlaylistsSheet), and it doubles as the fallback for artists that
-    /// never resolved to a catalog page, keeping the count column aligned.
+    /// Round artist-page portrait sitting just before the count, in three
+    /// states: a shimmering bone while the portrait lookup is in flight, the
+    /// portrait once it lands, and the initial-letter circle only when the
+    /// lookup finished empty (no catalog page). The bone is layered *behind*
+    /// `ArtworkImage` rather than swapped with it (`ArtworkImage` is
+    /// transparent while it downloads — see the same pattern in
+    /// ManagePlaylistsSheet), so the face paints over a still-loading shimmer
+    /// instead of popping over a settled letter. Fixed frame either way keeps
+    /// the count column aligned.
     private func artistAvatar(_ artist: InsightsModel.ArtistCount) -> some View {
         ZStack {
-            Circle()
-                .fill(Color.primary.opacity(0.08))
-            Text(artist.name.prefix(1).uppercased())
-                .font(.system(.caption, design: .rounded).weight(.semibold))
-                .foregroundStyle(.secondary)
+            if artist.portraitResolved && artist.artwork == nil {
+                Circle()
+                    .fill(Color.primary.opacity(0.08))
+                Text(artist.name.prefix(1).uppercased())
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else {
+                SkeletonShape(shape: Circle())
+            }
             if let artwork = artist.artwork {
                 ArtworkImage(artwork, width: 28, height: 28)
                     .clipShape(Circle())
             }
         }
         .frame(width: 28, height: 28)
+        // Bone → letter is a real state change (lookup came back empty);
+        // crossfade it instead of snapping.
+        .animation(.easeOut(duration: 0.25), value: artist.portraitResolved)
     }
 
     // MARK: - Recent taste

@@ -1236,6 +1236,52 @@
         }
       }
     },
+    "Album name under the song title": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albumname unter dem Songtitel"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El nombre del álbum bajo el título"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le nom de l'album sous le titre"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il nome dell'album sotto il titolo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲名の下にアルバム名を表示します"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nome do álbum abaixo do título"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在歌名下方显示专辑名"
+          }
+        }
+      }
+    },
     "All Library": {
       "localizations": {
         "de": {
@@ -3496,6 +3542,52 @@
         }
       }
     },
+    "Each new card starts playing on its own": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jede neue Karte spielt von selbst los"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada nueva tarjeta empieza a sonar sola"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chaque nouvelle carte se lance toute seule"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ogni nuova carta parte da sola"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいカードが自動で再生されます"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada novo cartão começa a tocar sozinho"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每张新卡片自动开始播放"
+          }
+        }
+      }
+    },
     "Emerald": {
       "localizations": {
         "de": {
@@ -4553,6 +4645,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "跳转到日期"
+          }
+        }
+      }
+    },
+    "Jump to songs added around a date": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Springe zu Songs, die du um ein Datum hinzugefügt hast"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salta a las canciones añadidas en torno a una fecha"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sautez aux morceaux ajoutés autour d'une date"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salta ai brani aggiunti intorno a una data"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加した日付のあたりの曲にジャンプします"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pule para músicas adicionadas perto de uma data"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳转到某个日期前后添加的歌曲"
           }
         }
       }
@@ -9893,6 +10031,52 @@
         }
       }
     },
+    "The hottest 30 seconds instead of the full song": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die heißesten 30 Sekunden statt des ganzen Songs"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los 30 segundos más intensos en vez de la canción entera"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les 30 secondes les plus fortes au lieu du morceau entier"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I 30 secondi più intensi invece del brano intero"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲全体ではなく、いちばん盛り上がる30秒を再生します"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os 30 segundos mais intensos em vez da música inteira"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只播放最精彩的30秒，而非整首歌"
+          }
+        }
+      }
+    },
     "Theme": {
       "localizations": {
         "de": {
@@ -9981,6 +10165,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "此播放列表为只读——整理后的歌曲将保留原位。"
+          }
+        }
+      }
+    },
+    "Tint the app to match each cover": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Färbt die App passend zum Cover"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiñe la app con el color de cada portada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teinte l'app aux couleurs de chaque pochette"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tinge l'app con i colori di ogni copertina"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリの色をアートワークに合わせます"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tinge o app com as cores de cada capa"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "让应用颜色跟随每张封面"
           }
         }
       }
@@ -10763,6 +10993,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "歌曲去向"
+          }
+        }
+      }
+    },
+    "Where your loved songs land": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hier landen deine Favoriten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Donde van tus canciones favoritas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Là où vont vos favoris"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dove finiscono i tuoi brani preferiti"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りにした曲の保存先です"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para onde vão suas músicas favoritas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "喜欢的歌曲会保存到这里"
           }
         }
       }

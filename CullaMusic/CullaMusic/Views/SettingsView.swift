@@ -118,9 +118,17 @@ struct SettingsView: View {
             rowDivider
             colorRow
             rowDivider
-            SettingsToggleRow(title: "Match song artwork", isOn: $useDynamicAccent)
+            SettingsToggleRow(
+                title: "Match song artwork",
+                subtitle: "Tint the app to match each cover",
+                isOn: $useDynamicAccent
+            )
             rowDivider
-            SettingsToggleRow(title: "Show album on cards", isOn: $showAlbumOnHero)
+            SettingsToggleRow(
+                title: "Show album on cards",
+                subtitle: "Album name under the song title",
+                isOn: $showAlbumOnHero
+            )
         }
     }
 
@@ -128,11 +136,23 @@ struct SettingsView: View {
         SettingsCard(title: "Playback") {
             SettingsToggleRow(title: "Haptics", isOn: $hapticsEnabled)
             rowDivider
-            SettingsToggleRow(title: "Auto play", isOn: $autoplayOnSwipe)
+            SettingsToggleRow(
+                title: "Auto play",
+                subtitle: "Each new card starts playing on its own",
+                isOn: $autoplayOnSwipe
+            )
             rowDivider
-            SettingsToggleRow(title: "Hot Preview", isOn: $useHotPreview)
+            SettingsToggleRow(
+                title: "Hot Preview",
+                subtitle: "The hottest 30 seconds instead of the full song",
+                isOn: $useHotPreview
+            )
             rowDivider
-            SettingsToggleRow(title: "Date jump", isOn: $dateJumpEnabled)
+            SettingsToggleRow(
+                title: "Date jump",
+                subtitle: "Jump to songs added around a date",
+                isOn: $dateJumpEnabled
+            )
         }
     }
 
@@ -256,9 +276,14 @@ struct SettingsView: View {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(appAccent)
-                Text("Loved playlist")
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Loved playlist")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("Where your loved songs land")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text(selectedLovedPlaylist?.name ?? String(localized: "Auto"))
                     .font(.system(.subheadline, design: .rounded))

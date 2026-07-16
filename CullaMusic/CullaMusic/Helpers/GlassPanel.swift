@@ -62,15 +62,24 @@ extension GlassPanel where Trailing == EmptyView {
 
 struct SettingsToggleRow: View {
     let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     @Binding var isOn: Bool
 
     @Environment(\.appAccent) private var appAccent
 
     var body: some View {
         Toggle(isOn: $isOn) {
-            Text(title)
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(.body, design: .rounded))
+                    .foregroundStyle(.primary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .tint(appAccent)
     }

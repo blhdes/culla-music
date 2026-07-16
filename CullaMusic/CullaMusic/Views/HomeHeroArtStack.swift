@@ -38,6 +38,11 @@ struct HomeHeroArtStack: View {
     /// Fires when the user taps the hero (any source, once the deck has
     /// loaded). Used by HomeView to open the full carousel exploration screen.
     var onHeroTap: (() -> Void)? = nil
+    /// Fires when the dismissed-deck load proves some `DismissedSong` rows are
+    /// orphaned (their song was deleted from the library) and prunes them.
+    /// HomeView uses it to recompute the mode-tile counts, so the Dismissed
+    /// badge drops to the real number instead of counting phantom rows.
+    var onDismissedOrphansPruned: (() -> Void)? = nil
     /// Apple Music song-id of the last cover the user centred inside the
     /// carousel exploration screen. When set, the scrub deck prepends that
     /// song's artwork at position 0 so the hero reflects "where you left
@@ -743,44 +748,124 @@ struct HomeHeroArtStack: View {
         return collected
     }
 
+    /// Result of one per-ID library lookup in `fetchRecentlyDismissedArtworks`.
+    /// Distinguishes "the song is there but has no artwork" from "the song is
+    /// gone" from "the request failed" — only the middle one is prune evidence.
+    private enum DismissedLookup {
+        /// Song is in the library (its artwork may still be nil).
+        case inLibrary(Artwork?)
+        /// Request succeeded with no match — the song left the library.
+        case missing
+        /// Request threw — no evidence either way.
+        case failed
+    }
+
     /// Reads SwiftData for dismissed songs in the user's chosen order, then
     /// fetches each artwork by ID in parallel. Direct filter (not
     /// `resolveSongs`) so we don't page through the whole library looking
     /// for matches. The order MUST track `sortOrder.ascending` so the
     /// hero stack and the dismissed carousel show the same song first —
     /// otherwise oldest-first surfaces different covers on each surface.
+    ///
+    /// The per-ID filter doubles as orphan detection: an exact-ID library
+    /// request only ever returns the match or nothing, so a request that
+    /// SUCCEEDS empty proves the song was deleted from the library. Those rows
+    /// are pruned (via the shared reconciler, which spares catalog rows) and
+    /// the window re-fetched — otherwise a deleted song holds a deck slot as
+    /// a blank forever while Home's Dismissed count keeps counting it.
     private func fetchRecentlyDismissedArtworks(limit: Int) async -> [Artwork] {
-        var descriptor = FetchDescriptor<DismissedSong>(
-            sortBy: [SortDescriptor(
-                \.dismissedAt,
-                order: sortOrder.ascending ? .forward : .reverse
-            )]
-        )
-        descriptor.fetchLimit = limit
-        guard
-            let dismissed = try? modelContext.fetch(descriptor),
-            !dismissed.isEmpty
-        else { return [] }
+        // Each pass either returns, or prunes ≥1 orphan row and re-fetches the
+        // now-smaller window — so the loop always terminates.
+        while !Task.isCancelled {
+            var descriptor = FetchDescriptor<DismissedSong>(
+                sortBy: [SortDescriptor(
+                    \.dismissedAt,
+                    order: sortOrder.ascending ? .forward : .reverse
+                )]
+            )
+            descriptor.fetchLimit = limit
+            guard
+                let dismissed = try? modelContext.fetch(descriptor),
+                !dismissed.isEmpty
+            else { return [] }
 
-        // Parallel fetch keyed by index so we can put the results back in
-        // dismissed-order — TaskGroup yields completions in any order.
-        return await withTaskGroup(of: (Int, Artwork?).self) { group in
-            for (idx, song) in dismissed.enumerated() {
-                group.addTask {
-                    do {
-                        var request = MusicLibraryRequest<Song>()
-                        request.filter(matching: \.id, equalTo: MusicItemID(song.songID))
-                        let response = try await request.response()
-                        return (idx, response.items.first?.artwork)
-                    } catch {
-                        return (idx, nil)
+            // Plain-value copy so the parallel tasks below never touch the
+            // SwiftData models off the main actor.
+            let ids = dismissed.map(\.songID)
+
+            // Parallel fetch keyed by index so we can put the results back in
+            // dismissed-order — TaskGroup yields completions in any order.
+            let outcomes = await withTaskGroup(of: (Int, DismissedLookup).self) { group in
+                for (idx, id) in ids.enumerated() {
+                    group.addTask {
+                        do {
+                            var request = MusicLibraryRequest<Song>()
+                            request.filter(matching: \.id, equalTo: MusicItemID(id))
+                            let response = try await request.response()
+                            guard let song = response.items.first else {
+                                return (idx, .missing)
+                            }
+                            return (idx, .inLibrary(song.artwork))
+                        } catch {
+                            return (idx, .failed)
+                        }
                     }
                 }
+                var slots: [(Int, DismissedLookup)] = []
+                for await pair in group { slots.append(pair) }
+                return slots.sorted { $0.0 < $1.0 }.map(\.1)
             }
-            var slots: [(Int, Artwork?)] = []
-            for await pair in group { slots.append(pair) }
-            return slots.sorted { $0.0 < $1.0 }.compactMap(\.1)
+
+            let artworks: [Artwork] = outcomes.compactMap {
+                if case .inLibrary(let artwork) = $0 { return artwork }
+                return nil
+            }
+
+            // Only decisive lookups (found / authoritatively missing) may feed
+            // the reconciler — a thrown request proves nothing about its row.
+            var decisiveRows: [DismissedSong] = []
+            var inLibraryIDs: Set<String> = []
+            for (row, outcome) in zip(dismissed, outcomes) {
+                switch outcome {
+                case .inLibrary:
+                    decisiveRows.append(row)
+                    inLibraryIDs.insert(row.songID)
+                case .missing:
+                    decisiveRows.append(row)
+                case .failed:
+                    break
+                }
+            }
+
+            // When NOT ONE row in the window resolved, the "missing" verdicts
+            // could equally mean the library read back empty before syncing
+            // (the cold-open trap SortedSongReconciler refuses to reconcile
+            // against). One limit-1 probe settles it: a readable library
+            // returns something, so the misses really are deletions. If even
+            // the probe comes back empty, skip pruning — a later pass
+            // self-heals once the library is actually there.
+            let hasOrphanCandidates = decisiveRows.contains {
+                !$0.isCatalogTrack && !inLibraryIDs.contains($0.songID)
+            }
+            if hasOrphanCandidates, inLibraryIDs.isEmpty {
+                var probe = MusicLibraryRequest<Song>()
+                probe.limit = 1
+                let probeItems = (try? await probe.response())?.items
+                guard let probeItems, !probeItems.isEmpty else { return artworks }
+            }
+
+            let pruned = DismissedSongReconciler.pruneOrphans(
+                rows: decisiveRows,
+                resolvedIDs: inLibraryIDs,
+                in: modelContext
+            )
+            guard !pruned.isEmpty else { return artworks }
+
+            onDismissedOrphansPruned?()
+            // The window shrank — go around to refill it from the rows that
+            // were previously beyond the fetchLimit.
         }
+        return []
     }
 
     /// Resolves the scope's track artworks for the scrub deck. Applies the same

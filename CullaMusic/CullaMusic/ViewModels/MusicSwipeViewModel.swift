@@ -895,24 +895,19 @@ final class MusicSwipeViewModel {
 
     /// Deletes dismissed rows that resolved to nothing — stale records left
     /// behind when a previously-dismissed song is later removed from the
-    /// library. They can't surface on any screen, yet they still inflate the
-    /// Dismissed count on Home and leave the hero shimmering over a song that
-    /// never loads (the "phantom dismissed song" carried across sessions).
-    ///
-    /// Only LIBRARY rows are pruned: `resolveSongs` pages the entire library
-    /// when it can't find an ID, so a library row that didn't resolve is
-    /// authoritatively gone. Catalog rows are left intact — a failed catalog
-    /// lookup may be a transient network error, not a dead record. Safe to run
-    /// on every deck load: when nothing is orphaned it's a no-op.
+    /// library. `resolveSongs` pages the entire library when it can't find an
+    /// ID, so a library row that didn't resolve is authoritatively gone (the
+    /// shared reconciler skips catalog rows). Also drops the pruned IDs from
+    /// `dismissedStore` so the in-memory dates map stays in lockstep.
     private func pruneOrphanedDismissals(rows: [DismissedSong], resolved: [Song]) {
-        let resolvedIDs = Set(resolved.map { $0.id.rawValue })
-        let orphans = rows.filter { !$0.isCatalogTrack && !resolvedIDs.contains($0.songID) }
-        guard !orphans.isEmpty else { return }
-        for row in orphans {
-            modelContext.delete(row)
-            dismissedStore.remove(songID: row.songID)
+        let pruned = DismissedSongReconciler.pruneOrphans(
+            rows: rows,
+            resolvedIDs: Set(resolved.map { $0.id.rawValue }),
+            in: modelContext
+        )
+        for songID in pruned {
+            dismissedStore.remove(songID: songID)
         }
-        try? modelContext.save()
     }
 
     /// First few songs of the un-dealt queue (beyond `nextSong`). The swipe

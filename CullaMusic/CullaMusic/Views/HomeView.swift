@@ -74,12 +74,18 @@ final class HomeViewModel {
     /// new day, invalidates both.
     func recomputeCounts() async {
         let sortedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<SortedSong>())) ?? 0
-        let dismissedSnapshot = (try? modelContext.fetchCount(FetchDescriptor<DismissedSong>())) ?? 0
+        // Full rows, not just a count — the library walk below needs their IDs
+        // and catalog flags to detect dismissals whose song was deleted from
+        // the library (see the orphan prune after the walk).
+        let dismissedRows = (try? modelContext.fetch(FetchDescriptor<DismissedSong>())) ?? []
+        let dismissedSnapshot = dismissedRows.count
         dismissedCount = dismissedSnapshot
         let today = todayString()
 
         // One fingerprint, two cache slots (the values differ: library vs unsorted).
-        let fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
+        // `var`: pruning orphaned dismissals after the walk shrinks the dismissed
+        // count, and the corrected fingerprint is what must land in the cache.
+        var fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
 
         // Library cache.
         let libraryCachedDate = UserDefaults.standard.string(forKey: CacheKey.libraryDate) ?? ""
@@ -115,7 +121,7 @@ final class HomeViewModel {
                 playlistIDs = []
             }
             let sortedIDs = Set((try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? [])
-            let dismissedIDs = Set((try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? [])
+            let dismissedIDs = Set(dismissedRows.map(\.songID))
             // Unsorted = "still needs a decision": not in any playlist, not
             // already sorted, and not dismissed. Dismissed must be excluded
             // here — otherwise the unsorted cache fingerprint (which includes
@@ -125,6 +131,9 @@ final class HomeViewModel {
 
             var libCount = 0
             var unsCount = 0
+            // Dismissed IDs actually encountered during the walk. Whatever is
+            // left over afterwards no longer exists in the library.
+            var seenDismissedIDs: Set<String> = []
             let pageSize = 100
             var offset = 0
 
@@ -138,6 +147,9 @@ final class HomeViewModel {
 
                 for song in page {
                     let id = song.id.rawValue
+                    if dismissedIDs.contains(id) {
+                        seenDismissedIDs.insert(id)
+                    }
                     if !libraryFresh, !libraryExclusion.contains(id) {
                         libCount += 1
                     }
@@ -148,6 +160,35 @@ final class HomeViewModel {
 
                 offset += page.count
                 if page.count < pageSize { break }
+            }
+
+            // The loop paged the ENTIRE library, so it's authoritative: a
+            // non-catalog dismissed row whose song never appeared was deleted
+            // from the library in Music. Prune those phantom rows — this is
+            // the only spot the Dismissed badge self-heals without the user
+            // opening the dismissed deck — and fold the corrected count into
+            // the fingerprint BEFORE it's cached, so the next recompute
+            // doesn't see a mismatch and re-walk the library for nothing.
+            // (Orphans never appeared in the walk, so libCount/unsCount are
+            // unaffected by their removal.)
+            //
+            // `offset > 0` = the walk saw at least one song. A zero-song walk
+            // is refused as prune evidence, same as SortedSongReconciler
+            // refuses an empty membership map: on a cold open the library can
+            // read back empty before it has synced, and deleting every
+            // dismissal against that would destroy real data. The genuinely
+            // emptied-library case is an accepted false-negative — rare, and
+            // the next non-empty walk self-heals it.
+            if offset > 0 {
+                let pruned = DismissedSongReconciler.pruneOrphans(
+                    rows: dismissedRows,
+                    resolvedIDs: seenDismissedIDs,
+                    in: modelContext
+                )
+                if !pruned.isEmpty {
+                    dismissedCount = dismissedSnapshot - pruned.count
+                    fingerprint = "\(sortedSnapshot):\(dismissedSnapshot - pruned.count)"
+                }
             }
 
             if !libraryFresh {
@@ -329,6 +370,13 @@ struct HomeView: View {
                             showCarousel = true
                         }
                     },
+                    onDismissedOrphansPruned: {
+                        // The hero's dismissed load just proved (and deleted)
+                        // rows whose song left the library — recompute so the
+                        // Dismissed badge drops to the real number instead of
+                        // keeping the phantom count.
+                        homeVM?.triggerRecompute()
+                    },
                     preferredFrontSongID: lastCenteredCarouselSongID
                 )
                 // One-time discoverability hint for the hero's hidden gestures.
@@ -478,6 +526,11 @@ struct HomeView: View {
                         withAnimation(.easeInOut(duration: 0.28)) {
                             showCarousel = false
                         }
+                        // The carousel feed prunes orphaned dismissals during
+                        // its full resolve (see CarouselSongFeed). Recompute on
+                        // the way back so the badges pick that up — free when
+                        // nothing changed (the count fingerprints still match).
+                        homeVM?.triggerRecompute()
                     },
                     onCenteredSongOnExit: { id in
                         lastCenteredCarouselSongID = id

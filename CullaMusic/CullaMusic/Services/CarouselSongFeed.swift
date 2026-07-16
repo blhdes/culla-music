@@ -224,6 +224,16 @@ final class CarouselSongFeed {
         let catalogIDs = Set(rows.filter(\.isCatalogTrack).map(\.songID))
         do {
             songs = try await service.resolveSongs(orderedIDs: ids, catalogIDs: catalogIDs)
+            // `resolveSongs` pages the whole library for the non-catalog IDs,
+            // so a library row it didn't return is authoritatively gone —
+            // same prune the swipe deck runs, kept here so browsing dismissed
+            // covers also heals stale rows. Inside the do-block on purpose: a
+            // FAILED resolve proves nothing and must never prune.
+            DismissedSongReconciler.pruneOrphans(
+                rows: rows,
+                resolvedIDs: Set(songs.map { $0.id.rawValue }),
+                in: modelContext
+            )
         } catch {
             print("CarouselSongFeed dismissed resolve failed: \(error)")
         }

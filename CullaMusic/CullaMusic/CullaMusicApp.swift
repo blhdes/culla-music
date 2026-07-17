@@ -47,6 +47,10 @@ private struct SplashGate: View {
     // the splash too, instead of flashing the system scheme for the first beat.
     @AppStorage("appColorScheme") private var colorSchemeRaw: String = "system"
 
+    // Same key and default as the photos app: the status bar stays hidden for
+    // the immersive full-screen feel unless the user opts back in.
+    @AppStorage("statusBarVisible") private var statusBarVisible: Bool = false
+
     private var appColorScheme: ColorScheme? {
         switch colorSchemeRaw {
         case "light": .light
@@ -67,6 +71,7 @@ private struct SplashGate: View {
         }
         .animation(.easeOut(duration: 0.4), value: isReady)
         .preferredColorScheme(appColorScheme)
+        .statusBarHidden(!statusBarVisible)
         .task {
             // Failsafe only — the real dismissal comes from RootView flipping
             // `isReady` once the first screen's content has actually loaded

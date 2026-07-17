@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("appAccentPalette") private var accentPaletteRaw: String = AccentPalette.blue.rawValue
     @AppStorage("useDynamicAccent") private var useDynamicAccent: Bool = true
     @AppStorage("showAlbumOnHero") private var showAlbumOnHero: Bool = false
+    @AppStorage("statusBarVisible") private var statusBarVisible: Bool = false
     @AppStorage("hapticsEnabled") private var hapticsEnabled: Bool = true
     @AppStorage("useHotPreview") private var useHotPreview: Bool = false
     @AppStorage("autoplayOnSwipe") private var autoplayOnSwipe: Bool = true
@@ -128,6 +129,12 @@ struct SettingsView: View {
                 title: "Show album on cards",
                 subtitle: "Album name under the song title",
                 isOn: $showAlbumOnHero
+            )
+            rowDivider
+            SettingsToggleRow(
+                title: "Show status bar",
+                subtitle: "The clock and battery at the top",
+                isOn: $statusBarVisible
             )
         }
     }

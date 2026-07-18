@@ -53,14 +53,40 @@ struct GlassPlayPauseDisc: View {
     let isPlaying: Bool
     let iconSize: CGFloat
     let discSize: CGFloat
+    /// Swipe-arming takeover (swipe deck only). When set, the disc's glyph is
+    /// replaced by this symbol — the drag's action preview (trash / heart /
+    /// share) — and `armingProgress` drives the emphasis: the glyph grows and
+    /// brightens toward the commit threshold, then bounces once as it crosses
+    /// (armed = releasing now commits). Deliberately contained in the disc:
+    /// the old full-screen arming bubbles crowded the card. The disc's own
+    /// frame never changes — resizing it re-resolves the centred position
+    /// (the old drift bug) — only the glyph scales, as a rendering transform.
+    /// The carousel never sets this, so it stays dormant there.
+    var armingSymbol: String? = nil
+    var armingProgress: CGFloat = 0
+
+    private var displayedSymbol: String {
+        armingSymbol ?? (isPlaying ? "pause.fill" : "play.fill")
+    }
+
+    private var isArmed: Bool {
+        armingSymbol != nil && armingProgress >= 1
+    }
 
     var body: some View {
-        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+        let progress = min(max(armingProgress, 0), 1)
+        Image(systemName: displayedSymbol)
             .font(.system(size: iconSize, weight: .bold))
             .foregroundStyle(.white)
             .contentTransition(.symbolEffect(.replace))
+            .opacity(armingSymbol == nil ? 1 : 0.7 + 0.3 * progress)
+            .scaleEffect(armingSymbol == nil ? 1 : 1 + 0.3 * progress)
+            .symbolEffect(.bounce, value: isArmed)
             .frame(width: discSize, height: discSize)
             .glassSurface(in: Circle(), interactive: true)
             .background(.black.opacity(0.45), in: Circle())
+            // The replace morph needs an animated transaction, and drags update
+            // the card offset with none — grant one keyed to the symbol.
+            .animation(.snappy(duration: 0.25), value: displayedSymbol)
     }
 }

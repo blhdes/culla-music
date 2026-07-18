@@ -52,10 +52,6 @@ struct SongCardView: View {
     @AppStorage("showAlbumOnHero") private var showAlbumOnHero: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Namespace for the swipe arming chip: at the commit threshold a glass coin
-    /// crystallizes behind the trash/heart inside its container. Inert < iOS 26.
-    @Namespace private var armNS
-
     private let swipeThreshold: CGFloat = 100
 
     /// Vertical translation is shown at this fraction of the raw value so
@@ -149,8 +145,6 @@ struct SongCardView: View {
                     }
                     .padding(.bottom, 40)
                 }
-
-                swipeOverlay
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .opacity(cardOpacity)
@@ -258,8 +252,18 @@ struct SongCardView: View {
     private var playButton: some View {
         // Shared visual; the swipe card owns the tap via this Button. See
         // `GlassPlayPauseDisc` for the load-bearing black → glass → icon order.
+        // During a drag the disc doubles as the arming indicator: its glyph
+        // becomes the pending action (trash / heart / share) and swells toward
+        // the commit threshold — feedback stays inside the one centred disc
+        // instead of a second full-screen bubble crowding the card.
         Button(action: onTogglePlay) {
-            GlassPlayPauseDisc(isPlaying: isPlaying, iconSize: 30, discSize: 72)
+            GlassPlayPauseDisc(
+                isPlaying: isPlaying,
+                iconSize: 30,
+                discSize: 72,
+                armingSymbol: swipeArming?.symbol,
+                armingProgress: swipeArming?.progress ?? 0
+            )
         }
         .buttonStyle(.plain)
     }
@@ -363,61 +367,25 @@ struct SongCardView: View {
         return 1.0 - 0.3 * min(offset.width / swipeThreshold, 1.0)
     }
 
-    @ViewBuilder
-    private var swipeOverlay: some View {
-        // Dominant-axis gating mirrors the gesture's direction lock so the
-        // overlays don't double up on diagonal drags.
+    /// The drag's action preview, rendered *inside* the centred play disc (see
+    /// `playButton`). Direction mapping mirrors `MusicSwipeView.handleSwipeEnd`:
+    /// dominant-axis gating matches the gesture's direction lock so diagonal
+    /// drags never show two candidates, and the sidebar deadzone keeps the
+    /// heart/share preview quiet once the user is engaging the sidebar.
+    /// Right drags return nil on purpose — there the sidebar rows are the
+    /// feedback. Nil whenever the card is settled.
+    private var swipeArming: (symbol: String, progress: CGFloat)? {
         let horizontalDominant = abs(offset.width) >= abs(offset.height)
-
-        // Sidebar deadzone — once the card has moved right past this, the
-        // user is engaging the sidebar and neither the trash nor the heart
-        // overlay should fire even if vertical motion later dominates.
         let sidebarDeadzone: CGFloat = 35
 
-        if horizontalDominant, offset.width < 0 {
-            let progress = min(abs(offset.width) / swipeThreshold, 1.0)
-            armingIcon(systemName: "trash.fill", progress: progress)
-        } else if !horizontalDominant, offset.height < 0, offset.width < sidebarDeadzone {
-            let progress = min(abs(offset.height) / swipeThreshold, 1.0)
-            armingIcon(systemName: "heart.fill", progress: progress)
+        if horizontalDominant {
+            guard offset.width < 0 else { return nil }
+            return ("trash.fill", min(abs(offset.width) / swipeThreshold, 1.0))
         }
-    }
-
-    /// Swipe-action overlay icon that scales up as the gesture approaches the
-    /// commit threshold and fires a one-shot bounce the instant it crosses.
-    /// The bounce is the moment the user feels the action "arm" — past this
-    /// point the gesture's release commits the swipe. At that instant a glass
-    /// coin crystallizes behind the glyph (iOS 26) so "armed" reads as a
-    /// material forming, not just a bigger icon.
-    @ViewBuilder
-    private func armingIcon(systemName: String, progress: CGFloat) -> some View {
-        let isArmed = progress >= 1.0
-        // GlassStack supplies the stable GlassEffectContainer the coin
-        // materializes inside; one ZStack child, so the layout is unchanged.
-        GlassStack(spacing: 0) {
-            ZStack {
-                if isArmed {
-                    Color.clear
-                        .frame(width: 112, height: 112)
-                        .glassSurface(in: Circle())
-                        .glassMorphID("arm.disc", in: armNS)
-                        .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
-                }
-                Image(systemName: systemName)
-                    .font(.system(size: 60))
-                    .foregroundStyle(.white.opacity(0.85 * progress))
-                    // Dark disc keyed to the swipe's progress so the white
-                    // glyph stays readable on a light cover — mirrors the play
-                    // button's scrim. Padding gives the circle room around the
-                    // glyph; ramped (not constant) so there's no dark blob
-                    // behind the near-invisible icon early in the drag.
-                    .padding(22)
-                    .background(.black.opacity(0.35 * progress), in: Circle())
-                    .scaleEffect(0.7 + 0.4 * progress)
-                    .symbolEffect(.bounce, value: isArmed)
-            }
+        guard offset.width < sidebarDeadzone else { return nil }
+        if offset.height < 0 {
+            return ("heart.fill", min(abs(offset.height) / swipeThreshold, 1.0))
         }
-        .allowsHitTesting(false)
-        .animation(.snappy(duration: 0.15), value: progress)
+        return ("square.and.arrow.up", min(offset.height / swipeThreshold, 1.0))
     }
 }

@@ -12,6 +12,13 @@ struct PlaylistMembershipChips: View {
     /// "this song has no memberships." Ignored once we have anything to show.
     var isLoading: Bool = false
 
+    /// True while the card carrying these chips is displaced by a drag. The
+    /// pills' Liquid Glass bleeds past the capsule corners when composited
+    /// under the drag's rotation/opacity, so mid-drag we swap to the flat
+    /// material fallback (an in-shape fill that can't leak) and restore glass
+    /// once the card settles.
+    var suspendGlass: Bool = false
+
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
     /// Album-derived tint when dynamic accent is on, palette accent otherwise —
     /// resolved upstream in `MusicSwipeView`, so the chips just read it.
@@ -51,6 +58,9 @@ struct PlaylistMembershipChips: View {
             // would snap. Scoped here (not on the card) so only the tint
             // refine blooms; a freshly mounted card still paints instantly.
             .animation(.easeInOut(duration: 0.45), value: chipTint)
+            // Softens the glass ↔ material swap at drag start/end so it reads
+            // as nothing at all rather than a one-frame texture pop.
+            .animation(.easeInOut(duration: 0.2), value: suspendGlass)
         }
     }
 
@@ -126,7 +136,7 @@ struct PlaylistMembershipChips: View {
         // Accent rides on the tint + hairline border. The label color is
         // derived from the tint's luminance (see `accentLabelColor`) so it
         // stays legible whether the tint lands pale or dark.
-        .glassSurface(in: Capsule(), tint: chipTint)
+        .glassSurface(in: Capsule(), tint: chipTint, enabled: !suspendGlass)
         .overlay(
             Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
         )
@@ -139,7 +149,7 @@ struct PlaylistMembershipChips: View {
             .foregroundStyle(accentLabelColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .glassSurface(in: Capsule(), tint: chipTint)
+            .glassSurface(in: Capsule(), tint: chipTint, enabled: !suspendGlass)
             .overlay(
                 Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
             )

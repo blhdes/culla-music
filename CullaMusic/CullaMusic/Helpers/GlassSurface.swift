@@ -17,13 +17,20 @@ extension View {
     /// Applies a glass background on iOS 26+, falls back to `.thinMaterial` on
     /// older OSes. `tint` is optional — when set, the glass picks up a wash of
     /// that color (used to mark the selected mode tile on iOS 26).
+    ///
+    /// `enabled: false` forces the material fallback even on iOS 26. Glass
+    /// panes are composited out-of-tree, and under an ancestor transform
+    /// (rotation/opacity, e.g. the swipe card mid-drag) their mask can lag and
+    /// bleed past the shape's rounded corners; the fallback is an in-shape
+    /// fill, so it can't leak. Use it to quiet glass while a transform is live.
     @ViewBuilder
     func glassSurface<S: Shape>(
         in shape: S,
         tint: Color? = nil,
-        interactive: Bool = false
+        interactive: Bool = false,
+        enabled: Bool = true
     ) -> some View {
-        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI, enabled {
             self.modifier(GlassSurfaceModifier(shape: shape, tint: tint, interactive: interactive))
         } else {
             self.background {

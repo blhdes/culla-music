@@ -137,7 +137,12 @@ struct SongCardView: View {
                             PlaylistMembershipChips(
                                 playlists: memberships,
                                 dismissedAt: dismissedAt,
-                                isLoading: isLoadingMemberships
+                                isLoading: isLoadingMemberships,
+                                // Same settled-only gating as the info buttons:
+                                // mid-drag the pills drop their glass (which
+                                // bleeds past the capsule corners under the
+                                // card's rotation) for the flat fallback.
+                                suspendGlass: offset != .zero
                             )
                         }
                         .padding(.horizontal, 24)

@@ -999,10 +999,18 @@ final class MusicSwipeViewModel {
     /// the meantime is a harmless no-op. The split is decided by a real library
     /// lookup, never by inspecting the ID string (which risks a catalog/library
     /// namespace collision).
+    ///
+    /// Only a CONFIRMED miss may set the flag. A wrong flag is the worst state
+    /// a row can reach: catalog rows are exempt from every void pass but still
+    /// count as active, so a mislabeled library track becomes a permanent
+    /// phantom in the Dismissed badge. Hence two refusals: an "i."-prefixed ID
+    /// is library-namespace by construction (catalog IDs are purely numeric)
+    /// and could never resolve from the catalog anyway, and a nil lookup means
+    /// the request failed and proves nothing.
     private func classifyDismissedTrack(recordID: UUID, song: Song) {
         Task { @MainActor in
-            let inLibrary = await service.isInLibrary(songID: song.id)
-            guard !inLibrary else { return }
+            guard !song.id.rawValue.hasPrefix("i.") else { return }
+            guard await service.isInLibrary(songID: song.id) == false else { return }
             let descriptor = FetchDescriptor<DismissedSong>(
                 predicate: #Predicate { $0.id == recordID }
             )

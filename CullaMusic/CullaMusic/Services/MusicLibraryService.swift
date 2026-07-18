@@ -1130,11 +1130,16 @@ final class MusicLibraryService {
     /// not-yet-added editorial song). Safe by construction — a library request
     /// only ever returns an exact match or nothing, so it can never confuse a
     /// library ID for an unrelated catalog song.
-    func isInLibrary(songID id: MusicItemID) async -> Bool {
+    ///
+    /// Tri-state: `nil` means the request itself failed, which proves nothing
+    /// about the song. Callers must not classify off a nil — reading failure
+    /// as absence once flagged a real library track as catalog, creating a
+    /// dismissal no reconcile pass would ever void (the stuck Dismissed = 1).
+    func isInLibrary(songID id: MusicItemID) async -> Bool? {
         var request = MusicLibraryRequest<Song>()
         request.filter(matching: \.id, equalTo: id)
-        let response = try? await request.response()
-        return response?.items.isEmpty == false
+        guard let response = try? await request.response() else { return nil }
+        return !response.items.isEmpty
     }
 
     /// Resolves an ordered list of IDs split across both stores: IDs in

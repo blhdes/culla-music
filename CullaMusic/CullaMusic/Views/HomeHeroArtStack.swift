@@ -845,8 +845,12 @@ struct HomeHeroArtStack: View {
             // returns something, so the misses really are deletions. If even
             // the probe comes back empty, skip voiding — a later pass
             // self-heals once the library is actually there.
+            // Bogus-flagged rows count as candidates too: the reconciler is
+            // about to heal them into library rows, so they need the same
+            // cold-open probe protection before they can be voided.
             let hasOrphanCandidates = decisiveRows.contains {
-                !$0.isCatalogTrack && !inLibraryIDs.contains($0.songID)
+                (!$0.isCatalogTrack || $0.hasBogusCatalogFlag)
+                    && !inLibraryIDs.contains($0.songID)
             }
             if hasOrphanCandidates, inLibraryIDs.isEmpty {
                 var probe = MusicLibraryRequest<Song>()

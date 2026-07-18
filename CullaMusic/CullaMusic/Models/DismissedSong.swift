@@ -50,6 +50,15 @@ extension DismissedSong {
     /// the song comes back before the next reconcile it stays hidden as
     /// dismissed rather than flip-flopping into the decks.
     static let activePredicate = #Predicate<DismissedSong> { $0.voidedAt == nil }
+
+    /// True when the catalog flag can't be right: "i."-prefixed IDs are
+    /// library-namespace by construction (catalog IDs are purely numeric), so
+    /// a catalog-flagged row carrying one is a misclassification — the old
+    /// failure-as-absence library check could flag a real library track over a
+    /// network blip. Flagged, the row dodged every void pass while still
+    /// counting as active: the permanently stuck Dismissed badge. The
+    /// reconciler heals these back into library rows.
+    var hasBogusCatalogFlag: Bool { isCatalogTrack && songID.hasPrefix("i.") }
 }
 
 /// Single source of truth for keeping `DismissedSong.voidedAt` in step with
@@ -73,6 +82,9 @@ enum DismissedSongReconciler {
     ///
     /// Catalog rows (`isCatalogTrack`) are never voided: they live outside
     /// the library by design, so "not in the library" is their normal state.
+    /// The exception is a row whose flag is provably wrong (see
+    /// `hasBogusCatalogFlag`) — that one is healed back to a library row and
+    /// reconciled like any other.
     @discardableResult
     static func reconcile(
         rows: [DismissedSong],
@@ -81,7 +93,15 @@ enum DismissedSongReconciler {
     ) -> [String] {
         var voidedSongIDs: [String] = []
         var changed = false
-        for row in rows where !row.isCatalogTrack {
+        for row in rows {
+            // Heal a misclassified catalog flag first, then reconcile the row
+            // as the library row it really is — left flagged, it would be
+            // exempt from voiding forever yet still inflate the active count.
+            if row.hasBogusCatalogFlag {
+                row.isCatalogTrack = false
+                changed = true
+            }
+            guard !row.isCatalogTrack else { continue }
             if resolvedIDs.contains(row.songID) {
                 if row.voidedAt != nil {
                     row.voidedAt = nil

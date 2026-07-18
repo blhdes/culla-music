@@ -89,7 +89,11 @@ final class HomeViewModel {
         // One fingerprint, two cache slots (the values differ: library vs unsorted).
         // `var`: pruning orphaned dismissals after the walk shrinks the dismissed
         // count, and the corrected fingerprint is what must land in the cache.
-        var fingerprint = "\(sortedSnapshot):\(dismissedSnapshot)"
+        // "v2": versioned so a build that changes reconcile behavior forces one
+        // fresh walk — a same-day cache written by the previous build would
+        // otherwise skip the walk and the new reconcile logic with it (how the
+        // bogus-flag heal sat idle behind a fresh cache for a whole day).
+        var fingerprint = "v2:\(sortedSnapshot):\(dismissedSnapshot)"
 
         // Library cache.
         let libraryCachedDate = UserDefaults.standard.string(forKey: CacheKey.libraryDate) ?? ""
@@ -184,15 +188,43 @@ final class HomeViewModel {
             // case is an accepted false-negative — rare, and the next
             // non-empty walk self-heals it.
             if offset > 0 {
+                // Ground truth for the console when a phantom row survives:
+                // every active row the full walk did NOT see, with the state
+                // that decides which reconcile pass owns it.
+                for row in dismissedRows where row.voidedAt == nil && !seenDismissedIDs.contains(row.songID) {
+                    print("DismissedAudit: unresolved active row id=\(row.songID) catalog=\(row.isCatalogTrack) title=\(row.snapshotTitle ?? "-") dismissedAt=\(row.dismissedAt)")
+                }
                 DismissedSongReconciler.reconcile(
                     rows: dismissedRows,
                     resolvedIDs: seenDismissedIDs,
                     in: modelContext
                 )
+                // Catalog-flagged rows dodged the pass above by design; judge
+                // the survivors (post-heal, so "i."-prefixed rows are already
+                // out) on dual evidence: a strict catalog lookup plus this
+                // walk's full library sweep. Nowhere = voided; back in either
+                // store = un-voided. The lookup throwing means "proved
+                // nothing" — the rows just wait for the next walk.
+                let catalogRows = dismissedRows.filter(\.isCatalogTrack)
+                if !catalogRows.isEmpty {
+                    do {
+                        let catalogPresent = try await MusicLibraryService.shared.catalogPresence(
+                            ids: catalogRows.map(\.songID)
+                        )
+                        DismissedSongReconciler.reconcileCatalogRows(
+                            rows: catalogRows,
+                            catalogResolvedIDs: catalogPresent,
+                            libraryResolvedIDs: seenDismissedIDs,
+                            in: modelContext
+                        )
+                    } catch {
+                        print("Dismissed catalog evidence pass failed: \(error)")
+                    }
+                }
                 let activeAfter = dismissedRows.filter { $0.voidedAt == nil }.count
                 if activeAfter != dismissedSnapshot {
                     dismissedCount = activeAfter
-                    fingerprint = "\(sortedSnapshot):\(activeAfter)"
+                    fingerprint = "v2:\(sortedSnapshot):\(activeAfter)"
                 }
             }
 

@@ -1167,6 +1167,28 @@ final class MusicLibraryService {
         return orderedIDs.compactMap { found[$0] }
     }
 
+    /// Evidence-grade catalog lookup: returns the subset of `ids` the catalog
+    /// currently serves. THROWS on any chunk failure instead of skipping it
+    /// (unlike `resolveCatalogSongs`) — callers use the result to void
+    /// dismissals, and a silently dropped chunk would read as "gone" and grey
+    /// out real records over a network blip.
+    func catalogPresence(ids: [String]) async throws -> Set<String> {
+        var present: Set<String> = []
+        let chunkSize = 25
+        var index = 0
+        while index < ids.count {
+            let chunk = Array(ids[index..<min(index + chunkSize, ids.count)])
+            index += chunkSize
+            let request = MusicCatalogResourceRequest<Song>(
+                matching: \.id,
+                memberOf: chunk.map { MusicItemID($0) }
+            )
+            let response = try await request.response()
+            present.formUnion(response.items.map { $0.id.rawValue })
+        }
+        return present
+    }
+
     /// Batched catalog lookup by song ID, chunked to stay under Apple Music's
     /// per-request id cap. Non-throwing: a failed chunk is logged and skipped
     /// so one bad ID can't sink the whole deck. Only ever called with genuine

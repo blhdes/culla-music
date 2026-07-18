@@ -124,4 +124,51 @@ enum DismissedSongReconciler {
         }
         return voidedSongIDs
     }
+
+    /// Catalog-row counterpart to `reconcile`, which deliberately skips
+    /// `isCatalogTrack` rows ("not in the library" is their normal state).
+    /// But a catalog row can still die — the song leaves the catalog, or the
+    /// flag was wrong on a numeric ID the "i."-prefix heal can't prove — and
+    /// then it inflates the active count forever with nothing to show.
+    ///
+    /// Voiding here requires DUAL evidence: a catalog lookup that didn't
+    /// return the ID AND a library sweep that didn't see it — the song is
+    /// nowhere. Both sets must come from fetches that SUCCEEDED (see
+    /// `MusicLibraryService.catalogPresence`, which throws rather than
+    /// silently dropping a failed chunk). Presence in either store un-voids,
+    /// same self-healing contract as the main pass.
+    @discardableResult
+    static func reconcileCatalogRows(
+        rows: [DismissedSong],
+        catalogResolvedIDs: Set<String>,
+        libraryResolvedIDs: Set<String>,
+        in context: ModelContext
+    ) -> [String] {
+        var voidedSongIDs: [String] = []
+        var changed = false
+        for row in rows where row.isCatalogTrack {
+            let existsSomewhere = catalogResolvedIDs.contains(row.songID)
+                || libraryResolvedIDs.contains(row.songID)
+            if existsSomewhere {
+                if row.voidedAt != nil {
+                    row.voidedAt = nil
+                    changed = true
+                }
+            } else {
+                if row.voidedAt == nil {
+                    row.voidedAt = .now
+                    changed = true
+                }
+                voidedSongIDs.append(row.songID)
+            }
+        }
+        if changed {
+            do {
+                try context.save()
+            } catch {
+                print("DismissedSongReconciler catalog save failed: \(error)")
+            }
+        }
+        return voidedSongIDs
+    }
 }

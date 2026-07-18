@@ -1183,8 +1183,20 @@ final class MusicLibraryService {
                 matching: \.id,
                 memberOf: chunk.map { MusicItemID($0) }
             )
-            let response = try await request.response()
-            present.formUnion(response.items.map { $0.id.rawValue })
+            do {
+                let response = try await request.response()
+                present.formUnion(response.items.map { $0.id.rawValue })
+            } catch let error as MusicDataRequest.Error where error.status == 404 {
+                // Authoritative absence, NOT a failure: when none of the
+                // requested ids exist, Apple answers 404 "Resource with
+                // requested id was not found" instead of an empty 200 — the
+                // exact verdict this method exists to extract. (If any id in
+                // the chunk existed, the response would be a 200 with that
+                // subset.) Swallowing it as "proved nothing" made a dead
+                // dismissal unvoidable forever. Every other error still
+                // throws.
+                continue
+            }
         }
         return present
     }

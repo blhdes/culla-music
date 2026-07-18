@@ -89,11 +89,12 @@ final class HomeViewModel {
         // One fingerprint, two cache slots (the values differ: library vs unsorted).
         // `var`: pruning orphaned dismissals after the walk shrinks the dismissed
         // count, and the corrected fingerprint is what must land in the cache.
-        // "v2": versioned so a build that changes reconcile behavior forces one
+        // "v3": versioned so a build that changes reconcile behavior forces one
         // fresh walk — a same-day cache written by the previous build would
         // otherwise skip the walk and the new reconcile logic with it (how the
         // bogus-flag heal sat idle behind a fresh cache for a whole day).
-        var fingerprint = "v2:\(sortedSnapshot):\(dismissedSnapshot)"
+        // v3 = catalogPresence learned to read Apple's 404 as a verdict.
+        var fingerprint = "v3:\(sortedSnapshot):\(dismissedSnapshot)"
 
         // Library cache.
         let libraryCachedDate = UserDefaults.standard.string(forKey: CacheKey.libraryDate) ?? ""
@@ -224,7 +225,7 @@ final class HomeViewModel {
                 let activeAfter = dismissedRows.filter { $0.voidedAt == nil }.count
                 if activeAfter != dismissedSnapshot {
                     dismissedCount = activeAfter
-                    fingerprint = "v2:\(sortedSnapshot):\(activeAfter)"
+                    fingerprint = "v3:\(sortedSnapshot):\(activeAfter)"
                 }
             }
 

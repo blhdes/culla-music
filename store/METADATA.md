@@ -7,20 +7,19 @@ Copy-paste sources for the App Store listing. Character limits noted in `[bracke
 > `apps.apple.com/us/app/cullamusic/id6778348600`). You're editing the existing record,
 > not creating a new one. The listing is **English (U.S.) only** for now.
 >
-> ⚠️ **Nothing user-facing changed in the code between build 1 and build 2** — this
-> release exists to refresh the listing (new screenshots require a new version). The
-> What's New text below is written accordingly; if you've shipped anything I can't see,
-> add it there.
+> ✅ **1.5.0 is a real feature release** (updated 2026-07-27; this note previously said
+> "listing refresh only"). Since build 1: the Insights stats screen, tappable playlist
+> chips that open a tracklist sheet, swipe-down share with the arming play disc, History
+> tombstones for deleted tracks, a hidden-status-bar Look option, and many fixes. The
+> What's New below reflects it.
 
 ---
 
 ## App information
 
-- **Name** `[30]`: `CullaMusic` *(as on the existing record — the store URL slug is
-  `cullamusic`. The name is editable with this version if you ever want e.g.
-  `CullaMusic: Sort Your Library` `[29]`.)*
-- **Subtitle** `[30]`: `Swipe songs into playlists`
-  - *Alt:* `Sort your library by feel`
+- **Name** `[30]`: `Culla Music: Swipe Your Songs` `[29]` *(chosen 2026-07-27; the
+  record previously showed `CullaMusic` — the store URL slug `cullamusic` stays.)*
+- **Subtitle** `[30]`: `Sort your music by feel` `[23]`
 - **Bundle ID**: `app.culla.music`
 - **Primary language**: English (U.S.)
 - **Primary category**: **Music**
@@ -43,16 +42,16 @@ support are in-page anchors, not separate files.
 *(Editable any time without a new review — use it for timely notes.)*
 
 ```
-Swipe right to file a song into a playlist, left to dismiss it, up to love it. Culla Music makes tidying your Apple Music library fast, tactile, and reversible.
+Swipe right to save a song into a playlist, left to dismiss it, up to love it. Culla Music makes tidying your Apple Music library fast, interactive, tactile and fun.
 ```
 
 ## Keywords `[100]`
 *(Comma-separated, no spaces. Words already in the name/subtitle — "culla", "music",
-"swipe", "songs", "playlists" — are indexed too, so they're intentionally left out.
+"swipe", "songs", "sort", "feel" — are indexed too, so they're intentionally left out.
 "apple" pairs with "music" from the name to match "apple music" searches.)*
 
 ```
-apple,library,organizer,sort,tidy,curate,triage,declutter,mixtape,dj,tracks,album
+apple,library,organizer,playlist,curate,triage,declutter,mixtape,dj,tracks,album,tidy,manager,mix
 ```
 
 ## Description `[4000]`
@@ -82,9 +81,10 @@ HEAR BEFORE YOU DECIDE
 • Jump the deck to a point in time — "everything I added last summer" is one tap away.
 
 KNOW WHAT YOU'RE HOLDING
-• Playlist chips show where the current song already lives, so you never re-sort it.
+• Playlist chips show where the current song already lives — tap one to open that playlist's full tracklist and preview any song.
 • Album liner notes open Apple Music's editorial notes about the record.
 • The artist hub gathers the artist's top songs, similar artists, and a short bio — tap a similar artist to keep digging.
+• Insights turns your sorting history into streaks, top artists, a genre mix, release-decade eras, and a library-coverage gauge — all computed on your iPhone.
 
 EVERYTHING IS REVERSIBLE
 • A full History log of every sort, love, and dismissal — swipe any row to undo it.
@@ -104,10 +104,14 @@ Culla Music works best with an active Apple Music subscription (without one, son
 ## What's New (version 1.5.0) `[4000]`
 
 ```
-A small housekeeping update:
+Culla Music 1.5 is a big one:
 
-• A refreshed App Store listing with new screenshots that show today's app.
-• Minor under-the-hood tidy-ups — no feature changes this time.
+• Insights — a new stats screen with your sorting streaks, top artists, genre mix, release-decade eras, and how much of your library you've covered.
+• Tap a playlist tag on the swipe card to open that playlist's full tracklist and preview any song.
+• The play disc now arms your swipes — drag and it previews what will happen, including the new swipe-down to share.
+• History keeps songs you've deleted from your library readable as greyed entries.
+• A quieter look: the status bar is hidden by default (Settings → Look), and every settings toggle now explains itself.
+• Lots of polish: steadier artwork-tinted colors, smoother card transitions, and Dismissed counts that stay accurate.
 
 Questions or ideas? Email agomezurrea@gmail.com.
 ```
@@ -118,7 +122,22 @@ Questions or ideas? Email agomezurrea@gmail.com.
 *(Critical — without this the reviewer can't use the app and rejects it as "broken".)*
 
 ```
-Culla Music requires an active Apple Music subscription to function. Please sign the test device into an Apple ID that has Apple Music and some songs saved in its library, and grant the "Media & Apple Music" permission when the app asks on first launch. The app reads your existing library, then lets you swipe songs right into playlists, left to dismiss, up to love, and down to share.
+Thank you for reviewing Culla Music.
+
+WHAT THE APP DOES
+Culla Music is a "swipe to sort" tool for the user's own Apple Music library. You swipe through songs one at a time and file them into playlists: swipe right = add to a playlist, left = dismiss, up = add to a "Loved" playlist, down = share the song.
+
+ACCESS REQUIRED
+On first launch the app requests Apple Music access (MusicKit authorization). Please tap "Allow", without it the app has no library to display and the deck will be empty. This is the only permission the app requests. No account creation, sign-in, or demo credentials are needed.
+
+WORKS WITHOUT AN APPLE MUSIC SUBSCRIPTION
+The app does NOT require an active Apple Music subscription. If you test on an account without a subscription, playback falls back to Apple's standard 30-second previews and the full swipe / sort / playlist flow still works. Please do not reject under Guideline 2.1 on the basis of "no subscription", the previews are expected, intended behavior, not a defect.
+
+TESTING TIP
+For the fullest experience, please test on an account that already has some songs in its Apple Music library and a few playlists, so there is content to swipe through and file.
+
+PRIVACY
+The app collects no data and contains no tracking (see the included privacy manifest; the data-collection answer is "Data Not Collected"). Everything stays on device.
 ```
 
 - **Sign-in required?** No login of its own → leave the demo-account fields empty.

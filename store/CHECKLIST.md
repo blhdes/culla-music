@@ -16,8 +16,9 @@ record. ✅ = already done in the repo. 👉 = you do it.
 - ✅ Listing text ready in `store/METADATA.md`.
 - ✅ Website live at `culla.app/music/` (the `culla-web` repo) — privacy at `#privacy`,
   support at `#support`.
-- ⚠️ **No user-facing code changes since build 1** — this release is a listing refresh
-  (screenshots can only change with a new version). What's New is written accordingly.
+- ✅ **Real feature release since build 1** (note updated 2026-07-27) — Insights,
+  tappable playlist chips → tracklist sheet, swipe-down share, History tombstones,
+  hidden status bar, and fixes. What's New in `METADATA.md` reflects it.
 
 ## 1. Confirm the website is live 👉
 

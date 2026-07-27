@@ -240,10 +240,17 @@ private struct PlaylistTrackRow: View {
                     color: accented ? appAccent : .primary,
                     isActive: isPlaying
                 )
-                Text(song.artistName)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                // Same marquee as the title: truncates at rest, scrolls to
+                // reveal its full length while this row is previewing.
+                MarqueeText(
+                    text: song.artistName,
+                    uiFont: .monospacedSystemFont(
+                        ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize,
+                        weight: .regular
+                    ),
+                    color: .secondary,
+                    isActive: isPlaying
+                )
             }
 
             // Fixed-width slot so the duration column never shifts when the

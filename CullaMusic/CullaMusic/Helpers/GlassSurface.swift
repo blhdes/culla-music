@@ -18,19 +18,18 @@ extension View {
     /// older OSes. `tint` is optional — when set, the glass picks up a wash of
     /// that color (used to mark the selected mode tile on iOS 26).
     ///
-    /// `enabled: false` forces the material fallback even on iOS 26. Glass
-    /// panes are composited out-of-tree, and under an ancestor transform
-    /// (rotation/opacity, e.g. the swipe card mid-drag) their mask can lag and
-    /// bleed past the shape's rounded corners; the fallback is an in-shape
-    /// fill, so it can't leak. Use it to quiet glass while a transform is live.
+    /// Caution: glass is a backdrop effect on an out-of-tree layer. Under an
+    /// animated ancestor transform (rotation/opacity — e.g. the swipe card
+    /// mid-drag) its mask can misalign and bleed past the shape's corners.
+    /// Surfaces that ride such transforms should use a plain fill instead
+    /// (see `PlaylistMembershipChips`).
     @ViewBuilder
     func glassSurface<S: Shape>(
         in shape: S,
         tint: Color? = nil,
-        interactive: Bool = false,
-        enabled: Bool = true
+        interactive: Bool = false
     ) -> some View {
-        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI, enabled {
+        if #available(iOS 26.0, *), !DebugFlags.forceLegacyUI {
             self.modifier(GlassSurfaceModifier(shape: shape, tint: tint, interactive: interactive))
         } else {
             self.background {

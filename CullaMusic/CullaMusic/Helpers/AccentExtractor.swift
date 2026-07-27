@@ -293,8 +293,7 @@ final class AccentExtractor {
         // chips use this (not the slate above) so monochrome artwork tints
         // their pills white → grey → black with the cover, which reads more
         // minimal than a synthetic steel/sand hue. Wider lightness band than
-        // the `l` used for the slate so dark and light covers pull apart; the
-        // chip's label color is still derived from this via `contrastingLabel`.
+        // the `l` used for the slate so dark and light covers pull apart.
         let neutralL = min(max(avgL, 0.22), 0.82)
         let neutral = Color(red: neutralL, green: neutralL, blue: neutralL)
         return ArtworkAccent(primary: primary, secondary: secondary, neutralTint: neutral)

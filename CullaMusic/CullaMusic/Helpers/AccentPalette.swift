@@ -3,9 +3,10 @@ import SwiftUI
 /// Palette colors are free to be bright, saturated, or strange. Text laid *on
 /// top of* an accent fill stays legible because the fill sites flip their
 /// foreground by luminance — `Color.idealForeground` (the selected ModeTile)
-/// and `Color.contrastingLabel` (the playlist chips) pick white on dark
-/// swatches and near-black on light ones. So we no longer hand-restrain
-/// lightness; we let the text color do the adapting.
+/// picks white on dark swatches and near-black on light ones. So we no longer
+/// hand-restrain lightness; we let the text color do the adapting. (The
+/// playlist chips don't need a flip: their fill is a faint tint wash over the
+/// scheme background, so a plain `.primary` label always contrasts.)
 ///
 /// One caveat the flip *doesn't* cover: when the accent is used as a plain
 /// foreground tint on the app's light background (icons, accent-colored text),

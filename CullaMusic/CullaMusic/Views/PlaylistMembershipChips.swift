@@ -12,13 +12,6 @@ struct PlaylistMembershipChips: View {
     /// "this song has no memberships." Ignored once we have anything to show.
     var isLoading: Bool = false
 
-    /// True while the card carrying these chips is displaced by a drag. The
-    /// pills' Liquid Glass bleeds past the capsule corners when composited
-    /// under the drag's rotation/opacity, so mid-drag we swap to the flat
-    /// material fallback (an in-shape fill that can't leak) and restore glass
-    /// once the card settles.
-    var suspendGlass: Bool = false
-
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
     /// Album-derived tint when dynamic accent is on, palette accent otherwise —
     /// resolved upstream in `MusicSwipeView`, so the chips just read it.
@@ -58,9 +51,6 @@ struct PlaylistMembershipChips: View {
             // would snap. Scoped here (not on the card) so only the tint
             // refine blooms; a freshly mounted card still paints instantly.
             .animation(.easeInOut(duration: 0.45), value: chipTint)
-            // Softens the glass ↔ material swap at drag start/end so it reads
-            // as nothing at all rather than a one-frame texture pop.
-            .animation(.easeInOut(duration: 0.2), value: suspendGlass)
         }
     }
 
@@ -78,16 +68,17 @@ struct PlaylistMembershipChips: View {
         appAccentNeutral ?? appAccent
     }
 
-    /// Black or white — whichever contrasts the tinted pill better. The tint
-    /// washing the glass can land genuinely dark: `AccentExtractor` clamps HSL
-    /// *lightness* to [0.40, 0.58] for colored accents (and down to ~0.22 for
-    /// the neutral grey), but a saturated hue at L=0.40 is still dark to the
-    /// eye, so the old `.primary` label went black-on-dark and disappeared.
-    /// Deriving the label from the tint's perceived luminance is scheme-
-    /// independent — it flips correctly for dark *and* pale tints.
-    private var accentLabelColor: Color {
-        chipTint.contrastingLabel
-    }
+    /// The pills are a *flat* tint wash over the card's plain background — no
+    /// Liquid Glass, no material. Deliberate: both are backdrop effects drawn
+    /// on out-of-tree layers, and under the swipe card's mid-drag transforms
+    /// (rotation + opacity) their masks misalign — the pill's surface bled
+    /// past the capsule corners. Suspending glass only while dragging just
+    /// moved the glitch to the release spring and added a visible texture
+    /// swap, so the pills now use one plain fill that renders identically
+    /// settled, dragging, and springing back. At 0.18 alpha the wash stays
+    /// near the scheme background, so a scheme-adaptive `.primary` label is
+    /// the correct contrast in both light and dark.
+    private static let tintWashOpacity: Double = 0.18
 
     private func dismissedChip(date: Date) -> some View {
         Text("Dismissed \(Self.relativeAge(from: date))")
@@ -129,14 +120,13 @@ struct PlaylistMembershipChips: View {
             Text(playlist.name)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(accentLabelColor)
+                .foregroundStyle(.primary)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        // Accent rides on the tint + hairline border. The label color is
-        // derived from the tint's luminance (see `accentLabelColor`) so it
-        // stays legible whether the tint lands pale or dark.
-        .glassSurface(in: Capsule(), tint: chipTint, enabled: !suspendGlass)
+        // Accent rides on the flat tint wash + hairline border — see
+        // `tintWashOpacity` for why these pills are deliberately glass-free.
+        .background(chipTint.opacity(Self.tintWashOpacity), in: Capsule())
         .overlay(
             Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
         )
@@ -146,10 +136,10 @@ struct PlaylistMembershipChips: View {
         Text(text)
             .font(.caption.weight(.medium))
             .lineLimit(1)
-            .foregroundStyle(accentLabelColor)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .glassSurface(in: Capsule(), tint: chipTint, enabled: !suspendGlass)
+            .background(chipTint.opacity(Self.tintWashOpacity), in: Capsule())
             .overlay(
                 Capsule().strokeBorder(chipTint.opacity(0.35), lineWidth: 1)
             )

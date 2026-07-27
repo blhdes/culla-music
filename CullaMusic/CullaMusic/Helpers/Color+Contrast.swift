@@ -14,15 +14,6 @@ extension Color {
         UIColor(self).wcagLuminance > 0.30 ? Color.black.opacity(0.88) : .white
     }
 
-    /// Pure black or white for a label on this color used as a **translucent**
-    /// tint — the playlist chips' glass capsules. The glass lets the light
-    /// background through, so the rendered chip is lighter than the raw accent;
-    /// a lower crossover (≈0.179, the point where black and white land at equal
-    /// WCAG contrast) leans on black a touch more than `idealForeground` to
-    /// compensate. Same luminance math, different threshold — see `wcagLuminance`.
-    var contrastingLabel: Color {
-        UIColor(self).wcagLuminance > 0.179 ? .black : .white
-    }
 }
 
 extension UIColor {

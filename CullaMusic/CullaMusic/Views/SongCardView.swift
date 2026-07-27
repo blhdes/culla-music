@@ -21,6 +21,10 @@ struct SongCardView: View {
     /// Like `onShowArtist`, only wired on the front card so it never appears on
     /// the obscured next card or while a drag is in flight.
     var onShowAlbum: (() -> Void)? = nil
+    /// Optional — when set and the card is settled, the membership pills open
+    /// that playlist's tracklist sheet on tap. Same front-card-only gating as
+    /// the artist/album info buttons, so pills mid-drag stay inert.
+    var onShowPlaylist: ((Playlist) -> Void)? = nil
     /// Fires `true` the moment the progress bar's scrub begins and `false` when
     /// it ends. MusicSwipeView uses it to freeze the card's drag-to-sort while
     /// the user moves through the song, so a horizontal scrub never doubles as
@@ -133,7 +137,8 @@ struct SongCardView: View {
                             PlaylistMembershipChips(
                                 playlists: memberships,
                                 dismissedAt: dismissedAt,
-                                isLoading: isLoadingMemberships
+                                isLoading: isLoadingMemberships,
+                                onTapPlaylist: offset == .zero ? onShowPlaylist : nil
                             )
                         }
                         .padding(.horizontal, 24)

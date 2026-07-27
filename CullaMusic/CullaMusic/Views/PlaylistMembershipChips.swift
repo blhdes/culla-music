@@ -12,6 +12,13 @@ struct PlaylistMembershipChips: View {
     /// "this song has no memberships." Ignored once we have anything to show.
     var isLoading: Bool = false
 
+    /// Optional — when set, each playlist pill becomes a button that opens
+    /// that playlist's tracklist sheet. Only the settled front card wires it
+    /// (see `SongCardView`), so pills on the obscured next card or mid-drag
+    /// stay inert and can't fight the swipe gesture. The dismissed and "+N"
+    /// overflow pills are never tappable.
+    var onTapPlaylist: ((Playlist) -> Void)? = nil
+
     @AppStorage("lovedPlaylistID") private var lovedPlaylistID: String = ""
     /// Album-derived tint when dynamic accent is on, palette accent otherwise —
     /// resolved upstream in `MusicSwipeView`, so the chips just read it.
@@ -108,6 +115,20 @@ struct PlaylistMembershipChips: View {
 
     @ViewBuilder
     private func chip(for playlist: Playlist) -> some View {
+        if let onTapPlaylist {
+            Button {
+                onTapPlaylist(playlist)
+            } label: {
+                chipLabel(for: playlist)
+            }
+            .buttonStyle(.plain)
+        } else {
+            chipLabel(for: playlist)
+        }
+    }
+
+    @ViewBuilder
+    private func chipLabel(for playlist: Playlist) -> some View {
         let isLoved = !lovedPlaylistID.isEmpty
             && playlist.appleMusicPlaylistID == lovedPlaylistID
 

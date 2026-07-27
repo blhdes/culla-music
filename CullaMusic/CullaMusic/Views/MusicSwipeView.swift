@@ -105,6 +105,11 @@ struct MusicSwipeView: View {
     @State private var artistSheetSong: Song?
     @State private var albumSheetSong: Song?
 
+    /// Playlist tracklist sheet — non-nil is the membership pill the user
+    /// tapped on the current card. `.sheet(item:)` re-keys on the playlist's
+    /// id, so tapping a different pill after dismissal reloads cleanly.
+    @State private var playlistSheetTarget: Playlist?
+
     /// Share sheet — non-nil presents the system share sheet for the current
     /// song (swipe DOWN). Mirrors the photo app's swipe-down-to-share, but the
     /// shared payload is the song's Apple Music link, not an image.
@@ -234,6 +239,12 @@ struct MusicSwipeView: View {
         }
         .sheet(item: $albumSheetSong) { song in
             AlbumDetailSheet(song: song)
+        }
+        .sheet(item: $playlistSheetTarget) { playlist in
+            PlaylistDetailSheet(
+                playlist: playlist,
+                currentTitle: viewModel.currentSong?.title
+            )
         }
         .sheet(item: $shareItem) { item in
             SongShareSheet(url: item.url, title: item.title)
@@ -476,6 +487,7 @@ struct MusicSwipeView: View {
                     onSeek: { MusicLibraryService.shared.seek(to: $0) },
                     onShowArtist: { artistSheetSong = current },
                     onShowAlbum: { albumSheetSong = current },
+                    onShowPlaylist: { playlistSheetTarget = $0 },
                     onScrubbingChanged: { isScrubbing = $0 },
                     chromeRevealed: chromeRevealed,
                     tileReceding: skipFadesOut || sessionEnding,
@@ -1021,6 +1033,7 @@ private struct CurrentCardView: View {
     let onSeek: (TimeInterval) -> Void
     let onShowArtist: () -> Void
     let onShowAlbum: () -> Void
+    let onShowPlaylist: (Playlist) -> Void
     let onScrubbingChanged: (Bool) -> Void
     let chromeRevealed: Bool
     let tileReceding: Bool
@@ -1046,6 +1059,7 @@ private struct CurrentCardView: View {
             onSeek: onSeek,
             onShowArtist: onShowArtist,
             onShowAlbum: onShowAlbum,
+            onShowPlaylist: onShowPlaylist,
             onScrubbingChanged: onScrubbingChanged,
             chromeRevealed: chromeRevealed,
             tileReceding: tileReceding,

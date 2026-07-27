@@ -662,6 +662,14 @@ final class MusicLibraryService {
         }
     }
 
+    /// Public read for the playlist tracklist sheet — every song in the
+    /// playlist, in playlist order. Same direct `.tracks` read as the deck's
+    /// paging path, but uncached and unpaged: the sheet shows the whole list
+    /// at once and should reflect the playlist as it stands right now.
+    func loadPlaylistSongs(playlistID id: MusicItemID) async throws -> [Song] {
+        try await fetchPlaylistSongs(inPlaylistID: id)
+    }
+
     private func performPlaylistMutation(
         for id: MusicItemID,
         operation: @escaping @MainActor () async throws -> Void

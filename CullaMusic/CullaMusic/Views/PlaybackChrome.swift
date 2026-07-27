@@ -78,15 +78,26 @@ struct GlassPlayPauseDisc: View {
         Image(systemName: displayedSymbol)
             .font(.system(size: iconSize, weight: .bold))
             .foregroundStyle(.white)
-            .contentTransition(.symbolEffect(.replace))
+            // Play↔pause keeps the symbol replace morph; arming swaps use a
+            // plain crossfade — quicker, and it stays glued to the disc while
+            // the card is in motion.
+            .contentTransition(armingSymbol == nil ? .symbolEffect(.replace) : .opacity)
+            // Scoped HERE, above the progress-driven modifiers, on purpose.
+            // The transaction this grants must cover only the glyph swap:
+            // when it wrapped the whole chain, every symbol change (and drags
+            // flip trash↔heart↔share constantly near the direction boundary)
+            // re-animated scale/opacity with a 250ms tail, so the glyph was
+            // forever easing toward the finger instead of tracking it 1:1.
+            .animation(.easeOut(duration: 0.15), value: displayedSymbol)
             .opacity(armingSymbol == nil ? 1 : 0.7 + 0.3 * progress)
             .scaleEffect(armingSymbol == nil ? 1 : 1 + 0.3 * progress)
+            // Animates only entering/leaving arming (the bool), never the
+            // per-frame progress ramp: drag start/release get a soft ramp,
+            // while mid-drag scale/opacity stay raw — 1:1 with the gesture.
+            .animation(.snappy(duration: 0.2), value: armingSymbol == nil)
             .symbolEffect(.bounce, value: isArmed)
             .frame(width: discSize, height: discSize)
             .glassSurface(in: Circle(), interactive: true)
             .background(.black.opacity(0.45), in: Circle())
-            // The replace morph needs an animated transaction, and drags update
-            // the card offset with none — grant one keyed to the symbol.
-            .animation(.snappy(duration: 0.25), value: displayedSymbol)
     }
 }

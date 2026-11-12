@@ -7,7 +7,7 @@ import SwiftUI
 /// it here was just noise.
 ///
 /// Visual tier matches the Settings parent: plain `systemBackground`, no
-/// `LivingMeshBackground`, `SettingsCard` containers instead of `GlassPanel`.
+/// animated backdrop, `SettingsCard` containers instead of `GlassPanel`.
 struct LovedPlaylistPickerSheet: View {
     let playlists: [Playlist]
     let selectedID: String                 // "" → auto-create default

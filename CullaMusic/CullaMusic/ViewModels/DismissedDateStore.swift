@@ -23,9 +23,11 @@ final class DismissedDateStore {
     /// Per-song dismissal timestamps for every `DismissedSong` row (any age).
     private(set) var dates: [String: Date] = [:]
 
-    /// Dismissals younger than this resurface in Unsorted with the chip.
-    /// Older ones stay excluded so the deck doesn't suddenly flood with
-    /// months of rejected tracks. Library mode still hides every dismissal.
+    /// How long a dismissal stays hidden from Unsorted. Dismissals YOUNGER
+    /// than this stay excluded (see `recentSongIDs`); once one is OLDER than
+    /// the window it resurfaces in the Unsorted deck — marked with the
+    /// "Dismissed Xmo ago" chip — so the song gets a second chance. Library
+    /// mode still hides every dismissal, whatever its age.
     private static let resurfaceWindow: TimeInterval = 30 * 24 * 60 * 60
 
     private let modelContext: ModelContext

@@ -14,11 +14,6 @@ final class MusicSwipeViewModel {
     var isEmpty: Bool = false
     var toastMessage: String?
 
-    /// When true, the toast renders as a snackbar with an inline Undo button
-    /// and a longer auto-dismiss window. Set by destructive actions like
-    /// remove-from-all-playlists where regret is more costly than a swipe.
-    var toastUndoable: Bool = false
-
     /// Semantic tag for the current toast — drives the trailing icon + role
     /// color in `SwipeToastView`. Paired with `toastMessage` through `setToast`
     /// so it can't drift from a prior action.
@@ -64,10 +59,6 @@ final class MusicSwipeViewModel {
         sidebarOrderValue = ordered
         return ordered
     }
-
-    private(set) var sessionSortedCount: Int = 0
-    private(set) var sessionDismissedCount: Int = 0
-    private(set) var sessionSkippedCount: Int = 0
 
     /// Per-song Apple Music playlist memberships + memoized local-Playlist
     /// resolution. Updated optimistically on sort/love/remove so chips reflect
@@ -187,7 +178,15 @@ final class MusicSwipeViewModel {
         do {
             switch config.mode {
             case .library:
-                sessionExclusionSet = fetchExcludedIdentifiers().union(anchorIDs)
+                var exclusion = fetchExcludedIdentifiers().union(anchorIDs)
+                // The "Filter queue" lists (hidden playlists / artists) apply
+                // to unscoped Library walks. Same call the hero and carousel
+                // make, so all three agree on what the deck holds. Returns
+                // empty — and costs nothing — when no filter is set.
+                if usesQueueFilter {
+                    exclusion.formUnion(await service.queueFilterExclusions())
+                }
+                sessionExclusionSet = exclusion
                 dismissedStore.loadAll()
                 let fetched = try await fetchNextSessionSongs()
                 populateQueue(with: anchorSongs + fetched)
@@ -265,6 +264,14 @@ final class MusicSwipeViewModel {
     /// accent warm-up for everyone who left the setting alone.
     private var dynamicAccentEnabled: Bool {
         UserDefaults.standard.object(forKey: "useDynamicAccent") as? Bool ?? true
+    }
+
+    /// True when this session honors the Manage sheet's "Filter queue" — an
+    /// unscoped Library walk. Unsorted, Dismissed, and playlist/artist scopes
+    /// ignore it (the sheet's footer says as much), so a filter change there
+    /// has nothing to rebuild.
+    var usesQueueFilter: Bool {
+        config.mode == .library && config.source == nil
     }
 
     func reload() async {
@@ -413,7 +420,6 @@ final class MusicSwipeViewModel {
             ))
             sessionExclusionSet.insert(songID)
             dismissedStore.set(songID: songID, date: existing.dismissedAt)
-            sessionDismissedCount += 1
             setToast(String(localized: "Dismissed"), kind: .dismissed)
             advance()
             return
@@ -426,7 +432,6 @@ final class MusicSwipeViewModel {
         undoCoordinator.record(.dismissed(song: song, record: record))
         sessionExclusionSet.insert(songID)
         dismissedStore.set(songID: songID, date: record.dismissedAt)
-        sessionDismissedCount += 1
         // Only a playlist scope can surface a catalog-only track; every other
         // deck is library-bound, so skip the lookup there.
         if config.isPlaylistSource {
@@ -441,7 +446,6 @@ final class MusicSwipeViewModel {
     func skipCurrent() {
         guard let song = currentSong else { return }
         sessionExclusionSet.insert(song.id.rawValue)
-        sessionSkippedCount += 1
         undoCoordinator.record(.skipped(song: song))
         setToast(String(localized: "Skipped"), kind: .skipped)
         advance()
@@ -477,7 +481,6 @@ final class MusicSwipeViewModel {
                 sortedRecord: sortedRecord,
                 originalDismissedAt: originalDismissedAt
             ))
-            sessionSortedCount += 1
             addMembership(songID: song.id.rawValue, playlistAMID: amID)
             setToast(String(localized: "Added to \(playlist.name)"), kind: .added)
             advance()
@@ -516,7 +519,6 @@ final class MusicSwipeViewModel {
             undoCoordinator.record(.sorted(song: song, playlist: playlist, record: record))
         }
         sessionExclusionSet.insert(song.id.rawValue)
-        sessionSortedCount += 1
         addMembership(songID: song.id.rawValue, playlistAMID: amID)
         setToast(String(localized: "Added to \(playlist.name)"), kind: .added)
         advance()
@@ -612,7 +614,7 @@ final class MusicSwipeViewModel {
             let existing = membershipIndex.index[song.id.rawValue] ?? []
             if existing.contains(amID) {
                 setToast(String(localized: "Already loved"), kind: .loved)
-                advance()
+                advanceIfStillCurrent(song)
                 return
             }
 
@@ -645,10 +647,9 @@ final class MusicSwipeViewModel {
                 undoCoordinator.record(.loved(song: song, playlist: playlist, record: record))
             }
             sessionExclusionSet.insert(songID)
-            sessionSortedCount += 1
             addMembership(songID: songID, playlistAMID: amID)
             setToast(originalDismissedAt == nil ? String(localized: "Loved") : String(localized: "Loved & restored"), kind: .loved)
-            advance()
+            advanceIfStillCurrent(song)
 
             do {
                 try await service.addSong(song, toPlaylistID: amID)
@@ -724,7 +725,6 @@ final class MusicSwipeViewModel {
         try? modelContext.save()
 
         sessionExclusionSet.remove(songID)
-        sessionSortedCount = max(sessionSortedCount - 1, 0)
         removeMembership(songID: songID, playlistAMID: playlistAMID.rawValue)
     }
 
@@ -738,7 +738,6 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
             dismissedStore.remove(songID: song.id.rawValue)
-            sessionDismissedCount = max(sessionDismissedCount - 1, 0)
             pushBackToFront(song: song)
 
         case .redismissed(let song, let record, let originalDismissedAt):
@@ -748,19 +747,16 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
             dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
-            sessionDismissedCount = max(sessionDismissedCount - 1, 0)
             pushBackToFront(song: song)
 
         case .skipped(let song):
             sessionExclusionSet.remove(song.id.rawValue)
-            sessionSkippedCount = max(sessionSkippedCount - 1, 0)
             pushBackToFront(song: song)
 
         case .sorted(let song, let playlist, let record):
             modelContext.delete(record)
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
-            sessionSortedCount = max(sessionSortedCount - 1, 0)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
@@ -778,7 +774,6 @@ final class MusicSwipeViewModel {
             // the exclusion when the sort came from a scoped include-dismissed
             // session, which does insert it. Mirrors `.lovedFromDismissed`.
             sessionExclusionSet.remove(song.id.rawValue)
-            sessionSortedCount = max(sessionSortedCount - 1, 0)
             dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
@@ -788,7 +783,6 @@ final class MusicSwipeViewModel {
             modelContext.delete(record)
             try? modelContext.save()
             sessionExclusionSet.remove(song.id.rawValue)
-            sessionSortedCount = max(sessionSortedCount - 1, 0)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
             remoteRemove(song: song, fromPlaylist: playlist)
@@ -802,7 +796,6 @@ final class MusicSwipeViewModel {
             try? modelContext.save()
             classifyDismissedTrack(recordID: restored.id, song: song)
             sessionExclusionSet.remove(song.id.rawValue)
-            sessionSortedCount = max(sessionSortedCount - 1, 0)
             dismissedStore.set(songID: song.id.rawValue, date: originalDismissedAt)
             removeMembership(songID: song.id.rawValue, playlistAMID: playlist.appleMusicPlaylistID)
             pushBackToFront(song: song)
@@ -811,12 +804,10 @@ final class MusicSwipeViewModel {
     }
 
     /// Single entry point for toast updates. Pairs `toastMessage` with
-    /// `toastUndoable` so the snackbar flag can't leak from a previous
-    /// destructive action into a later, unrelated toast. `toastUndoable` is
-    /// written first so the view's `onChange(of: toastMessage)` reads the
-    /// correct snackbar mode for its timer.
-    private func setToast(_ message: String, kind: ToastKind = .info, undoable: Bool = false) {
-        toastUndoable = undoable
+    /// `toastKind` so the icon/role can't leak from a previous action into a
+    /// later, unrelated toast. `toastKind` is written first so the view's
+    /// `onChange(of: toastMessage)` already sees the matching kind.
+    private func setToast(_ message: String, kind: ToastKind = .info) {
         toastKind = kind
         toastMessage = message
     }
@@ -980,6 +971,17 @@ final class MusicSwipeViewModel {
                 }
             }
         }
+    }
+
+    /// `advance()` for actions that reach it only after an `await` (the
+    /// up-swipe waits on the Loved-playlist resolve, which can take a second
+    /// or more the first time it has to create "Culla Loves"). If the user
+    /// acted on another card in that gap, the deck has already moved on — a
+    /// blind `advance()` here would silently drop whichever card is current
+    /// NOW. Only step forward when the acted-on song is still in front.
+    private func advanceIfStillCurrent(_ song: Song) {
+        guard currentSong?.id == song.id else { return }
+        advance()
     }
 
     private func pushBackToFront(song: Song) {

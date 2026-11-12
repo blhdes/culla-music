@@ -468,7 +468,6 @@ struct HomeView: View {
                             ModeTile(
                                 mode: mode,
                                 isSelected: selectedMode == mode,
-                                isDisabled: false,
                                 count: count(for: mode),
                                 isLoadingCount: isLoadingCount(for: mode)
                             ) {
@@ -1130,7 +1129,6 @@ private struct ArtistThumbnail: View {
 private struct ModeTile: View {
     let mode: ReviewMode
     let isSelected: Bool
-    let isDisabled: Bool
     let count: Int?
     let isLoadingCount: Bool
     let onTap: () -> Void
@@ -1198,10 +1196,7 @@ private struct ModeTile: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isDisabled)
-        .opacity(isDisabled ? 0.45 : 1.0)
         .animation(.spring(response: 0.4, dampingFraction: 0.78), value: isSelected)
-        .animation(.easeInOut(duration: 0.2), value: isDisabled)
     }
 
     private var iconBadge: some View {

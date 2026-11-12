@@ -18,8 +18,9 @@ import UIKit
 ///   plain label naming the playlist/artist — there's no mode to switch.
 /// - Tap **Start Cullaing** → opens `MusicSwipeView` seeded with the centred
 ///   song as its first card, so an already-playing preview keeps going.
-/// - Tap the **dim backdrop** → returns to Home. The carousel band has a
-///   vertical safe gutter so a near-miss release doesn't accidentally dismiss.
+/// - Tap the **X button** (top-leading) → returns to Home. The backdrop itself
+///   no longer dismisses: a horizontal flick on any empty area steps the
+///   carousel one cover instead.
 ///
 /// Source: unscoped (`source == nil`) browses the current mode's deck;
 /// a picked playlist/artist browses that collection instead. The date-jump
@@ -161,10 +162,10 @@ struct HomeArtCarouselView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            // Explicit dismiss affordance — backdrop-tap is also there but
-            // most users will reach for a visible button. Sits at top-leading
-            // so it doesn't fight Home's settings gear at top-trailing (the
-            // gear stays visible because it lives on HomeView's outer overlay).
+            // The one dismiss affordance (the backdrop no longer dismisses —
+            // it steps the carousel). Sits at top-leading, where Home's
+            // History button was: Home fades its own gear/History buttons out
+            // while the carousel is up, so nothing competes with this.
             Button {
                 dismiss()
             } label: {
@@ -467,13 +468,16 @@ struct HomeArtCarouselView: View {
     }
 
     private var emptyPlaceholder: some View {
+        // `.secondary`, not white: the backdrop is `systemBackground` now (it
+        // was a dark dim layer when this was written), so hard-coded white made
+        // the whole placeholder invisible in light mode.
         VStack(spacing: 14) {
             Image(systemName: mode.icon)
                 .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.secondary)
             Text("Nothing to explore here yet")
                 .font(.system(.subheadline, design: .rounded).weight(.medium))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.secondary)
         }
         .frame(width: coverSize, height: coverSize)
     }

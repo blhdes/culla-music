@@ -3,7 +3,13 @@ import Foundation
 /// MusicBrainz blocks clients that don't send a descriptive User-Agent, and
 /// Wikipedia / Wikidata are friendlier with one too. Every outbound request in
 /// the bio pipeline goes through `cullaGET` so the header is set in one place.
-let cullaUserAgent = "CullaMusic/1.0 ( agomezurrea@gmail.com )"
+///
+/// The version is read from the bundle so it tracks the shipped build (it was
+/// hard-coded to "1.0" and went stale by 1.5.0).
+let cullaUserAgent: String = {
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    return "CullaMusic/\(version) ( agomezurrea@gmail.com )"
+}()
 
 /// GET with the Culla User-Agent set. Returns the body and HTTP status (0 for a
 /// non-HTTP response) — deliberately *not* the `URLResponse`, which isn't

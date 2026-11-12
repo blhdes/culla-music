@@ -13,12 +13,11 @@ extension Color {
     var idealForeground: Color {
         UIColor(self).wcagLuminance > 0.30 ? Color.black.opacity(0.88) : .white
     }
-
 }
 
 extension UIColor {
-    /// WCAG relative luminance (0…1) — the perceptual lightness both contrast
-    /// helpers above use to choose black-vs-white text. Linearizes each sRGB
+    /// WCAG relative luminance (0…1) — the perceptual lightness
+    /// `idealForeground` uses to choose black-vs-white text. Linearizes each sRGB
     /// channel (undoing gamma) then weights them by the human eye's sensitivity
     /// (green ≫ red ≫ blue). Falls back to 0 — treats the color as dark, so the
     /// caller defaults to white text — if the components can't be read.

@@ -90,13 +90,13 @@ struct MusicSwipeView: View {
 
     // Sheet
     @State private var showManageSheet = false
-    /// Snapshot of the queue-filter set taken the instant `showManageSheet`
-    /// flips on. Compared on dismiss; a difference triggers `viewModel.reload()`
-    /// so the deck honors the new exclusion immediately. Snapshotting at the
-    /// chrome layer (here) rather than passing a callback into the sheet keeps
-    /// the sheet ignorant of who reloads — same pattern would work if a future
-    /// settings surface edits the filter too.
-    @State private var filterSnapshotOnOpen: Set<String> = []
+    /// Snapshot of both queue-filter sets (playlists + artists) taken the
+    /// instant `showManageSheet` flips on. Compared on dismiss; a difference
+    /// triggers `viewModel.reload()` so the deck honors the new exclusion
+    /// immediately. Snapshotting at the chrome layer (here) rather than passing
+    /// a callback into the sheet keeps the sheet ignorant of who reloads — same
+    /// pattern would work if a future settings surface edits the filter too.
+    @State private var filterSnapshotOnOpen = QueueFilterStore.Snapshot()
 
     /// Artist hub sheet — non-nil identifies the song whose artist we want to
     /// inspect. `.sheet(item:)` re-keys on the song's id, so opening the hub
@@ -301,11 +301,16 @@ struct MusicSwipeView: View {
         }
         .onChange(of: showManageSheet) { _, isOpen in
             if isOpen {
-                filterSnapshotOnOpen = QueueFilterStore.read()
-            } else if QueueFilterStore.read() != filterSnapshotOnOpen {
+                filterSnapshotOnOpen = QueueFilterStore.snapshot()
+            } else if viewModel.usesQueueFilter,
+                      QueueFilterStore.snapshot() != filterSnapshotOnOpen {
                 // Filter changed — rebuild the deck so freshly-excluded
-                // playlists drop out of the queue (and previously-excluded
-                // ones return) without waiting for the next session start.
+                // playlists/artists drop out of the queue (and previously-
+                // excluded ones return) without waiting for the next session
+                // start. Only sessions that honor the filter (an unscoped
+                // Library walk) rebuild: anywhere else the change has no
+                // effect on the deck, and a reload would just throw away the
+                // user's place and undo history for nothing.
                 Task { await viewModel.reload() }
             }
         }
@@ -318,14 +323,12 @@ struct MusicSwipeView: View {
             toastAccent = pendingToastAccent ?? effectiveAccent.primary
             pendingToastAccent = nil
             toastTimer?.cancel()
-            let duration: Duration = viewModel.toastUndoable ? .seconds(6) : .seconds(1.4)
             toastTimer = Task {
-                try? await Task.sleep(for: duration)
+                try? await Task.sleep(for: .seconds(1.4))
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.3)) {
                         viewModel.toastMessage = nil
-                        viewModel.toastUndoable = false
                     }
                 }
             }
@@ -1002,11 +1005,8 @@ struct MusicSwipeView: View {
     private func flashUndo() {
         undoHideTask?.cancel()
         withAnimation(.spring) { showUndo = true }
-        // Destructive multi-playlist actions get a longer undo window (matching
-        // the old 6s inline-toast undo); routine actions stay a quick 2.5s.
-        let lingers = viewModel.toastUndoable
         undoHideTask = Task {
-            try? await Task.sleep(for: .seconds(lingers ? 6 : 2.5))
+            try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.3)) { showUndo = false }

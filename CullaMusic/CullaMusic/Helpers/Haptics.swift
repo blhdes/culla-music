@@ -8,7 +8,6 @@ enum Haptics {
     static func skip()       { impact(.soft)   }   // double-tap → skip (session-only)
     static func tap()        { impact(.light)  }
     static func scrubTick()  { selection() }       // scrub start / end
-    static func confirm()    { notification(.success) }
     static func undo()       { selection() }       // undo tap (light tick)
 
     /// Haptics default to ON unless the user explicitly turned them off in

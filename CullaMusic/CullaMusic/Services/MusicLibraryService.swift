@@ -510,19 +510,31 @@ final class MusicLibraryService {
 
     // MARK: - Playlists
 
+    /// Pages through every library playlist. A single `MusicLibraryRequest`
+    /// response is capped at `limit`, so without the loop a library with more
+    /// than 100 playlists only ever synced its first 100 — the rest never
+    /// reached the pickers or the sidebar. Same paging shape as
+    /// `refreshLibraryArtists`; the cache is only swapped once the whole walk
+    /// succeeds, so a mid-walk failure keeps the last-known playlists.
     @discardableResult
     func refreshUserPlaylists() async throws -> [MusicKit.Playlist] {
-        var request = MusicLibraryRequest<MusicKit.Playlist>()
-        request.limit = 100
-        let response = try await request.response()
-        let playlists = Array(response.items)
+        let pageSize = 100
+        var playlists: [MusicKit.Playlist] = []
+        var offset = 0
+        while true {
+            var request = MusicLibraryRequest<MusicKit.Playlist>()
+            request.limit = pageSize
+            request.offset = offset
+            let response = try await request.response()
+            let page = Array(response.items)
+            if page.isEmpty { break }
+            playlists.append(contentsOf: page)
+            if page.count < pageSize { break }
+            offset += page.count
+        }
         playlistCache.removeAll(keepingCapacity: true)
         for p in playlists { playlistCache[p.id] = p }
         return playlists
-    }
-
-    func artworkURL(forPlaylistID id: String, size: Int = 88) -> URL? {
-        playlistCache[MusicItemID(id)]?.artwork?.url(width: size, height: size)
     }
 
     func artwork(forPlaylistID id: String) -> Artwork? {
@@ -806,79 +818,37 @@ final class MusicLibraryService {
     /// existed, the hero ran an unfiltered library request and could surface a
     /// song the carousel had already excluded — first-cover mismatch.
     ///
-    /// - `.library`:   sorted ∪ dismissed ∪ playlistFiltered ∪ artistFiltered
+    /// - `.library`:   sorted ∪ dismissed ∪ `queueFilterExclusions()`
     ///                 (already acted on, plus the user's two optional exclude
-    ///                 lists — see `QueueFilterStore` and the rules below)
+    ///                 lists — see `queueFilterExclusions` for their rules)
     /// - `.unsorted`:  playlists ∪ sorted ∪ dismissed  (everything that "has a home")
     /// - `.dismissed`: empty (dismissed mode *shows* dismissed songs, doesn't filter them)
     ///
-    /// `.library` playlist filter — lenient policy: a song is added to the
-    /// exclusion set only when *every* playlist it belongs to is in the user's
-    /// excluded set. Songs in zero playlists are never filtered. This preserves
-    /// the ability to encounter a song from a non-excluded playlist even if it
-    /// also lives in an excluded one.
-    ///
-    /// `.library` artist filter — hard policy: every library track crediting a
-    /// filtered artist is excluded outright (collabs included — that's the
-    /// natural meaning of "don't show me this artist"). The two filters union,
-    /// so each independently hides its matches.
+    /// "Sorted" means ACTIVE sorts only (`voidedAt == nil`), matching the swipe
+    /// session (`MusicSwipeViewModel.fetchExcludedIdentifiers`): a voided sort
+    /// is a song the user pulled back out of its playlist in Music, so it's
+    /// re-sortable and must show here too — otherwise the hero/carousel hide a
+    /// song the session then deals. Dismissals deliberately keep ALL rows (see
+    /// `DismissedSong.activePredicate`).
     ///
     /// On a playlist-fetch failure in `.unsorted`, returns `[]` to match
     /// `CarouselSongFeed.buildExclusionSet`'s prior behavior — without this,
-    /// the hero and the carousel would diverge in the failure path. The
-    /// `.library` membership fetch follows the same pattern: on failure we
-    /// fall back to the unfiltered sorted ∪ dismissed set rather than empty,
-    /// because losing sort/dismiss filtering would be worse than losing the
-    /// user's optional playlist filter.
+    /// the hero and the carousel would diverge in the failure path.
     func deckExclusionSet(
         for mode: ReviewMode,
         modelContext: ModelContext
     ) async -> Set<String> {
         let sortedIDs = Set(
-            (try? modelContext.fetch(FetchDescriptor<SortedSong>()))?.map(\.songID) ?? []
+            (try? modelContext.fetch(
+                FetchDescriptor<SortedSong>(predicate: #Predicate { $0.voidedAt == nil })
+            ))?.map(\.songID) ?? []
         )
         let dismissedIDs = Set(
             (try? modelContext.fetch(FetchDescriptor<DismissedSong>()))?.map(\.songID) ?? []
         )
         switch mode {
         case .library:
-            let base = sortedIDs.union(dismissedIDs)
-            let excludedPlaylists = QueueFilterStore.read()
-            let excludedArtists = QueueFilterStore.readArtists()
-            guard !excludedPlaylists.isEmpty || !excludedArtists.isEmpty else { return base }
-
-            var filtered = base
-
-            // Playlist filter (lenient: only when ALL of a song's playlists are
-            // excluded). On a membership-fetch failure we keep what we have
-            // rather than dropping sort/dismiss — losing the optional filter is
-            // the lesser harm.
-            if !excludedPlaylists.isEmpty {
-                do {
-                    let membership = try await fetchPlaylistMembershipIndex(includeCurated: true)
-                    for (songID, playlistAMIDs) in membership where !playlistAMIDs.isEmpty {
-                        if playlistAMIDs.allSatisfy({ excludedPlaylists.contains($0.rawValue) }) {
-                            filtered.insert(songID)
-                        }
-                    }
-                } catch {
-                    print("deckExclusionSet library playlist filter failed: \(error)")
-                }
-            }
-
-            // Artist filter (hard: any track by a filtered artist). Each lookup
-            // is cached per-artist, so re-walks are cheap; a single artist
-            // failure is logged and skipped so the rest still apply.
-            for artistID in excludedArtists {
-                do {
-                    let ids = try await artistLibrarySongIDs(artistID: MusicItemID(artistID))
-                    filtered.formUnion(ids)
-                } catch {
-                    print("deckExclusionSet library artist filter failed for \(artistID): \(error)")
-                }
-            }
-
-            return filtered
+            return sortedIDs.union(dismissedIDs).union(await queueFilterExclusions())
         case .unsorted:
             do {
                 let playlistIDs = try await fetchPlaylistSongIDs(includeCurated: true)
@@ -890,6 +860,61 @@ final class MusicLibraryService {
         case .dismissed:
             return []
         }
+    }
+
+    /// Song IDs the user's "Filter queue" choices (Manage Playlists sheet) hide
+    /// from an UNSCOPED `.library` deck. Empty when no filter is set, so the
+    /// default path costs nothing. Shared by `deckExclusionSet` (hero +
+    /// carousel) and the swipe session's own exclusion set — the session used
+    /// to skip this entirely, so filtered songs were hidden from the previews
+    /// but still dealt as cards.
+    ///
+    /// Playlist filter — lenient policy: a song is hidden only when *every*
+    /// playlist it belongs to is in the user's excluded set. Songs in zero
+    /// playlists are never filtered. This preserves the ability to encounter a
+    /// song from a non-excluded playlist even if it also lives in an excluded
+    /// one.
+    ///
+    /// Artist filter — hard policy: every library track crediting a filtered
+    /// artist is hidden outright (collabs included — that's the natural meaning
+    /// of "don't show me this artist"). The two filters union, so each
+    /// independently hides its matches.
+    ///
+    /// Failures degrade to "that filter isn't applied this time" (logged), never
+    /// to an error: losing an optional filter is a lesser harm than blocking
+    /// the deck. Lookups are cached (`PlaylistTracksCache`, `artistSongCache`),
+    /// so repeat calls are cheap.
+    func queueFilterExclusions() async -> Set<String> {
+        let excludedPlaylists = QueueFilterStore.read()
+        let excludedArtists = QueueFilterStore.readArtists()
+        guard !excludedPlaylists.isEmpty || !excludedArtists.isEmpty else { return [] }
+
+        var hidden = Set<String>()
+
+        if !excludedPlaylists.isEmpty {
+            do {
+                let membership = try await fetchPlaylistMembershipIndex(includeCurated: true)
+                for (songID, playlistAMIDs) in membership where !playlistAMIDs.isEmpty {
+                    if playlistAMIDs.allSatisfy({ excludedPlaylists.contains($0.rawValue) }) {
+                        hidden.insert(songID)
+                    }
+                }
+            } catch {
+                print("queueFilterExclusions playlist filter failed: \(error)")
+            }
+        }
+
+        // A single artist failure is logged and skipped so the rest still apply.
+        for artistID in excludedArtists {
+            do {
+                let ids = try await artistLibrarySongIDs(artistID: MusicItemID(artistID))
+                hidden.formUnion(ids)
+            } catch {
+                print("queueFilterExclusions artist filter failed for \(artistID): \(error)")
+            }
+        }
+
+        return hidden
     }
 
     /// Ordered songs for a picked playlist/artist scope, matching the ordering
@@ -977,8 +1002,7 @@ final class MusicLibraryService {
     /// (and localized equivalents). That's never a real artist to look up, so
     /// we skip the catalog search and fall through to the per-track relationship.
     private static func isVariousArtists(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower == "various artists" || lower.contains("various artist")
+        name.lowercased().contains("various artist")
     }
 
     /// Hydrates an `Artist` with the relationships the hub renders.
@@ -1562,6 +1586,10 @@ final class MusicLibraryService {
     // ApplicationMusicPlayer has no built-in periodic time observer, so we poll.
     // 0.2s is fine for a hairline progress bar — the eye won't see finer.
     private func startFullSongPositionTimer() {
+        // Never stack two polls: a second start (e.g. a resume racing a fresh
+        // play) would otherwise orphan the first timer, which keeps firing
+        // with no handle left to invalidate it.
+        fullSongPositionTimer?.invalidate()
         fullSongPositionTimer = Timer.scheduledTimer(
             withTimeInterval: 0.2,
             repeats: true

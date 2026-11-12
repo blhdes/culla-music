@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// HomeView's ambient backdrop. Replaces the old `LivingMeshBackground` which
-/// read as generic AI-pastel: a slow mesh smothered under a thick material
-/// veil. This version has shape and texture — a solid base, one large soft
-/// glow centered on the hero, and a film-grain tile that breaks the flatness.
+/// HomeView's ambient backdrop. Replaced an earlier animated mesh gradient
+/// (since deleted) which read as generic AI-pastel: a slow mesh smothered under
+/// a thick material veil. This version has shape and texture — a solid base,
+/// one large soft glow centered on the hero, and a film-grain tile that breaks
+/// the flatness.
 ///
 /// The glow `tint` is meant to be the dominant color of the hero artwork
 /// (sampled by the caller via `Artwork.backgroundColor`), so every Home view

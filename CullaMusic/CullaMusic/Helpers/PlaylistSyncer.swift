@@ -40,11 +40,16 @@ enum PlaylistSyncer {
         let amPlaylists = try await MusicLibraryService.shared.refreshUserPlaylists()
         let defaults = UserDefaults.standard
         let local = fetchLocal(modelContext)
+        // `uniquingKeysWith`, not `uniqueKeysWithValues`: the latter TRAPS on a
+        // repeated key, and this runs on every launch — two local rows that
+        // ever ended up sharing an Apple Music ID would crash the app on open,
+        // every time. Keeping the first (lowest `displayOrder`) is harmless.
         let localByAMID = Dictionary(
-            uniqueKeysWithValues: local.compactMap { playlist -> (String, Playlist)? in
+            local.compactMap { playlist -> (String, Playlist)? in
                 guard let amID = playlist.appleMusicPlaylistID else { return nil }
                 return (amID, playlist)
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
         var nextOrder = (local.map(\.displayOrder).max() ?? -1) + 1
 

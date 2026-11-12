@@ -125,9 +125,9 @@ struct SourceScopePickerSheet: View {
 
     // MARK: - Sort chip
 
-    /// Per-tab sort control. The shared `SortChip` renders the active option
-    /// and the flat menu of concrete (field, direction) combinations; this just
-    /// hands it the right binding for the current tab.
+    /// Per-tab sort control. The shared `SortChip` lists each sort field once
+    /// (re-picking the active one flips its direction); this just hands it the
+    /// right bindings for the current tab.
     @ViewBuilder
     private var sortChip: some View {
         switch pickerMode {

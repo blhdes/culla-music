@@ -10,10 +10,8 @@ enum ToastKind {
     case dismissed
     case skipped
     case removed
-    case restored
     case created
     case renamed
-    case forgotten
     case error
     case info
 
@@ -25,10 +23,8 @@ enum ToastKind {
         case .dismissed: return "xmark"
         case .skipped:   return "forward.fill"
         case .removed:   return "trash.fill"
-        case .restored:  return "arrow.uturn.backward"
         case .created:   return "folder.badge.plus"
         case .renamed:   return "pencil"
-        case .forgotten: return "tray.and.arrow.up.fill"
         case .error:     return "exclamationmark.triangle.fill"
         case .info:      return "info.circle.fill"
         }
@@ -37,9 +33,9 @@ enum ToastKind {
     /// Which of the three semantic tiers colors the icon.
     var role: ToastRole {
         switch self {
-        case .loved, .added, .created, .restored:
+        case .loved, .added, .created:
             return .positive
-        case .dismissed, .skipped, .renamed, .forgotten, .info:
+        case .dismissed, .skipped, .renamed, .info:
             return .neutral
         case .removed, .error:
             return .destructive

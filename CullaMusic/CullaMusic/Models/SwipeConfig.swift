@@ -23,11 +23,6 @@ struct SwipeConfig {
         return false
     }
 
-    var isArtistSource: Bool {
-        if case .artist = source { return true }
-        return false
-    }
-
     /// Returns the source playlist's ID only when the scope is `.playlist`,
     /// so the playlist-only call sites (Move-from-source, restore-on-undo)
     /// naturally bail to nil for artist or library scope.

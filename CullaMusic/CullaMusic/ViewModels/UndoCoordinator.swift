@@ -51,7 +51,8 @@ enum SwipeAction {
     case sorted(song: Song, playlist: Playlist, record: SortedSong)
     /// Right-swipe in dismissed mode: un-dismisses + adds to playlist.
     case sortedFromDismissed(song: Song, playlist: Playlist, sortedRecord: SortedSong, originalDismissedAt: Date)
-    /// Down-swipe: in-session only, song reappears next launch.
+    /// Double-tap: in-session only, song reappears next session. (Down-swipe
+    /// is Share now, which isn't a deck action and records nothing here.)
     case skipped(song: Song)
     /// Up-swipe: adds to the user's loved playlist (auto-created on first use).
     case loved(song: Song, playlist: Playlist, record: SortedSong)

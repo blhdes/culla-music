@@ -25,8 +25,8 @@ iPhone between steps. Facts in §2 were checked against the code at commit `a048
 - [x] L3 mark swapped in the app (build ✅)
 - [x] L4 Icon Composer icon saved + checks pass _(done by Claude, see Decisions log)_
 - [ ] 🧪 L passed _(deferred 2026-11-13: he will test L, H and T together on device later. Committed untested.)_
-- [ ] H0 extraction approved and done (build ✅, quick 🧪)
-- [ ] H1 workshop → layout chosen
+- [x] H0 extraction approved and done (build ✅) _(quick 🧪 batched with L's device test)_
+- [ ] H1 workshop → layout chosen _(workshop published 2026-11-13, waiting for his line)_
 - [ ] H2 layout built (build ✅)
 - [ ] 🧪 H passed
 - [ ] T0 questions answered
@@ -79,6 +79,38 @@ _(Executor: paste answers and workshop lines here, with the date.)_
   TintedLight, TintedDark, ClearLight, ClearDark).
 - **2026-11-13, icon ring colour confirmed:** he wants the **white** ring on the light grey
   icon on purpose ("more elegant and distinctive"). Don't swap it to black for contrast.
+- **2026-11-13, H0:** split done, build ✅, not committed yet (commit message in §4). He
+  chose to **batch the quick 🧪** with the L device test. New layout: `Views/HomeView.swift`
+  (566 lines: state, `body`, wordmark, Start CTA, `buildSwipeConfig`, counts),
+  `ViewModels/HomeViewModel.swift`, `Views/Home/ModeTile.swift`,
+  `Views/Home/ArtistThumbnail.swift`, `Views/Home/HomeView+SourceControls.swift` (Sort From
+  card, order / include-dismissed / copy-move rows, plus their read-only helpers). Made
+  non-private for the extension: `reduceMotion`, `glassMorph`, `showSourcePicker`,
+  `sortOrderRaw`, `sourceTransferModeRaw`, `includeDismissedInScope`, `playlistCanRemove`.
+  The §2 line numbers for `HomeView.swift` are now stale; grep the `// MARK` names.
+- **2026-11-13, H1 prep:** his screenshots are in `~/Desktop/app store connect/cullamusic/`
+  (`IMG_5894.PNG` dark, `IMG_5895.PNG` light: 1170 × 2532 px = 390 × 844 pt, July build,
+  Unsorted mode, so no Sort From card). They matched the code's sizes; nothing else needed.
+- **2026-11-13, H1 workshop:** https://claude.ai/artifact/LeZaSeCtXuCq21orukAgFq (v1). A new
+  session updates it by reading that URL first, then publishing with `url` (the source file
+  was in a session scratchpad). It shows Today + A/B/C at real size, light and dark, 6.1″
+  and SE, four Home states, with a fit check per phone. **Next step: wait for his line,
+  then H2.** Line format and what each value means in SwiftUI:
+  `layout=A top=none heroScale=1.08 heroGap=22 heroPos=even tiles=regular dock=off`
+  - `layout` A/B/C = the preset he started from (info only; the other values rule).
+  - `top`: `none` (no strip; hero rises via the spacer) · `mark` (22 pt `CullaLogo` alone,
+    centred in the 38 pt History/Settings row: band = 16 top padding + 38) · `context`
+    (one line in that band: bold count + label, e.g. "434 unsorted", "2.397 in your
+    library", "86 in <playlist>", "23 by <artist>"; rounded 15 pt medium, secondary).
+  - `heroScale`: multiplies `HomeHeroArtStack.size` (168) **and** the resting slot offsets;
+    hero frame height = (168 + 24) × scale. Check the carousel morph after changing it.
+  - `heroGap`: the `.padding(.bottom, 22)` under the hero.
+  - `heroPos`: split of free space between the two spacers. `even` = today (1:1),
+    `high` = 1 above : 2 below, `low` = 2 : 1 (do it with extra `Spacer`s, minLength 8 / 12).
+  - `tiles`: `regular` = today's `ModeTile` rows · `compact` = one row of three chips
+    (icon + count on top, title below, radius 16, padding 10/12, gap 8, no description).
+  - `dock`: `on` = Sort From, the scope rows, Order and Start inside one glass panel
+    (radius 30, padding 14, gap 12, 10 pt side inset, 8 pt above the bottom safe area).
 
 ---
 

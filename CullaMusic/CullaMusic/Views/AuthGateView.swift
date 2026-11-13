@@ -26,9 +26,9 @@ struct AuthGateView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
 
-                // Brand identity — the logo glyph follows `.primary`, so it flips
-                // black-on-light / white-on-dark, while the five accent dots keep
-                // their brand colors in both appearances.
+                // Brand identity — the mark's ring follows `.primary`, so it flips
+                // black-on-light / white-on-dark, while the centre dot keeps its
+                // brand blue in both appearances.
                 VStack(spacing: 22) {
                     CullaLogo()
                         .frame(width: 96, height: 96)

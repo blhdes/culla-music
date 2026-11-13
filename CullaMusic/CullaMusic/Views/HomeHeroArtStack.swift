@@ -365,8 +365,8 @@ struct HomeHeroArtStack: View {
 
     /// One neutral cover: clear Liquid Glass — the app's own `glassSurface`
     /// (real `glassEffect` on iOS 26, thin material below) — behind the Culla
-    /// brand mark (`CullaLogo`, the official mark ported from
-    /// `design/app-icon.svg`). The mark rides `centreness`: full-size,
+    /// brand mark (`CullaLogo`, drawn from the official artwork in
+    /// `design/culla-mark-color.svg`). The mark rides `centreness`: full-size,
     /// full-colour, and fully opaque on the centre card, then smaller, paler,
     /// and desaturated on the cards behind — the same depth cue the real
     /// deck gets from its shadows, expressed in the mark itself. The card

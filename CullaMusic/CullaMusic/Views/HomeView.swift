@@ -770,8 +770,8 @@ struct HomeView: View {
     /// Identity strip at the top: the Culla brand mark + the app name. Logo
     /// size scales with Dynamic Type via `@ScaledMetric` so the relationship
     /// to the 15pt wordmark text holds under accessibility text sizes. The
-    /// glyph follows `.primary`, so the central "C" auto-adapts between
-    /// light and dark while the five brand dots keep their fixed hues.
+    /// ring follows `.primary`, so it auto-adapts between light and dark
+    /// while the centre dot keeps its brand blue.
     private var wordmark: some View {
         HStack(spacing: 7) {
             CullaLogo()
@@ -789,7 +789,7 @@ struct HomeView: View {
 
     // Sized a touch larger than the 15pt cap height so the logo reads as the
     // anchor of the strip — small enough to sit politely beside the wordmark,
-    // large enough that the five accent dots remain individually visible.
+    // large enough that the open ring still reads as a "C".
     @ScaledMetric(relativeTo: .subheadline) private var wordmarkLogoSize: CGFloat = 22
 
     // MARK: - Source pill (promoted to full-width glass card)

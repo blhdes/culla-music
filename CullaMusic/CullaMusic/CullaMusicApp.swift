@@ -83,8 +83,8 @@ private struct SplashGate: View {
     }
 
     /// The same logo + two-tone wordmark as the home strip, scaled up and
-    /// centered. The glyph follows `.primary` (flips per appearance); the five
-    /// accent dots keep their fixed brand hues.
+    /// centered. The ring follows `.primary` (flips per appearance); the centre
+    /// dot keeps its brand blue.
     private var splash: some View {
         ZStack {
             Color(.systemBackground)

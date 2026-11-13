@@ -20,12 +20,11 @@ iPhone between steps. Facts in §2 were checked against the code at commit `a048
 ## Status
 
 - [x] L0 questions answered
-- [ ] L1 workshop → mark chosen _(in progress: workshop v1 is live, see Decisions log.
-  Waiting for his copied line. If he wants changes, read the URL and republish to it.)_
-- [ ] L2 artwork files + image sets
-- [ ] L3 mark swapped in the app (build ✅)
-- [ ] L4 👉 Icon Composer icon saved + checks pass
-- [ ] 🧪 L passed
+- [x] L1 workshop → mark chosen
+- [x] L2 artwork files + image sets
+- [x] L3 mark swapped in the app (build ✅)
+- [x] L4 Icon Composer icon saved + checks pass _(done by Claude, see Decisions log)_
+- [ ] 🧪 L passed _(deferred 2026-11-13: he will test L, H and T together on device later. Committed untested.)_
 - [ ] H0 extraction approved and done (build ✅, quick 🧪)
 - [ ] H1 workshop → layout chosen
 - [ ] H2 layout built (build ✅)
@@ -49,6 +48,37 @@ _(Executor: paste answers and workshop lines here, with the date.)_
   are fractions of the 1024 canvas (ring/dot are radii), angles in degrees, 0° = right,
   clockwise. `pad` = empty margin inside the in-app frame (sets the viewBox crop of
   `culla-mark.svg`).
+- **2026-11-13, L1 chosen:** `mark=B ring=0.275 stroke=0.145 gap=77 turn=317 sit=0.000
+  dot=0.065 caps=round accent=#0A09EF bg=#EEF0F3 ink=#FFFFFF pad=0.10`. Cradle: open
+  ring, gap up-right, blue centre dot.
+- **2026-11-13, L2:** icon background (set in Icon Composer, not a file) = **#EEF0F3**;
+  Dark appearance background = **#18181B** (what the workshop's Dark tile used). Ring
+  white, dot #0A09EF. All mark files come from `design/build-mark.py` (edit its numbers
+  and re-run to change the mark). The ring spans ~712 px of the 1024 canvas, his workshop
+  size, so bigger than the ~640 guess in L2; scale it in Icon Composer if it feels tight.
+  **Change from the plan:** in-app uses two image sets, `CullaMarkRing` (template, follows
+  `.primary`) and `CullaMarkDot` (original, keeps its blue), stacked in `CullaLogo`. One
+  colour image could not flip the ring for dark mode, and a blue dot laid over a
+  single-colour mark leaves a dark/white fringe. `design/culla-mark.svg` (one colour) and
+  `culla-mark-color.svg` (black ring, blue dot) are the masters for web and store.
+- **2026-11-13, L4 (from Apple's guide):** an Icon Composer file **replaces** the AppIcon
+  asset catalog, and Xcode builds the older-iOS fallback images from it at build time
+  (they look close, not identical). So once `AppIcon.icon` builds, delete
+  `Assets.xcassets/AppIcon.appiconset` (it is in git).
+- **2026-11-13, L4 done by Claude, at his request:** `AppIcon.icon` was written by hand
+  (format copied from VILLE's `AppIcon.icon`) and checked with Icon Composer's `ictool`
+  renders of all six looks. Two groups, Dot in front of Ring, each with neutral shadow 0.5
+  and translucency **off** (so the white ring stays solid on the light grey). Fill #EEF0F3,
+  dark #18181B. The dot has a `tinted` fill of white: without it the dark blue turned
+  almost black in Tinted and Clear. `build-mark.py` also writes the two layer SVGs into
+  `AppIcon.icon/Assets/`. `AppIcon.appiconset` deleted; the build generates
+  `AppIcon60x60@2x.png` etc. for iOS 17 and the pbxproj is untouched. Preview a change
+  with: `"$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+  CullaMusic/CullaMusic/AppIcon.icon --export-image --output-file out.png --platform iOS
+  --rendition Default --width 256 --height 256 --scale 1` (renditions: Default, Dark,
+  TintedLight, TintedDark, ClearLight, ClearDark).
+- **2026-11-13, icon ring colour confirmed:** he wants the **white** ring on the light grey
+  icon on purpose ("more elegant and distinctive"). Don't swap it to black for contrast.
 
 ---
 

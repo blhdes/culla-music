@@ -50,6 +50,12 @@ struct HomeHeroArtStack: View {
     /// playlist/artist sources — there the pinned lead is the source's own
     /// cover, which stays put regardless of where the carousel was left.
     var preferredFrontSongID: String? = nil
+    /// Size multiplier for the whole fan. 1 is the original 168 pt cover.
+    /// Scales the covers, their corner radius, the resting/scrub offsets and
+    /// the drag distance together, so a bigger hero keeps the same shape and
+    /// the same feel under the finger. Covers render at the scaled size (not
+    /// a `scaleEffect`), so artwork stays sharp.
+    var scale: CGFloat = 1
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -86,7 +92,8 @@ struct HomeHeroArtStack: View {
 
     private enum DragAxis { case undecided, horizontal, ignored }
 
-    private let size: CGFloat = 168
+    private var size: CGFloat { 168 * scale }
+    private var cornerRadius: CGFloat { 22 * scale }
     /// The deck holds up to this many covers — the rest state shows the first
     /// three balanced (centre + near-left + near-right); the last two live
     /// off-screen and slide in when the user drags in their direction.
@@ -100,7 +107,7 @@ struct HomeHeroArtStack: View {
     /// made the newcomer's centring need ~240pt, almost full screen width.
     /// Past the second stage the gesture rubber-bands so the user feels the
     /// end of the deck without an abrupt stop.
-    private let revealDistance: CGFloat = 80
+    private var revealDistance: CGFloat { 80 * scale }
 
     var body: some View {
         ZStack {
@@ -111,7 +118,7 @@ struct HomeHeroArtStack: View {
         // overlapping cards (which would push the horizontally-padded rows
         // below off-center).
         .frame(maxWidth: .infinity)
-        .frame(height: size + 24)
+        .frame(height: size + 24 * scale)
         // Hit-test the whole section, not just the centred card silhouette,
         // so the scrub can start from the empty flanks too. The `including:`
         // mask disables the gesture while the deck is empty (loading / nothing
@@ -318,14 +325,14 @@ struct HomeHeroArtStack: View {
 
         return content()
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(.white.opacity(0.17), lineWidth: 1)
             )
             .scaleEffect(layout.scale)
             .rotationEffect(.degrees(layout.rotation))
-            .offset(layout.offset)
+            .offset(x: layout.offset.width * scale, y: layout.offset.height * scale)
             .opacity(layout.opacity)
             // Neutral depth shadow whose strength rides `centreness`; the
             // centre card sits slightly higher off the page while off-centre
@@ -381,7 +388,7 @@ struct HomeHeroArtStack: View {
                     .saturation(0.25 + 0.75 * Double(centreness))
                     .opacity(0.55 + 0.45 * Double(centreness))
             }
-            .glassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     // MARK: - Scrub gesture
@@ -476,16 +483,16 @@ struct HomeHeroArtStack: View {
     /// shimmering, so the hero reads as "nothing to preview" instead of looping
     /// a load that will never finish.
     private var emptyDeckCard: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(.ultraThinMaterial)
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: frontFallbackKind.symbol)
-                    .font(.system(size: 48, weight: .light))
+                    .font(.system(size: 48 * scale, weight: .light))
                     .foregroundStyle(.secondary)
             }
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(.white.opacity(0.12), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
@@ -498,22 +505,22 @@ struct HomeHeroArtStack: View {
     /// keeping all three at full strength telegraphs the deck, and the real
     /// covers settle to their slot opacities on reveal.
     private func skeletonCard(layout: ScrubLayout, isCentre: Bool) -> some View {
-        SkeletonShape(shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        SkeletonShape(shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .frame(width: size, height: size)
             .overlay {
                 if isCentre {
                     Image(systemName: frontFallbackKind.symbol)
-                        .font(.system(size: 48, weight: .light))
+                        .font(.system(size: 48 * scale, weight: .light))
                         .foregroundStyle(.secondary)
                 }
             }
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(.white.opacity(0.12), lineWidth: 1)
             )
             .scaleEffect(layout.scale)
             .rotationEffect(.degrees(layout.rotation))
-            .offset(layout.offset)
+            .offset(x: layout.offset.width * scale, y: layout.offset.height * scale)
             // Neutral depth shadow matching `scrubCard` — centre lifts, sides
             // flatten toward the page. No accent tint.
             .shadow(

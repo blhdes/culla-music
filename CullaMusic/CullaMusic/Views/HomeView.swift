@@ -29,6 +29,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.appAccent) private var appAccent
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Shared namespace for the iOS 26 Liquid Glass morph. The mode-tile cluster
     /// and the source chips read it so their glass coordinates as one family —
     /// the cluster crystallizes out as the source chips crystallize in, instead
@@ -70,6 +71,9 @@ struct HomeView: View {
     /// changes (mode / source / sort) so a stale id from one deck
     /// doesn't leak into another.
     @State private var lastCenteredCarouselSongID: String?
+    /// Height of Home's column (the screen minus the safe areas). Picks the
+    /// hero size; `.infinity` until the first layout reports it.
+    @State private var columnHeight: CGFloat = .infinity
     @AppStorage("music.sortOrder") var sortOrderRaw: String = SortOrder.newestFirst.rawValue
     @AppStorage("music.sourceTransferMode") var sourceTransferModeRaw: String = SourceTransferMode.copy.rawValue
     /// Scoped-only opt-in: when on, dismissed tracks also surface inside
@@ -87,8 +91,8 @@ struct HomeView: View {
             HomeAmbientBackground(tint: ambientTint)
 
             VStack(spacing: 0) {
-                wordmark
-                    .padding(.top, 22)
+                topMark
+                    .padding(.top, 16)
 
                 Spacer(minLength: 8)
 
@@ -117,7 +121,8 @@ struct HomeView: View {
                         // keeping the phantom count.
                         homeVM?.triggerRecompute()
                     },
-                    preferredFrontSongID: lastCenteredCarouselSongID
+                    preferredFrontSongID: lastCenteredCarouselSongID,
+                    scale: heroScale
                 )
                 // One-time discoverability hint for the hero's hidden gestures.
                 // Floated as an overlay (not a row in the VStack) so dismissing it
@@ -149,7 +154,6 @@ struct HomeView: View {
                     }
                     .animation(.spring(response: 0.45, dampingFraction: 0.8), value: showsHeroHint)
                 }
-                .padding(.bottom, 22)
 
                 // Mode tiles disappear once a scope is picked — at that point
                 // mode is implicitly Library (the picker only surfaces there),
@@ -164,20 +168,19 @@ struct HomeView: View {
                 // vocabulary used by sourceTransferPicker and
                 // includeDismissedRow so the whole source-driven sequence
                 // reads as one coordinated motion.
+                //
+                // The 32 pt gap under the hero rides on the tiles, so it leaves
+                // with them: once a source is picked the dock grows, and the
+                // freed space keeps everything on a 375 × 667 pt screen.
                 if source == nil {
-                    GlassStack(spacing: 10) {
-                        ForEach(ReviewMode.allCases) { mode in
-                            ModeTile(
-                                mode: mode,
-                                isSelected: selectedMode == mode,
-                                count: count(for: mode),
-                                isLoadingCount: isLoadingCount(for: mode)
-                            ) {
-                                selectedMode = mode
-                            }
-                        }
-                    }
+                    ModeChipRow(
+                        selectedMode: selectedMode,
+                        count: { count(for: $0) },
+                        isLoadingCount: { isLoadingCount(for: $0) },
+                        onSelect: { selectedMode = $0 }
+                    )
                     .padding(.horizontal, 20)
+                    .padding(.top, 32)
                     .transition(
                         .asymmetric(
                             insertion: .scale(scale: 0.94, anchor: .top)
@@ -194,40 +197,14 @@ struct HomeView: View {
 
                 Spacer(minLength: 12)
 
-                // The source-driven controls share ONE GlassEffectContainer so
-                // their glass refracts as a family and inserts crystallize as
-                // glass (iOS 26) instead of independent scale/opacity fades.
-                // spacing 0 matches the prior direct-VStack layout exactly — each
-                // row keeps its own paddings and cross-OS transition.
-                GlassStack(spacing: 0) {
-                    if selectedMode == .library {
-                        sourceFilterButton
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 10)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                controlDock
+            }
+            .background {
+                GeometryReader { geo in
+                    Color.clear.onChange(of: geo.size.height, initial: true) { _, height in
+                        columnHeight = height
                     }
-
-                    if selectedMode == .library, case .playlist = source {
-                        sourceTransferPicker
-                            .padding(.bottom, 10)
-                            .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
-                    }
-
-                    if selectedMode == .library, source != nil {
-                        includeDismissedRow
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 10)
-                            .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
-                    }
-
-                    orderRow
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 16)
                 }
-
-                startButton
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
             }
 
             // Carousel overlay — covers Home while showing. Home stays
@@ -305,7 +282,7 @@ struct HomeView: View {
         }
         .overlay(alignment: .topLeading) {
             // History button — mirror image of the settings gear, flanking the
-            // centered wordmark. Same carousel gating so it doesn't poke through
+            // centred mark. Same carousel gating so it doesn't poke through
             // the exploration overlay.
             Button {
                 showHistory = true
@@ -454,32 +431,66 @@ struct HomeView: View {
         !hasSeenHomeHeroHint && heroArtwork != nil && !showCarousel
     }
 
-    // MARK: - Wordmark
+    // MARK: - Top mark
 
-    /// Identity strip at the top: the Culla brand mark + the app name. Logo
-    /// size scales with Dynamic Type via `@ScaledMetric` so the relationship
-    /// to the 15pt wordmark text holds under accessibility text sizes. The
-    /// ring follows `.primary`, so it auto-adapts between light and dark
-    /// while the centre dot keeps its brand blue.
-    private var wordmark: some View {
-        HStack(spacing: 7) {
-            CullaLogo()
-                .frame(width: wordmarkLogoSize, height: wordmarkLogoSize)
-            HStack(spacing: 4) {
-                Text("culla")
-                    .foregroundStyle(.primary)
-                Text("music")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.system(size: 15, weight: .bold, design: .rounded))
-            .tracking(0.5)
-        }
+    /// The brand mark alone, centred in the same 38 pt row as the History and
+    /// Settings buttons (the "culla music" words are gone from Home). The ring
+    /// follows `.primary`; the centre dot keeps its brand blue. Fixed at 22 pt
+    /// to match the fixed-size buttons beside it.
+    private var topMark: some View {
+        CullaLogo()
+            .frame(width: 22, height: 22)
+            .frame(maxWidth: .infinity)
+            .frame(height: 38)
     }
 
-    // Sized a touch larger than the 15pt cap height so the logo reads as the
-    // anchor of the strip — small enough to sit politely beside the wordmark,
-    // large enough that the open ring still reads as a "C".
-    @ScaledMetric(relativeTo: .subheadline) private var wordmarkLogoSize: CGFloat = 22
+    // MARK: - Hero size
+
+    /// The hero's size multiplier (1 = the original 168 pt cover). 1.27 from
+    /// the H1 workshop. An iPhone SE-sized screen (column under 700 pt) gets
+    /// 1.15, so a picked playlist (the tallest dock) still fits without a
+    /// scroll view. Accessibility text sizes go back to 1 to leave room for
+    /// the bigger text.
+    private var heroScale: CGFloat {
+        if dynamicTypeSize.isAccessibilitySize { return 1.0 }
+        return columnHeight < 700 ? 1.15 : 1.27
+    }
+
+    // MARK: - Control dock
+
+    /// Sort From, the scope options, Order and Start on one glass panel at the
+    /// bottom (H1 workshop: radius 30, padding 14, gap 12, 10 pt side inset,
+    /// 8 pt above the bottom safe area). The option rows keep their shared
+    /// `GlassEffectContainer` so their glass still refracts as one family;
+    /// Start sits outside it because it's a solid gradient, not glass.
+    private var controlDock: some View {
+        VStack(spacing: 12) {
+            GlassStack(spacing: 12) {
+                if selectedMode == .library {
+                    sourceFilterButton
+                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                }
+
+                if selectedMode == .library, case .playlist = source {
+                    sourceTransferPicker
+                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                }
+
+                if selectedMode == .library, source != nil {
+                    includeDismissedRow
+                        .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+                }
+
+                orderRow
+            }
+
+            startButton
+        }
+        .padding(14)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
 
     // MARK: - Start CTA
 

@@ -26,8 +26,8 @@ iPhone between steps. Facts in §2 were checked against the code at commit `a048
 - [x] L4 Icon Composer icon saved + checks pass _(done by Claude, see Decisions log)_
 - [ ] 🧪 L passed _(deferred 2026-11-13: he will test L, H and T together on device later. Committed untested.)_
 - [x] H0 extraction approved and done (build ✅) _(quick 🧪 batched with L's device test)_
-- [ ] H1 workshop → layout chosen _(workshop published 2026-11-13, waiting for his line)_
-- [ ] H2 layout built (build ✅)
+- [x] H1 workshop → layout chosen _(2026-11-13, line in Decisions log)_
+- [x] H2 layout built (build ✅) _(2026-11-13, not committed yet)_
 - [ ] 🧪 H passed
 - [ ] T0 questions answered
 - [ ] T1 tour built (build ✅)
@@ -111,6 +111,32 @@ _(Executor: paste answers and workshop lines here, with the date.)_
     (icon + count on top, title below, radius 16, padding 10/12, gap 8, no description).
   - `dock`: `on` = Sort From, the scope rows, Order and Start inside one glass panel
     (radius 30, padding 14, gap 12, 10 pt side inset, 8 pt above the bottom safe area).
+- **2026-11-13, H1 chosen:** `layout=C top=mark heroScale=1.27 heroGap=32 heroPos=even
+  tiles=compact dock=on`. His extra ask: titles like Library / Unsorted / Dismissed must
+  never crop ("clean display; if it does, look for a smart solution").
+- **2026-11-13, H2 built** (build ✅, no warnings). What changed and why:
+  - `HomeHeroArtStack` takes `scale` (default 1): covers, corner radius, slot offsets,
+    drag distance and the fallback symbol all scale; covers render at full size, so art
+    stays sharp. The carousel has no geometry morph (it is an opacity overlay), so the
+    bigger hero can't break it.
+  - **Hero size:** 1.27, but **1.15 when Home's column is under 700 pt** (iPhone SE), and
+    1.0 at accessibility text sizes. Reason: with a playlist picked (tallest dock) the SE
+    came out ~20 pt over at 1.27.
+  - **The 32 pt gap rides on the tiles** (`.padding(.top, 32)`), so it leaves with them
+    when a source is picked. Same reason (SE fit).
+  - **No-crop chips** (`Views/Home/ModeChipRow.swift`): a `ViewThatFits` tries (1) three
+    equal chips, one-line titles; (2) chips sized to their titles; (3) two-word titles
+    broken between words onto two lines; (4) today's full `ModeTile` rows. Measured with
+    SF Pro Rounded 14 pt: on SE, fr "Bibliothèque" lands in (2) and pt-BR
+    "Não organizadas" in (3); every other language is (1). The tile description moved
+    to the VoiceOver hint; chips also get the `isSelected` trait.
+  - Dock rows: the Order / Include dismissed / Source songs pills are `.fixedSize()`, so
+    with large text the left label wraps instead of the pill getting "…" (es "Mantener en
+    la playlist" was the tight one). `sourceTransferPicker` lost its own 20 pt side
+    padding (the dock pads it).
+  - `HomeArtCarouselView`'s Start moved to 24 pt sides / 22 pt bottom, the dock Start's
+    exact spot, so the carousel ⇄ Home hand-off stays invisible.
+  - `wordmark` → `topMark` (22 pt `CullaLogo` in the 38 pt button row, top padding 16).
 
 ---
 

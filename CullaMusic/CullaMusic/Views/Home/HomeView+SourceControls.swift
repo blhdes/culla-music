@@ -126,6 +126,10 @@ extension HomeView {
                 .glassMorphTransition(.matchedGeometry, reduceMotion: reduceMotion)
             }
             .buttonStyle(.plain)
+            // The pill keeps its full width; on a narrow screen or with large
+            // text the label on the left wraps instead of the pill's text
+            // being cut with "…".
+            .fixedSize()
         }
     }
 
@@ -162,6 +166,10 @@ extension HomeView {
                 .glassMorphTransition(.materialize, reduceMotion: reduceMotion)
             }
             .buttonStyle(.plain)
+            // The pill keeps its full width; on a narrow screen or with large
+            // text the label on the left wraps instead of the pill's text
+            // being cut with "…".
+            .fixedSize()
         }
     }
 
@@ -211,6 +219,7 @@ extension HomeView {
                 .buttonStyle(.plain)
                 .disabled(!canRemove)
                 .opacity(canRemove ? 1.0 : 0.45)
+                .fixedSize()
             }
 
             Text(transferModeFooter(isReadOnly: isReadOnly, canRemove: canRemove, mode: displayMode))
@@ -219,7 +228,6 @@ extension HomeView {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.opacity)
         }
-        .padding(.horizontal, 20)
     }
 
     private func transferModeFooter(isReadOnly: Bool, canRemove: Bool, mode: SourceTransferMode) -> String {

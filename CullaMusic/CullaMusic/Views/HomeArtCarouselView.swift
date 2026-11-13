@@ -498,8 +498,10 @@ struct HomeArtCarouselView: View {
         ) {
             startFromCentered()
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 24)
+        // Home's Start sits inside its bottom dock: 10 pt inset + 14 pt
+        // padding at the sides, 8 pt + 14 pt at the bottom.
+        .padding(.horizontal, 24)
+        .padding(.bottom, 22)
     }
 
     // MARK: - Tap behavior
